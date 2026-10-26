@@ -2,9 +2,10 @@ package cli
 
 import (
 	"context"
+	"testing"
+
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/netdisco"
-	"testing"
 )
 
 func TestReplacePreflightBeforeInventoryAndCredentials(t *testing.T) {

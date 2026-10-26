@@ -3,12 +3,13 @@ package transfer
 import (
 	"bufio"
 	"context"
-	"github.com/gatework/go-net-connector/connector"
 	"io"
 	"net"
 	"regexp"
 	"testing"
 	"time"
+
+	"github.com/gatework/go-net-connector/connector"
 )
 
 func transferDevice(t *testing.T, vendor string, dialogue [][2]string) *connector.Device {

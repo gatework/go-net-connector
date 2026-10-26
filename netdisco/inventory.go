@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gatework/go-net-connector/inventory"
 	"io"
 	"net/http"
 	"net/url"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/gatework/go-net-connector/inventory"
 )
 
 type Source interface {

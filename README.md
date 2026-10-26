@@ -2,21 +2,17 @@
 
 以 Go 实现 Ruby net-connector 0.18.0 冻结工作区的设备连接、配置采集、原生上传、拓扑审计和批次执行模块。支持 Go 1.26+，目标平台为 Linux/macOS、amd64/arm64。
 
-底层使用 `github.com/gatework/go-expect` 和系统 SSH/Telnet。此工作区包含尚未发布的 expect 兼容补丁；`v0.0.0` 仅为本地依赖占位，不能据此直接从公共 Go 模块代理安装。源码快照、补丁和逐文件校验清单均包含在本项目，原始 expect 工作区不会被改写。
+底层直接依赖 GitHub 上的 `github.com/gatework/go-expect` 和系统 SSH/Telnet。依赖版本由 `go.mod` 固定，构建不使用本地 `replace` 或跨仓库 `go.work`。历史快照和补丁仅用于审计，不参与当前构建。
 
 ## 构建
 
 ```sh
-python3 scripts/prepare-workspace.py
-go test ./...
-go build -o bin/ ./cmd/...
+GOWORK=off go mod download
+GOWORK=off go test ./...
+GOWORK=off go build -o bin/ ./cmd/...
 ```
 
-准备脚本从 `dependencies/go-expect-source.tar.gz` 重建冻结源码，在独立的 `.work/go-expect` 中应用 `patches/go-expect-compat.patch`，校验候选源码，然后创建本地 `go.work`。已存在的候选目录只校验，不覆盖；额外源码、符号链接或已记录文件内容变化都会被拒绝。也可传入与基线完全相同的本地 go-expect 源目录；发生漂移时脚本拒绝继续。
-
-```sh
-python3 scripts/prepare-workspace.py /path/to/go-expect
-```
+公开 Go API 的变更见 [迁移说明](docs/api-migration.md)。CLI、配置文件、厂商命令及报告格式保持兼容。
 
 系统需要 `ssh`；Telnet 连接另需系统 `telnet`。SSH 归档服务器需要管理员安装 `net-connector-archive`，默认路径 `/usr/local/bin/net-connector-archive`。客户端只探测协议版本和能力，不上传或安装 worker。
 

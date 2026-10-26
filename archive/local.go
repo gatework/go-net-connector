@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"golang.org/x/sys/unix"
 	"net"
 	"path/filepath"
 	"regexp"
 	"sync"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // LocalLauncher runs the same pinned-directory transaction used by the remote

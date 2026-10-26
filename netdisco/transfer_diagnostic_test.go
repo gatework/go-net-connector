@@ -2,9 +2,10 @@ package netdisco
 
 import (
 	"errors"
+	"testing"
+
 	"github.com/gatework/go-net-connector/archive"
 	"github.com/gatework/go-net-connector/transfer"
-	"testing"
 )
 
 func TestTransferDiagnosticIntegration(t *testing.T) {

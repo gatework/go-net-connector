@@ -7,6 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/internal/bootstrap"
 	"github.com/gatework/go-net-connector/inventory"
@@ -15,12 +22,6 @@ import (
 	"github.com/gatework/go-net-connector/storage"
 	"github.com/gatework/go-net-connector/topology"
 	"github.com/gatework/go-net-connector/vendors"
-	"path/filepath"
-	"regexp"
-	"sort"
-	"strings"
-	"sync"
-	"time"
 )
 
 type topologyOutcome struct {

@@ -136,7 +136,7 @@ func (r Report) Summary() map[string]any {
 				row["configuration_kind"] = optional(a.ConfigurationKind)
 				row["source_file"] = optional(a.SourceFile)
 				row["format"] = optional(a.Format)
-				row["verification"] = optional(a.Verification)
+				row["verification"] = optional(string(a.Verification))
 				row["server_file_verified"] = a.Verified()
 				row["server_sha256"], row["sha256"] = optional(a.ServerSHA256), optional(a.ServerSHA256)
 				row["local_file"], row["server_archive_file"] = optional(a.LocalPath), optional(a.ArchivePath)

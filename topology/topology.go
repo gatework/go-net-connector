@@ -3,12 +3,12 @@ package topology
 import (
 	"context"
 	"errors"
+	"slices"
+	"strconv"
+
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/internal/terminal"
 	"github.com/gatework/go-net-connector/vendors"
-	"slices"
-	"strconv"
-	"strings"
 )
 
 // Topology binds stateless dialect rules to a device. Constructing it performs no I/O.
@@ -21,7 +21,7 @@ func New(device *connector.Device) (*Topology, error) {
 	if device == nil {
 		return nil, ErrInvalid
 	}
-	p, e := vendors.Profile(device.Name())
+	p, e := vendors.Profile(device.ProfileName())
 	if e != nil {
 		return nil, e
 	}
@@ -292,46 +292,9 @@ func (t *Topology) apply(ctx context.Context, op *connector.Operation, p Plan, o
 	result.Verified = true
 	r, e = op.SaveConfig(ctx, opts.Execute)
 	result.Receipts = append(result.Receipts, r.Steps()...)
-	if e != nil || !persistenceConfirmed(p.Vendor, r) {
+	if e != nil {
 		return failure("persistence_unconfirmed", "persist", errors.Join(ErrPersistence, e))
 	}
 	result.Persisted = true
 	return nil
-}
-func persistenceConfirmed(vendor string, result connector.Result) bool {
-	pattern := `(?i)^(?:\[OK\]|Copy complete\.)$`
-	switch vendor {
-	case "h3c", "h3c_wireless":
-		pattern = `(?i)^Saved the current configuration to mainboard device successfully\.$`
-	case "hillstone":
-		pattern = `(?i)^Saving configuration is finished\.?$`
-	}
-	steps := result.Steps()
-	if len(steps) == 0 {
-		return false
-	}
-	failed := re(`(?i)\b(?:error|failed|failure|denied|cannot|unable|unsuccessful|aborted)\b`)
-	for _, step := range steps {
-		raw := strings.TrimSuffix(step.Raw(), step.Prompt())
-		history := re(`\x1b\[[0-9;:]*m`).ReplaceAllString(raw, "")
-		history = strings.ReplaceAll(history, "\r", "\n")
-		rendered, e := terminal.Render([]byte(raw), false)
-		if e != nil {
-			return false
-		}
-		historyRendered, e := terminal.Render([]byte(history), false)
-		if e != nil || failed.MatchString(history) || failed.MatchString(historyRendered) || failed.MatchString(rendered) {
-			return false
-		}
-		complete := false
-		for _, line := range strings.Split(rendered, "\n") {
-			if re(pattern).MatchString(strings.TrimSpace(line)) {
-				complete = true
-			}
-		}
-		if !complete {
-			return false
-		}
-	}
-	return true
 }

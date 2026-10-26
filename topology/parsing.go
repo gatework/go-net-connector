@@ -1,13 +1,14 @@
 package topology
 
 import (
-	"github.com/gatework/go-net-connector/internal/terminal"
-	"github.com/gatework/go-net-connector/textfsm"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/gatework/go-net-connector/internal/terminal"
+	"github.com/gatework/go-net-connector/textfsm"
 )
 
 func re(pattern string) *regexp.Regexp { return regexp.MustCompile(pattern) }

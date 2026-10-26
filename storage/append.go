@@ -1,8 +1,9 @@
 package storage
 
 import (
-	"golang.org/x/sys/unix"
 	"os"
+
+	"golang.org/x/sys/unix"
 )
 
 // OpenAppend opens a private, owned, single-link regular log without following

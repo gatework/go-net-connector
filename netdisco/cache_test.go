@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/gatework/go-net-connector/inventory"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/gatework/go-net-connector/inventory"
 )
 
 func TestCacheOfflineAndRefreshFallback(t *testing.T) {

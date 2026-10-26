@@ -20,16 +20,22 @@ func (d *Device) WithOperation(ctx context.Context, run func(*Operation) error) 
 		return
 	}
 	defer d.release()
+	ctx, cancel := d.operationContext(ctx)
+	defer cancel()
+	returned := false
 	o := &Operation{device: d, scope: newCallScope(ctx)}
 	defer func() {
 		if o.scope.end() && err == nil {
 			err = context.Canceled
 		}
-		if err != nil {
+		if !returned {
 			_ = d.closeResources()
+		} else if err != nil {
+			err = joinCleanup(err, d.closeResources())
 		}
 	}()
 	err = run(o)
+	returned = true
 	if err == nil {
 		err = ctx.Err()
 	}
@@ -62,15 +68,14 @@ func (o *Operation) RunningConfig(ctx context.Context) (Result, error) {
 	return o.device.runningConfig(ctx)
 }
 func (o *Operation) SaveConfig(ctx context.Context, opts ExecuteOptions) (Result, error) {
-	if len(o.device.profile.SaveCommands) == 0 {
-		return Result{}, ErrUnsupported
+	ctx, leave, err := o.scope.enter(ctx)
+	if err != nil {
+		return Result{}, err
 	}
-	var commands []Command
-	for _, text := range o.device.profile.SaveCommands {
-		commands = append(commands, Command{Text: text})
-	}
-	return o.ExecuteScript(ctx, Script{Commands: commands}, opts)
+	defer leave()
+	return o.device.saveConfig(ctx, opts)
 }
+
 func (o *Operation) CurrentPrompt() string { return o.device.CurrentPrompt() }
-func (o *Operation) Name() string          { return o.device.Name() }
+func (o *Operation) ProfileName() string   { return o.device.ProfileName() }
 func (o *Operation) Host() string          { return o.device.Host() }

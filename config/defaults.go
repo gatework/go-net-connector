@@ -1,10 +1,11 @@
 package config
 
 import (
-	"go.yaml.in/yaml/v3"
 	"io"
 	"os"
 	"path/filepath"
+
+	"go.yaml.in/yaml/v3"
 )
 
 func Defaults(mode string) map[string]any {

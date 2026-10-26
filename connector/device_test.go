@@ -200,7 +200,7 @@ func TestTelnetFallbackOnlyAfterConnectionRefused(t *testing.T) {
 			var ports []int
 			var peers sync.WaitGroup
 			f := func(_ context.Context, c ConnectionConfig) (io.ReadWriteCloser, error) {
-				protocols = append(protocols, c.Protocol)
+				protocols = append(protocols, string(c.Protocol))
 				ports = append(ports, c.Port)
 				a, b := net.Pipe()
 				peers.Add(1)

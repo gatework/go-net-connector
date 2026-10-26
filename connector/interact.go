@@ -6,11 +6,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"os"
+
 	expect "github.com/gatework/go-expect"
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
-	"io"
-	"os"
 )
 
 // InteractOptions borrows a file input and cooperative output. Input must have
@@ -39,6 +40,8 @@ func (d *Device) Interact(parent context.Context, o InteractOptions) (result Int
 		return result, e
 	}
 	defer d.release()
+	parent, stopOperation := d.operationContext(parent)
+	defer stopOperation()
 	if err = d.connect(parent); err != nil {
 		return
 	}
@@ -63,6 +66,14 @@ func (d *Device) Interact(parent context.Context, o InteractOptions) (result Int
 	escape := append([]byte(nil), o.Escape...)
 	session := d.session
 	go func() { r := d.relayInput(ctx, session, fd, escape); done <- r; cancel() }()
+	returned := false
+	defer func() {
+		if !returned {
+			cancel()
+			_ = d.closeResources()
+			<-done
+		}
+	}()
 	pattern, _ := expect.Compile(`(?s).+`)
 	_, readErr := d.session.Expect(ctx, []expect.Case{{Pattern: pattern, Handler: func(_ context.Context, _ *expect.Session, r expect.Result) (expect.Action, error) {
 		p := []byte(r.Before + r.Match)
@@ -75,6 +86,7 @@ func (d *Device) Interact(parent context.Context, o InteractOptions) (result Int
 	cancel()
 	cleanupErr := d.closeResources()
 	input := <-done
+	returned = true
 	result = InteractResult{Reason: input.reason, PendingInput: append([]byte(nil), input.pending...)}
 	if e := parent.Err(); e != nil {
 		return result, e

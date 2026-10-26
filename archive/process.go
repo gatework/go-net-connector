@@ -66,7 +66,9 @@ func closePipe(file io.Closer) error {
 // CommandLauncher starts one worker per transaction over ordinary pipes.
 // The caller supplies an installed executable; this never installs remote code.
 func CommandLauncher(executable string, arguments ...string) Launcher {
-	args := append([]string(nil), arguments...)
+	return commandLauncher(executable, append([]string(nil), arguments...), reapGroup)
+}
+func commandLauncher(executable string, args []string, reap func(int, chan error) error) Launcher {
 	return func(ctx context.Context) (Channel, error) {
 		cmd := exec.CommandContext(ctx, executable, args...)
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -102,7 +104,7 @@ func CommandLauncher(executable string, arguments ...string) Launcher {
 		stdinRead.Close()
 		stdoutWrite.Close()
 		done := make(chan error, 1)
-		go func() { done <- cmd.Wait() }()
+		go func(waitDone chan error) { waitDone <- cmd.Wait(); close(waitDone) }(done)
 		var mu sync.Mutex
 		closed := false
 		var closeErr error
@@ -112,7 +114,6 @@ func CommandLauncher(executable string, arguments ...string) Launcher {
 			if closed {
 				return closeErr
 			}
-			closed = true
 			closeErr = errors.Join(closePipe(input), closePipe(output))
 			select {
 			case e := <-done:
@@ -122,8 +123,9 @@ func CommandLauncher(executable string, arguments ...string) Launcher {
 				}
 			default:
 			}
-			closeErr = errors.Join(closeErr, reapGroup(cmd.Process.Pid, done))
-			return closeErr
+			reapErr := reap(cmd.Process.Pid, done)
+			closed = reapErr == nil
+			return errors.Join(closeErr, reapErr)
 		}
 		return Channel{Input: input, Output: output, Close: close}, nil
 	}

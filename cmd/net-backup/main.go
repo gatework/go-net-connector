@@ -2,10 +2,11 @@ package main
 
 import (
 	"context"
-	"github.com/gatework/go-net-connector/internal/cli"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/gatework/go-net-connector/internal/cli"
 )
 
 func main() {

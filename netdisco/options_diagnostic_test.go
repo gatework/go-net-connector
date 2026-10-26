@@ -3,10 +3,11 @@ package netdisco
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/gatework/go-net-connector/archive"
-	"github.com/gatework/go-net-connector/transfer"
 	"strings"
 	"testing"
+
+	"github.com/gatework/go-net-connector/archive"
+	"github.com/gatework/go-net-connector/transfer"
 )
 
 func TestCredentialOptionDiagnostics(t *testing.T) {

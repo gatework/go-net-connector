@@ -3,11 +3,12 @@ package netdisco
 import (
 	"context"
 	"fmt"
+	"testing"
+
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/storage"
 	"github.com/gatework/go-net-connector/vendors"
-	"testing"
 )
 
 func BenchmarkMockFleet(b *testing.B) {

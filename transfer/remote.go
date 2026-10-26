@@ -27,7 +27,7 @@ func RemoteBackup(ctx context.Context, d *connector.Device, o RemoteOptions) (re
 	if d == nil {
 		return result, ErrInvalid
 	}
-	if d.Name() != "juniper" {
+	if d.ProfileName() != "juniper" {
 		return result, ErrUnsupported
 	}
 	if err = ValidateRemote(o); err != nil {
@@ -40,7 +40,7 @@ func RemoteBackup(ctx context.Context, d *connector.Device, o RemoteOptions) (re
 	timeout := 180 * time.Second
 	command := connector.Command{Text: "show configuration | save " + destination, Timeout: &timeout, OutputSensitive: true}
 	if o.Password != "" {
-		command.Interactions = []connector.Interaction{{Pattern: regexp.MustCompile(`(?i)(?:password(?: for [^\r\n:]*)?):\s*$`), Response: o.Password + "\n", Sensitive: true, Limit: 1}}
+		command.Interactions = []connector.Interaction{{Pattern: regexp.MustCompile(`(?i)(?:password(?: for [^\r\n:]*)?):\s*$`), Reply: o.Password + "\n", Sensitive: true, Limit: 1}}
 	}
 	err = d.WithOperation(ctx, func(op *connector.Operation) error {
 		r, e := op.ExecuteCommand(ctx, command, connector.ExecuteOptions{SkipPrivilege: true})

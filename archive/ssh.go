@@ -19,6 +19,7 @@ const defaultWorkerPath = "/usr/local/bin/net-connector-archive"
 // sshMaster owns a single foreground ControlMaster and its private socket.
 // The password, when configured, is provided only to a private askpass helper.
 type sshMaster struct {
+	reap        func(int, chan error) error
 	endpoint    *url.URL
 	worker      string
 	password    string
@@ -107,7 +108,7 @@ func (m *sshMaster) prepare(ctx context.Context) (err error) {
 	m.cmd = cmd
 	m.done = make(chan error, 1)
 	done := m.done
-	go func() { done <- cmd.Wait() }()
+	go func() { done <- cmd.Wait(); close(done) }()
 	deadline := time.NewTimer(15 * time.Second)
 	defer deadline.Stop()
 	tick := time.NewTicker(100 * time.Millisecond)
@@ -168,11 +169,20 @@ func (m *sshMaster) close() error {
 func (m *sshMaster) closeLocked() error {
 	var err error
 	if m.cmd != nil {
-		err = reapGroup(m.cmd.Process.Pid, m.done)
+		reap := m.reap
+		if reap == nil {
+			reap = reapGroup
+		}
+		err = reap(m.cmd.Process.Pid, m.done)
+		if err != nil {
+			return err
+		}
 		m.cmd, m.done = nil, nil
 	}
 	if m.dir != "" {
-		err = errors.Join(err, os.RemoveAll(m.dir))
+		if err = os.RemoveAll(m.dir); err != nil {
+			return err
+		}
 		m.dir, m.socket = "", ""
 	}
 	return err

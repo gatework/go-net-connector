@@ -2,12 +2,13 @@ package topology
 
 import (
 	"errors"
-	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/vendors"
 	"maps"
 	"reflect"
 	"slices"
 	"strings"
+
+	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/vendors"
 )
 
 func key(vendor, name string) string {

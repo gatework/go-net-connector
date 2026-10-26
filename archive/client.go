@@ -5,26 +5,25 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"github.com/gatework/go-net-connector/storage"
-	"github.com/gatework/go-net-connector/transfer"
 	"io"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/gatework/go-net-connector/storage"
+	"github.com/gatework/go-net-connector/transfer"
 )
 
-type Channel struct {
-	Input  io.Writer
-	Output io.Reader
-	Close  func() error
-}
-type Launcher func(context.Context) (Channel, error)
 type ClientOptions struct {
 	Root, Directory string
 	Launcher        Launcher
 	Timeout         time.Duration
 }
 type Client struct {
+	cleanupMu              sync.Mutex
+	pending                []func() error
+	active                 int
+	closed                 bool
 	root, directory, batch string
 	launch                 Launcher
 	timeout                time.Duration
@@ -49,41 +48,27 @@ func NewClient(o ClientOptions) (*Client, error) {
 	return &Client{root: o.Root, directory: directory, batch: batch, launch: o.Launcher, timeout: o.Timeout, slots: make(chan struct{}, 4)}, nil
 }
 func (c *Client) channel(ctx context.Context, run func(*Protocol) error) (err error) {
+	c.cleanupMu.Lock()
+	if c.closed {
+		c.cleanupMu.Unlock()
+		return ErrArchive
+	}
+	c.active++
+	c.cleanupMu.Unlock()
+	defer func() { c.cleanupMu.Lock(); c.active--; c.cleanupMu.Unlock() }()
 	select {
 	case c.slots <- struct{}{}:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 	defer func() { <-c.slots }()
-	ch, e := c.launch(ctx)
-	if e != nil {
-		return e
-	}
-	if ch.Close != nil {
-		defer func() {
-			if e := ch.Close(); err == nil {
-				err = e
-			}
-		}()
-	}
-	input, ok := ch.Input.(interface{ SetWriteDeadline(time.Time) error })
-	if !ok || ch.Output == nil {
-		return ErrArchive
-	}
-	output, ok := ch.Output.(interface{ SetReadDeadline(time.Time) error })
-	if !ok {
-		return ErrArchive
-	}
-	// Reject endpoints whose deadline methods exist but cannot enforce deadlines.
-	deadline := time.Now().Add(time.Second)
-	if input.SetWriteDeadline(deadline) != nil || output.SetReadDeadline(deadline) != nil {
-		return ErrArchive
-	}
-	if input.SetWriteDeadline(time.Time{}) != nil || output.SetReadDeadline(time.Time{}) != nil {
-		return ErrArchive
-	}
-	return run(NewProtocol(ch.Input, ch.Output, c.timeout))
+	return runChannel(ctx, c.launch, c.timeout, run, func(close func() error) {
+		c.cleanupMu.Lock()
+		c.pending = append(c.pending, close)
+		c.cleanupMu.Unlock()
+	})
 }
+
 func (c *Client) Prepare(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -196,4 +181,29 @@ func (c *Client) Upload(ctx context.Context, filename, archiveName string, uploa
 		return e
 	})
 	return receipt, err
+}
+
+// Close rejects new transactions and retries pending channel cleanup. Call after
+// transactions return; active work belongs to its context and returns ErrArchive.
+// Pool cancels and joins admitted work before calling this method.
+func (c *Client) Close() error {
+	c.cleanupMu.Lock()
+	defer c.cleanupMu.Unlock()
+	if c.active != 0 {
+		return ErrArchive
+	}
+	c.closed = true
+	var failed []func() error
+	var err error
+	for _, close := range c.pending {
+		if e := close(); e != nil {
+			err = errors.Join(err, e)
+			failed = append(failed, close)
+		}
+	}
+	c.pending = failed
+	if err != nil {
+		return &Error{cause: err}
+	}
+	return nil
 }

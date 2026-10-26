@@ -43,11 +43,12 @@ func rules(patterns ...string) []*regexp.Regexp {
 	return out
 }
 func reply(pattern, response string) connector.Interaction {
-	return connector.Interaction{Pattern: re(pattern), Response: response, Capture: true}
+	return connector.Interaction{Pattern: re(pattern), Reply: response, Capture: true, Unlimited: true}
 }
 func loginReply(pattern, response string) connector.Interaction {
 	r := reply(pattern, response)
 	r.Limit = 1
+	r.Unlimited = false
 	return r
 }
 
@@ -155,6 +156,7 @@ func Profile(name string) (connector.Profile, error) {
 		return connector.Profile{}, fmt.Errorf("vendors: unknown vendor: %w", connector.ErrUnsupported)
 	}
 	p.CommandTimeout = time.Duration(seconds) * time.Second
+	p.ValidateSave = func(ctx context.Context, r connector.Result) error { return validateSave(ctx, name, r) }
 	p.ConfigStrategy = func() connector.ConfigStrategy { return &configStrategy{vendor: name} }
 	p.Capabilities = connector.Capabilities{Save: len(p.SaveCommands) > 0, TFTP: name != "topsec" && name != "juniper", RemoteBackup: name == "juniper", Descriptions: name != "topsec" && name != "centec", Neighbors: name != "radware" && name != "topsec" && name != "centec", TopologyWrite: name == "h3c" || name == "h3c_wireless" || name == "cisco_ios" || name == "cisco_nxos" || name == "hillstone"}
 	return p, nil
@@ -166,7 +168,7 @@ var assignedRule = re(`(?i)rule\s+(\d+)\s+pass[^\n]+\n\s*#`)
 
 func prepareH3C(_ context.Context, c connector.Command, x connector.Executor) (connector.Command, bool, error) {
 	if appendRule.MatchString(c.Text) {
-		id := x.Get("rule_id")
+		id := x.Value("rule_id")
 		if id == "" {
 			return c, false, fmt.Errorf("vendors: missing rule id: %w", connector.ErrIncomplete)
 		}
@@ -187,6 +189,6 @@ func afterH3C(ctx context.Context, c connector.Command, _ connector.StepResult, 
 	if len(m) < 2 {
 		return fmt.Errorf("vendors: missing assigned rule id: %w", connector.ErrIncomplete)
 	}
-	x.Set("rule_id", m[1])
+	x.SetValue("rule_id", m[1])
 	return nil
 }

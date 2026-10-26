@@ -13,7 +13,7 @@ func TestReplaceRequiresExplicitKnownHosts(t *testing.T) {
 		if policy == "replace" {
 			path = t.TempDir() + "/known_hosts"
 		}
-		if _, err := New(fixtureProfile(), ConnectionConfig{Host: "fixture", HostKeyPolicy: policy, KnownHosts: path}); err != nil {
+		if _, err := New(fixtureProfile(), ConnectionConfig{Host: "fixture", HostKeyPolicy: HostKeyPolicy(policy), KnownHosts: path}); err != nil {
 			t.Fatal(policy, err)
 		}
 	}

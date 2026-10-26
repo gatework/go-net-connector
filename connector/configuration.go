@@ -29,15 +29,28 @@ func (d *Device) RunningConfig(ctx context.Context) (Result, error) {
 		return Result{}, e
 	}
 	defer d.release()
+	ctx, cancel := d.operationContext(ctx)
+	defer cancel()
 	return d.runningConfig(ctx)
 }
 func (d *Device) runningConfig(ctx context.Context) (result Result, err error) {
+	returned := false
+	defer func() {
+		if !returned {
+			_ = d.closeResources()
+		}
+	}()
+	result, err = d.collectConfig(ctx)
+	returned = true
+	return
+}
+func (d *Device) collectConfig(ctx context.Context) (result Result, err error) {
 	if len(d.profile.ConfigCommands) == 0 {
 		return Result{}, fail("configuration_error", "collect", Command{}, ErrUnsupported)
 	}
 	defer func() {
 		if err != nil {
-			_ = d.closeResources()
+			err = joinCleanup(err, d.closeResources())
 		}
 	}()
 	commands := make([]Command, len(d.profile.ConfigCommands))
@@ -84,15 +97,58 @@ func (d *Device) runningConfig(ctx context.Context) (result Result, err error) {
 	result.config = &config
 	return result, nil
 }
+
+// SaveConfig distinguishes command completion from profile-confirmed persistence.
 func (d *Device) SaveConfig(ctx context.Context, opts ExecuteOptions) (Result, error) {
 	if len(d.profile.SaveCommands) == 0 {
 		return Result{}, ErrUnsupported
 	}
+	if opts.MaxOutputBytes < 0 {
+		return Result{}, ErrInvalid
+	}
+	if err := d.acquire(); err != nil {
+		return Result{}, err
+	}
+	defer d.release()
+	ctx, cancel := d.operationContext(ctx)
+	defer cancel()
+	return d.saveConfig(ctx, opts)
+}
+func (d *Device) saveConfig(ctx context.Context, opts ExecuteOptions) (result Result, err error) {
+	if len(d.profile.SaveCommands) == 0 {
+		return result, ErrUnsupported
+	}
+	if opts.MaxOutputBytes < 0 {
+		return result, ErrInvalid
+	}
+	returned := false
+	defer func() {
+		if !returned {
+			_ = d.closeResources()
+		} else if err != nil {
+			err = joinCleanup(err, d.closeResources())
+		}
+	}()
+	result, err = d.save(ctx, opts)
+	returned = true
+	return
+}
+func (d *Device) save(ctx context.Context, opts ExecuteOptions) (result Result, err error) {
 	commands := make([]Command, len(d.profile.SaveCommands))
 	for i, text := range d.profile.SaveCommands {
 		commands[i] = Command{Text: text}
 	}
-	return d.ExecuteScript(ctx, Script{Commands: commands}, opts)
+	result, err = d.execute(ctx, Script{Commands: commands}, opts, nil)
+	if err != nil {
+		return
+	}
+	if d.profile.ValidateSave == nil {
+		return result, fail("persistence_unconfirmed", "persist", Command{}, ErrUnconfirmed)
+	}
+	if err = d.profile.ValidateSave(ctx, result); err != nil {
+		return result, fail("persistence_unconfirmed", "persist", Command{}, err)
+	}
+	return result, ctx.Err()
 }
 
 type BackupOptions struct {
@@ -113,9 +169,12 @@ type BackupReceipt struct {
 }
 
 func (d *Device) Backup(ctx context.Context, opts BackupOptions) (receipt BackupReceipt, err error) {
-	if d.lease.Load() {
-		return receipt, ErrBusy
+	if e := d.acquire(); e != nil {
+		return receipt, e
 	}
+	defer d.release()
+	ctx, cancel := d.operationContext(ctx)
+	defer cancel()
 	lock, e := storage.Acquire(ctx, opts.Path, opts.LockTimeout)
 	if e != nil {
 		return receipt, e
@@ -125,10 +184,6 @@ func (d *Device) Backup(ctx context.Context, opts BackupOptions) (receipt Backup
 			err = fail("backup_finalize_failed", "backup", Command{}, e)
 		}
 	}()
-	if e = d.acquire(); e != nil {
-		return receipt, e
-	}
-	defer d.release()
 	result, e := d.runningConfig(ctx)
 	if e != nil {
 		return receipt, e

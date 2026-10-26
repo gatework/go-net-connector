@@ -40,7 +40,7 @@ func TestFrozenRubyTransferCommandsAndReplies(t *testing.T) {
 			w := want.Commands[0]
 			responses := []string{}
 			for _, i := range command.Interactions {
-				responses = append(responses, i.Response)
+				responses = append(responses, i.Reply)
 			}
 			if command.Text != w.Text || command.Timeout == nil || *command.Timeout != time.Duration(w.Timeout*float64(time.Second)) || !reflect.DeepEqual(responses, w.Responses) {
 				t.Fatalf("command differs: %s %v", command.Text, responses)

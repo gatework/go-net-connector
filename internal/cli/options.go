@@ -1,12 +1,13 @@
 package cli
 
 import (
-	"github.com/gatework/go-net-connector/config"
-	"github.com/gatework/go-net-connector/internal/buildinfo"
-	"github.com/spf13/pflag"
 	"io"
 	"net/netip"
 	"strings"
+
+	"github.com/gatework/go-net-connector/config"
+	"github.com/gatework/go-net-connector/internal/buildinfo"
+	"github.com/spf13/pflag"
 )
 
 type options struct {

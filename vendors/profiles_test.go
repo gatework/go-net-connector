@@ -100,7 +100,7 @@ func TestInteractionsAndPrivilege(t *testing.T) {
 					if (c.login && r.Limit != 1) || (!c.login && r.Limit != 0) {
 						t.Errorf("interaction limit %d differs from source", r.Limit)
 					}
-					got = r.Response
+					got = r.Reply
 					break
 				}
 			}
@@ -121,8 +121,8 @@ type hookExecutor struct {
 	err      error
 }
 
-func (x *hookExecutor) Get(k string) string { return x.values[k] }
-func (x *hookExecutor) Set(k, v string)     { x.values[k] = v }
+func (x *hookExecutor) Value(k string) string { return x.values[k] }
+func (x *hookExecutor) SetValue(k, v string)  { x.values[k] = v }
 func (x *hookExecutor) Execute(_ context.Context, c connector.Command) (connector.StepResult, error) {
 	x.commands = append(x.commands, c.Text)
 	return connector.StepResult{}, x.err
@@ -134,7 +134,7 @@ func TestH3CRuleHook(t *testing.T) {
 	if _, _, e := p.Prepare(t.Context(), c, x); e == nil {
 		t.Fatal("unresolved ID accepted")
 	}
-	x.Set("rule_id", "123")
+	x.SetValue("rule_id", "123")
 	got, skip, e := p.Prepare(t.Context(), c, x)
 	if e != nil || skip || got.Text != "rule 123 append source-ip 192.0.2.1" {
 		t.Fatalf("%s %v %v", got.Text, skip, e)

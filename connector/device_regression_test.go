@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/gatework/go-net-connector/internal/terminal"
 	"io"
 	"net"
 	"reflect"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gatework/go-net-connector/internal/terminal"
 )
 
 type reviewFailSink struct{}
@@ -96,8 +97,8 @@ func TestOperationExpiresAndDrainsAdmittedCall(t *testing.T) {
 		close(release)
 		t.Fatal("scope did not cancel admitted call")
 	}
-	if e := d.Close(); !errors.Is(e, ErrBusy) {
-		t.Errorf("lease released while draining: %v", e)
+	if e := d.Close(); e != nil {
+		t.Errorf("Close failed while draining: %v", e)
 	}
 	select {
 	case e := <-outer:
@@ -266,8 +267,8 @@ func TestHookExpiresAndDrainsAdmittedCall(t *testing.T) {
 		close(release)
 		t.Fatal("hook scope did not cancel query")
 	}
-	if e := d.Close(); !errors.Is(e, ErrBusy) {
-		t.Errorf("hook drain released lease: %v", e)
+	if e := d.Close(); e != nil {
+		t.Errorf("Close failed during hook drain: %v", e)
 	}
 	close(release)
 	if e := <-child; !errors.Is(e, context.Canceled) {
@@ -501,7 +502,7 @@ func TestSensitiveInteractionProtectsEntireExchange(t *testing.T) {
 			var log bytes.Buffer
 			p := fixtureProfile()
 			c := Command{Text: "show"}
-			rule := Interaction{Pattern: regexp.MustCompile(`Question:`), Response: "secret\n", Sensitive: true}
+			rule := Interaction{Pattern: regexp.MustCompile(`Question:`), Reply: "secret\n", Sensitive: true}
 			if profileInteraction {
 				p.Interactions = []Interaction{rule}
 			} else {

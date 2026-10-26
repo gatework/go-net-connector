@@ -4,14 +4,15 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/inventory"
-	"github.com/gatework/go-net-connector/storage"
-	"github.com/gatework/go-net-connector/vendors"
 	"os"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/inventory"
+	"github.com/gatework/go-net-connector/storage"
+	"github.com/gatework/go-net-connector/vendors"
 )
 
 func TestFrozenRubyReportAndPartialReceipts(t *testing.T) {

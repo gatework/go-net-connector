@@ -22,10 +22,19 @@ var ErrBusy = errors.New("storage: destination is busy")
 var ErrUnsafe = errors.New("storage: unsafe file")
 var ErrLimit = errors.New("storage: file exceeds limit")
 
+// FileState records atomic replacement and confirmed directory durability.
+type FileState string
+
+const (
+	StateNotCommitted FileState = "not_committed"
+	StateCommitted    FileState = "committed"
+	StateDurable      FileState = "durable"
+)
+
 type Receipt struct {
-	Path  string `json:"path"`
-	State string `json:"state"`
-	Phase string `json:"phase"`
+	Path  string    `json:"path"`
+	State FileState `json:"state"`
+	Phase string    `json:"phase"`
 }
 
 func (r Receipt) Committed() bool { return r.State == "committed" || r.State == "durable" }
@@ -37,7 +46,7 @@ type WriteError struct {
 }
 
 func (e *WriteError) Error() string {
-	return "storage: replacement " + e.Receipt.State + " at " + e.Receipt.Phase
+	return "storage: replacement " + string(e.Receipt.State) + " at " + e.Receipt.Phase
 }
 func (e *WriteError) Unwrap() error { return e.Cause }
 

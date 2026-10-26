@@ -28,3 +28,26 @@ Review artifacts and source diffs remain under `.superpowers/sdd/implementation-
 - Regression evidence covers default API and CLI use, ASCII/UTF-8/GBK/GB18030, one-byte transport fragments, paging, Chinese after a large ASCII prefix, native-byte terminal edits, corrupted input, previous-backup preservation, decoded-size limits, secret redaction and backup hashes.
 - Final local checks passed with Go 1.27.3: `sh scripts/check` (workspace tests, complete race suite, vet, frozen expect race suite and command builds), `go mod verify`, independent consumer/outside-checkout CLI verification with `GOTOOLCHAIN=local`, and `govulncheck v1.9.0` (`No vulnerabilities found`). Module tidy was checked using a temporary modfile with the existing frozen expect candidate; no replacement was added to the published module file.
 - These checks did not contact a production switch or deploy to a device. The original go-expect working tree was not edited.
+
+## 2026-10-26 unification
+
+Plan: docs/2026-10-26-unification-plan.md. Paired worktrees at ../go-expect and this checkout; bases c66cbd2/a25b345.
+Ruling: work in new paired feature worktrees; do not commit or publish. Preserve original compatibility worktree.
+Ruling: a published compatible dependency cannot be created without publication authorization; retain the release gate and verify explicit local paired consumers, never label them published-dependency evidence.
+Preflight: compatibility port must preserve standalone core fixes; canonical connector consumes the port before its API migration.
+
+User correction: consume github.com/gatework/go-expect directly; no local replace or cross-repository go.work. Temporary setup workspace removed before implementation. Resolve GitHub dependency availability before migrating consumer APIs.
+
+Generic-core milestone ready in sibling worktree: compatibility regressions RED on absent APIs; close-handler and cleanup-cause regressions RED then GREEN; full script/ci (race/vet/fuzz/bench/example/self-source consumer), lint and vulnerability scan passed. Fresh review found SendAll suffix reconversion; allocation regression failed at 4112 allocations and passed after one-buffer fix, followed by full CI. No other Important/Critical findings.
+Independent net-connector changes verified without any local module replacement: archive blocked Send/Expect/Receive cancellation tests RED then GREEN using selected actual archive sources; CRLF parsing and Longest/POSIX snapshot tests RED then GREEN using actual connector/types.go. Full consumer build awaits a GitHub-accessible compatible dependency.
+
+Archive channel ownership extracted into channel.go. Actual-source tests first reproduced lost primary+cleanup causes and unclosed partial launcher return, then passed under race after safe wrapping and cleanup fixes.
+Awaiting explicit answer to GitHub dependency delivery question. No local dependency replacements/workspace remain in this worktree, no GitHub mutations performed. Remaining plan work: canonical Device cancellation/terminal Close/recovery and panic guards; attempt evidence; key authentication/line ending migration; shared save confirmation; policy/status types and naming migration; consumer docs/tooling/full integrations and final consumer review. These are NOT complete.
+
+## 2026-10-27: authorized GitHub delivery
+
+The user explicitly authorized committing and pushing both repositories. This supersedes the earlier no-commit/no-push ruling for the paired unification worktrees; the original nested compatibility worktree remains preserved as historical WIP.
+
+The current connector changes implement terminal Close/cancellation and explicit recovery, failed-attempt evidence, key authentication and line endings, shared save validation, API naming and typed policies, archive channel cleanup, and migration documentation. go-expect resolves directly from the immutable GitHub version pinned in go.mod with GOWORK=off and no dependency replacement.
+
+Fresh local verification passed: connector full race/shuffle suite, go vet, goimports, go mod verify, and the independent consumer/outside-checkout CLI check. The paired go-expect script/ci and actionlint checks also passed. These checks do not establish remote CI, full cross-platform integration, final implementation review, real-device behavior, or a formal release.
