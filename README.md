@@ -78,6 +78,10 @@ backup:
 
 主机密钥策略 `replace` 必须显式指定 `ssh.known_hosts`，不会隐式替换用户默认信任文件中的密钥。
 
+连接器自动检查命令响应的编码，并统一以 UTF-8 提供文本和保存备份；现有 Go API 调用与 CLI 无需增加编码参数。有效 UTF-8 原样保留，GBK/GB2312/GB18030 中文输出由 [chardet](https://github.com/saintfish/chardet) 提供候选，再由 `golang.org/x/text` 严格转换。检测在完整响应收齐后进行，分页和网络分包不会拆坏中文字符，终端退格/光标操作按原始字节处理后再转换。
+
+`StepResult.Raw()` 保留原始响应字节，`OutputEncoding()` 提供本次选择的编码作为诊断信息。备份的字节数和 SHA-256 基于 UTF-8 内容；转码后仍受 `MaxOutputBytes` 限制。无法识别或转换的输出返回 `invalid_output_encoding`，保留旧备份。自动识别是对 UTF-8 与 GB18030 家族的启发式判断，合法 UTF-8 优先，字节有效性校验不能消除所有歧义。会话日志按完整行转换，并在转换前后脱敏。发送命令、交互透传及原生 TFTP 上传文件仍按协议保留原始字节。
+
 PostgreSQL 使用 `netdisco.source: postgres`、`query`、`query_params`；身份来自 `ND_DB_HOST/NAME/USER/PASS`。查询通过参数绑定和只读游标执行。`cache_mode: only` 仅使用已校验缓存，禁止源查询。
 
 TFTP 的 `server`、`servers`、`verification_root`、`verification_roots`、`source_files`、`source_interfaces`、`vrfs` 支持默认值与精确地址覆盖。SSH 核验目录采用 `ssh://user@host/absolute/path`，凭据通过 `NC_TFTP_SSH_PASSWORD` 或 SSH 密钥提供。所有服务器及策略预检成功后才开始设备任务。PAN 固定上传名需要可用归档根目录。

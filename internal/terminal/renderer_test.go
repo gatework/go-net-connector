@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -14,6 +15,23 @@ func TestRenderRejectsShortOutput(t *testing.T) {
 	_, e := r.Write([]byte("body\n"))
 	if e != io.ErrShortWrite {
 		t.Fatal(e)
+	}
+}
+
+func TestEncodedRendererSplitBytesAndControls(t *testing.T) {
+	var b strings.Builder
+	r := New(&b, 1024, true)
+	r.Encoding = "gbk"
+	for _, part := range []string{"\xd6", "\xd0\xce", "\xc4\r\n", "\xd6", "\xd0\b\bOK", "\x1b[", "K"} {
+		if _, err := r.Write([]byte(part)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Finish(); err != nil || b.String() != "中文\nOK" {
+		t.Fatalf("rendered %q, %v", b.String(), err)
+	}
+	if _, err := RenderEncoded([]byte("\xd6\n"), true, "gbk"); !errors.Is(err, ErrEncoding) {
+		t.Fatalf("truncated GBK accepted: %v", err)
 	}
 }
 
