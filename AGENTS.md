@@ -1,0 +1,12 @@
+# Go net-connector
+
+Use the golang-how-to skill for Go implementation, review and debugging.
+
+- Preserve reference workspaces and concurrent edits. No commits, publication or deployment without explicit authorization.
+- Profile declares vendor capabilities; Device owns its operation lease and session; transport owns processes; go-expect owns stream matching and I/O.
+- Validate complete scripts before connection or sending. Never replay device writes after an uncertain result.
+- Preserve completed steps and storage commit receipts when later logging, callbacks or durability fail.
+- Raw responses are explicit access only; diagnostic formatting must not expose secrets or response bodies.
+- Test actual byte sequences and failure boundaries. Test success does not imply real-device or remote-release evidence.
+- New APIs use context, bounded resource ownership and explicit dependency injection. No global service locator.
+- Follow docs/implementation-plan.md and record implementation evidence in docs/progress.md.

@@ -1,0 +1,8 @@
+.reference/
+.work/
+.superpowers/
+/go.work
+/go.work.sum
+/bin/
+/coverage.out
+/tmp/

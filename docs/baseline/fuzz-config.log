@@ -1,0 +1,7 @@
+fuzz: elapsed: 0s, gathering baseline coverage: 0/2 completed
+fuzz: elapsed: 0s, gathering baseline coverage: 2/2 completed, now fuzzing with 2 workers
+fuzz: elapsed: 3s, execs: 72897 (24292/sec), new interesting: 182 (total: 184)
+fuzz: elapsed: 6s, execs: 91658 (6251/sec), new interesting: 202 (total: 204)
+fuzz: elapsed: 6s, execs: 91658 (0/sec), new interesting: 202 (total: 204)
+PASS
+ok  	github.com/gatework/go-net-connector/config	6.529s

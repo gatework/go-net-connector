@@ -1,0 +1,82 @@
+package transfer
+
+import (
+	"bufio"
+	"context"
+	"github.com/gatework/go-net-connector/connector"
+	"io"
+	"net"
+	"regexp"
+	"testing"
+	"time"
+)
+
+func transferDevice(t *testing.T, vendor string, dialogue [][2]string) *connector.Device {
+	t.Helper()
+	done := make(chan struct{})
+	d, e := connector.New(connector.Profile{Name: vendor, LoginPrompt: regexp.MustCompile(`sw#\s*$`), CommandPrompt: regexp.MustCompile(`sw#\s*$`)}, connector.ConnectionConfig{Host: "192.0.2.1", CommandTimeout: time.Second}, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
+		a, b := net.Pipe()
+		go func() {
+			defer close(done)
+			defer b.Close()
+			io.WriteString(b, "sw#")
+			r := bufio.NewReader(b)
+			for _, step := range dialogue {
+				line, e := r.ReadString('\n')
+				if e != nil {
+					return
+				}
+				if line != step[0]+"\n" {
+					t.Errorf("command got %q want %q", line, step[0])
+				}
+				io.WriteString(b, step[1])
+			}
+			io.Copy(io.Discard, b)
+		}()
+		return a, nil
+	}))
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() {
+		d.Close()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("peer did not exit")
+		}
+	})
+	return d
+}
+func TestTFTPDialects(t *testing.T) {
+	for _, test := range []struct{ vendor, command, success string }{{"cisco_nxos", "copy running-config tftp://192.0.2.9/backup.cfg vrf management", "123 bytes copied"}, {"fortinet", "execute backup full-config tftp backup.cfg 192.0.2.9", "Send config file to tftp server OK."}, {"centec", "copy running-config tftp://192.0.2.9/backup.cfg", "Sent 123 bytes in 1.2 seconds"}, {"hillstone", "export configuration startup to tftp server 192.0.2.9 vrouter mgt-vr backup.cfg", "Export ok, target file name backup.cfg"}} {
+		t.Run(test.vendor, func(t *testing.T) {
+			d := transferDevice(t, test.vendor, [][2]string{{test.command, test.command + "\r\n" + test.success + "\r\nsw#"}})
+			result, e := TFTP(t.Context(), d, TFTPOptions{Server: "192.0.2.9", Path: "backup.cfg"})
+			if e != nil || !result.Receipt.Reported() || result.Receipt.Verified() || len(result.Steps) != 1 {
+				t.Fatal(result, e)
+			}
+		})
+	}
+}
+func TestTFTPFailureOverridesPositiveAndFilenameIsNotFailure(t *testing.T) {
+	for _, body := range []string{"123 bytes copied\r\nTransfer failed.", "123 bytes copied"} {
+		d := transferDevice(t, "cisco_nxos", [][2]string{{"copy running-config tftp://192.0.2.9/failed.cfg vrf management", "copy running-config tftp://192.0.2.9/failed.cfg vrf management\r\n" + body + "\r\nsw#"}})
+		r, e := TFTP(t.Context(), d, TFTPOptions{Server: "192.0.2.9", Path: "failed.cfg"})
+		if (e == nil) != (body == "123 bytes copied") || r.Receipt.Reported() != (e == nil) {
+			t.Fatal(r, e)
+		}
+	}
+}
+func TestH3CSourceDiscoveryAndIOSDialogue(t *testing.T) {
+	d := transferDevice(t, "h3c", [][2]string{{"display startup", "display startup\r\nNext main startup saved-configuration file: flash:/startup.cfg\r\nsw#"}, {"tftp 192.0.2.9 put flash:/startup.cfg backup.cfg source ip 192.0.2.1", "File transfer completed successfully.\r\nsw#"}})
+	r, e := TFTP(t.Context(), d, TFTPOptions{Server: "192.0.2.9", Path: "backup.cfg", SourceInterface: "management"})
+	if e != nil || r.Receipt.ConfigurationKind != "startup" || len(r.Steps) != 2 {
+		t.Fatal(r, e)
+	}
+	d = transferDevice(t, "cisco_ios", [][2]string{{"copy running-config tftp:", "Address or name of remote host []? "}, {"192.0.2.9", "Destination filename [router-confg]? "}, {"backup.cfg", "[OK - 123 bytes]\r\nsw#"}})
+	r, e = TFTP(t.Context(), d, TFTPOptions{Server: "192.0.2.9", Path: "backup.cfg"})
+	if e != nil || !r.Receipt.Reported() {
+		t.Fatal(r, e)
+	}
+}
