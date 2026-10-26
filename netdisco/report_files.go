@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gatework/go-net-connector/storage"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/gatework/go-net-connector/storage"
 )
 
 func (r Report) Text(directory string, p Plan, workers int) string {

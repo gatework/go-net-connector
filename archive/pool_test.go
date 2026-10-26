@@ -2,12 +2,13 @@ package archive
 
 import (
 	"context"
-	"github.com/gatework/go-net-connector/transfer"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/gatework/go-net-connector/transfer"
 )
 
 func TestNewPoolValidationAndSlots(t *testing.T) {

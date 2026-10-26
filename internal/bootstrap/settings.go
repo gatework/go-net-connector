@@ -205,7 +205,7 @@ func ruleOptions(p config.Snapshot) (netdisco.RuleOptions, error) {
 }
 func (s *Services) connection(vendor string) (connector.ConnectionConfig, error) {
 	p := s.policy
-	c := connector.ConnectionConfig{LogLevel: str(p, "ssh.log_level", "info"), Protocol: str(p, "ssh.protocol", "ssh"), KnownHosts: str(p, "ssh.known_hosts", ""), HostKeyPolicy: str(p, "ssh.host_key_policy", "strict"), MaxScriptOutputBytes: int64(number(p, "ssh.max_script_output_bytes", 0))}
+	c := connector.ConnectionConfig{LogLevel: str(p, "ssh.log_level", "info"), Protocol: connector.Protocol(str(p, "ssh.protocol", "ssh")), KnownHosts: str(p, "ssh.known_hosts", ""), HostKeyPolicy: connector.HostKeyPolicy(str(p, "ssh.host_key_policy", "strict")), MaxScriptOutputBytes: int64(number(p, "ssh.max_script_output_bytes", 0))}
 	protocols, e := mapping(p, "ssh.vendor_protocols")
 	if e != nil {
 		return c, e
@@ -216,7 +216,7 @@ func (s *Services) connection(vendor string) (connector.ConnectionConfig, error)
 		}
 	}
 	if v := protocols[vendor]; v != "" {
-		c.Protocol = v
+		c.Protocol = connector.Protocol(v)
 	}
 	return c, nil
 }

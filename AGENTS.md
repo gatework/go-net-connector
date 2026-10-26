@@ -10,3 +10,7 @@ Use the golang-how-to skill for Go implementation, review and debugging.
 - Test actual byte sequences and failure boundaries. Test success does not imply real-device or remote-release evidence.
 - New APIs use context, bounded resource ownership and explicit dependency injection. No global service locator.
 - Follow docs/implementation-plan.md and record implementation evidence in docs/progress.md.
+
+- Resolve go-expect from its pinned GitHub module with GOWORK=off. Frozen sources/patches are historical; do not reintroduce a local dependency replacement.
+- Device.Close is terminal and cancels active operations without waiting for user callbacks. Failed sessions need explicit Connect before another command.
+- Preserve failed Attempt evidence separately from accepted Steps. Save completion requires Profile.ValidateSave; a prompt alone is unconfirmed.

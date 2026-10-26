@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -14,10 +15,14 @@ import (
 )
 
 var (
+	ErrClosed         = errors.New("connector: device closed")
+	ErrNotConnected   = errors.New("connector: explicit reconnect required")
 	ErrBusy           = errors.New("connector: session busy")
 	ErrDevice         = errors.New("connector: device rejected command")
 	ErrAuthentication = errors.New("connector: authentication failed")
 	ErrConnection     = errors.New("connector: connection failed")
+	ErrUnconfirmed    = errors.New("connector: save not confirmed")
+	ErrResponseLimit  = errors.New("connector: response limit exceeded")
 	ErrOutputLimit    = errors.New("connector: output limit exceeded")
 	ErrScriptLimit    = errors.New("connector: script output limit exceeded")
 	ErrInvalid        = errors.New("connector: invalid input")
@@ -42,14 +47,16 @@ func fail(code, phase string, c Command, cause error) error {
 
 type Interaction struct {
 	Pattern            *regexp.Regexp
-	Response           string
+	Reply              string
 	Respond            func(context.Context, string) (string, error)
-	Limit              int // zero is unlimited; credentials are configured with one.
+	Limit              int  // zero means one reply; negative values are invalid.
+	Unlimited          bool // explicit legacy/pager repetition, still bounded by the operation deadline.
 	Capture, Sensitive bool
 }
 type Command struct {
 	Text                       string
-	Timeout                    *time.Duration // nil inherits; zero explicitly polls.
+	Timeout                    *time.Duration // nil inherits; zero disables the relative timer.
+	Poll                       bool           // explicit immediate OS readiness; incompatible with a positive Timeout.
 	Prompt                     *regexp.Regexp
 	Interactions               []Interaction
 	Sensitive, OutputSensitive bool
@@ -69,14 +76,14 @@ func (c Command) validate() error {
 	if strings.TrimSpace(c.Text) == "" || strings.ContainsAny(c.Text, "\r\n\x00") || !utf8.ValidString(c.Text) {
 		return fail("invalid_command", "parse", c, ErrInvalid)
 	}
-	if c.Timeout != nil && *c.Timeout < 0 {
+	if c.Timeout != nil && (*c.Timeout < 0 || c.Poll && *c.Timeout > 0) {
 		return fail("invalid_timeout", "parse", c, ErrInvalid)
 	}
 	if c.Prompt != nil && c.Prompt.MatchString("") {
 		return fail("invalid_prompt", "parse", c, ErrInvalid)
 	}
 	for _, r := range c.Interactions {
-		if r.Pattern == nil || r.Pattern.MatchString("") || r.Limit < 0 {
+		if r.Pattern == nil || r.Pattern.MatchString("") || r.Limit < 0 || r.Unlimited && r.Limit > 0 {
 			return fail("invalid_interaction", "parse", c, ErrInvalid)
 		}
 	}
@@ -84,7 +91,7 @@ func (c Command) validate() error {
 }
 func validateInteractions(replies []Interaction) error {
 	for _, r := range replies {
-		if r.Pattern == nil || r.Pattern.MatchString("") || r.Limit < 0 {
+		if r.Pattern == nil || r.Pattern.MatchString("") || r.Limit < 0 || r.Unlimited && r.Limit > 0 {
 			return ErrInvalid
 		}
 	}
@@ -94,7 +101,9 @@ func clonePattern(r *regexp.Regexp) *regexp.Regexp {
 	if r == nil {
 		return nil
 	}
-	return regexp.MustCompile(r.String())
+	// Copy isolates Longest/POSIX semantics; recompiling String would lose them.
+	//nolint:staticcheck // SA1019: independent Longest configuration is intentional.
+	return r.Copy()
 }
 func cloneInteractions(in []Interaction) []Interaction {
 	out := append([]Interaction(nil), in...)
@@ -121,6 +130,7 @@ type Script struct {
 func ParseScript(text, name string) (Script, error) {
 	s := Script{Name: name}
 	for i, line := range strings.Split(text, "\n") {
+		line = strings.TrimSuffix(line, "\r")
 		if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimLeft(line, " \t"), "#") {
 			continue
 		}
@@ -169,9 +179,42 @@ func (s StepResult) MarshalJSON() ([]byte, error) {
 }
 
 type Result struct {
-	steps  []StepResult
-	config *string
+	attempts []Attempt
+	steps    []StepResult
+	config   *string
 }
+
+// Attempt records command-write progress and received evidence, including failure.
+// Complete observes a prompt, not device acceptance or persistence.
+type Attempt struct {
+	command  Command
+	response StepResult
+	written  int
+	complete bool
+	err      error
+}
+
+func (a Attempt) Command() Command { return a.command.clone() }
+func (a Attempt) Raw() string      { return a.response.raw }
+func (a Attempt) Prompt() string   { return a.response.prompt }
+func (a Attempt) Written() int     { return a.written }
+func (a Attempt) Complete() bool   { return a.complete }
+func (a Attempt) Err() error       { return a.err }
+func (a Attempt) String() string {
+	return fmt.Sprintf("connector.Attempt{written:%d complete:%t failed:%t}", a.written, a.complete, a.err != nil)
+}
+func (a Attempt) GoString() string { return a.String() }
+func (a Attempt) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Written  int  `json:"written"`
+		Complete bool `json:"complete"`
+		Failed   bool `json:"failed"`
+	}{a.written, a.complete, a.err != nil})
+}
+
+// Attempts returns detached progress for main and hook-issued command attempts.
+// Steps and their JSON format continue to include only accepted main commands.
+func (r Result) Attempts() []Attempt { return append([]Attempt(nil), r.attempts...) }
 
 func (r Result) Steps() []StepResult {
 	out := append([]StepResult(nil), r.steps...)
@@ -214,10 +257,12 @@ type ExecuteOptions struct {
 }
 type Executor interface {
 	Execute(context.Context, Command) (StepResult, error)
-	Get(string) string
-	Set(string, string)
+	Value(string) string
+	SetValue(string, string)
 }
 type Profile struct {
+	// ValidateSave requires affirmative device evidence; nil leaves saving unconfirmed.
+	ValidateSave func(context.Context, Result) error
 	// LegacySSHArguments are used only by opted-in RSA compatibility recovery.
 	// Nil defaults to SSH1 (-1); an explicit empty slice disables this recovery.
 	LegacySSHArguments                                                                 []string
@@ -321,18 +366,38 @@ func (p Profile) clone() (Profile, error) {
 	return p, nil
 }
 
+// Protocol identifies the explicitly selected system client.
+type Protocol string
+
+const (
+	ProtocolSSH    Protocol = "ssh"
+	ProtocolTelnet Protocol = "telnet"
+)
+
+// HostKeyPolicy controls explicit host-key trust behavior.
+type HostKeyPolicy string
+
+const (
+	HostKeyStrict    HostKeyPolicy = "strict"
+	HostKeyAcceptNew HostKeyPolicy = "accept_new"
+	HostKeyReplace   HostKeyPolicy = "replace"
+)
+
 type ConnectionConfig struct {
-	Host, Username, Password, EnablePassword, Protocol string
-	Port                                               int
-	LoginTimeout, CommandTimeout, WriteTimeout         time.Duration
-	MaxOutputBytes, MaxScriptOutputBytes               int64
-	KnownHosts, HostKeyPolicy                          string
-	SSHPath, TelnetPath                                string
-	LegacySSHArguments                                 []string
-	AllowTelnetFallback                                bool
-	AllowLegacySSH                                     bool
-	replaceHostKey                                     bool
-	Challenges                                         []Interaction
+	IdentityFile, KeyPassphrase, LineEnding    string
+	Host, Username, Password, EnablePassword   string
+	Protocol                                   Protocol
+	Port                                       int
+	LoginTimeout, CommandTimeout, WriteTimeout time.Duration
+	MaxOutputBytes, MaxScriptOutputBytes       int64
+	KnownHosts                                 string
+	HostKeyPolicy                              HostKeyPolicy
+	SSHPath, TelnetPath                        string
+	LegacySSHArguments                         []string
+	AllowTelnetFallback                        bool
+	AllowLegacySSH                             bool
+	replaceHostKey                             bool
+	Challenges                                 []Interaction
 	// Logger is an explicitly injected cooperative writer. With empty LogLevel,
 	// it receives raw rendered/redacted response bytes (the low-level API).
 	// LogLevel selects structured text events; only debug includes responses.
@@ -346,8 +411,9 @@ func (c ConnectionConfig) String() string   { return "connector.ConnectionConfig
 func (c ConnectionConfig) GoString() string { return c.String() }
 func (c ConnectionConfig) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Host, Protocol string
-		Port           int
+		Host     string
+		Protocol Protocol
+		Port     int
 	}{c.Host, c.Protocol, c.Port})
 }
 
@@ -363,4 +429,29 @@ func WithTransportFactory(f TransportFactory) Option {
 		o.factory = f
 		return nil
 	}
+}
+
+func nilValue(value any) bool {
+	if value == nil {
+		return true
+	}
+	v := reflect.ValueOf(value)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return v.IsNil()
+	}
+	return false
+}
+
+// cleanupError keeps diagnostics safe without hiding a primary Error's metadata.
+type cleanupError struct{ cause error }
+
+func (e *cleanupError) Error() string    { return "connector: cleanup failed" }
+func (e *cleanupError) GoString() string { return e.Error() }
+func (e *cleanupError) Unwrap() error    { return e.cause }
+func joinCleanup(primary, cleanup error) error {
+	if cleanup == nil {
+		return primary
+	}
+	return &cleanupError{cause: errors.Join(primary, cleanup)}
 }

@@ -6,13 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"github.com/gatework/go-net-connector/transfer"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/gatework/go-net-connector/transfer"
 )
 
 func TestWorkerTransactionAndUnconfirmedStaging(t *testing.T) {

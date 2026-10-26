@@ -3,10 +3,11 @@ package transfer
 import (
 	"crypto/sha256"
 	"fmt"
-	"github.com/gatework/go-net-connector/vendors"
 	"net/netip"
 	"regexp"
 	"strings"
+
+	"github.com/gatework/go-net-connector/vendors"
 )
 
 type TFTPOptions struct{ Server, Path, SourceFile, VRF, SourceInterface string }

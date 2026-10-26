@@ -2,13 +2,14 @@ package archive
 
 import (
 	"context"
-	"github.com/gatework/go-net-connector/transfer"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/gatework/go-net-connector/transfer"
 )
 
 func TestClientVerifiesBothArchivesBeforeCleanup(t *testing.T) {

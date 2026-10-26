@@ -4,10 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/inventory"
-	"github.com/gatework/go-net-connector/storage"
-	"github.com/gatework/go-net-connector/vendors"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,6 +11,11 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/inventory"
+	"github.com/gatework/go-net-connector/storage"
+	"github.com/gatework/go-net-connector/vendors"
 )
 
 func TestDiagnosticFrozenMetadataVocabulary(t *testing.T) {

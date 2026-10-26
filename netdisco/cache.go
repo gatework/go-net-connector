@@ -7,8 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/gatework/go-net-connector/inventory"
-	"github.com/gatework/go-net-connector/storage"
 	"io"
 	"math"
 	"os"
@@ -16,6 +14,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/gatework/go-net-connector/inventory"
+	"github.com/gatework/go-net-connector/storage"
 
 	"golang.org/x/sys/unix"
 )

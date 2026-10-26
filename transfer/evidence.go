@@ -1,10 +1,11 @@
 package transfer
 
 import (
-	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/internal/terminal"
 	"regexp"
 	"strings"
+
+	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/internal/terminal"
 )
 
 var sgr = regexp.MustCompile(`\x1b\[[0-9;:]*m`)
@@ -33,7 +34,7 @@ func evidenceLines(step connector.StepResult, output string) []string {
 	echoes := map[string]bool{command.Text: true, prompt + command.Text: true, prompt: true}
 	for _, reply := range command.Interactions {
 		if reply.Respond == nil {
-			echoes[strings.TrimSuffix(reply.Response, "\n")] = true
+			echoes[strings.TrimSuffix(reply.Reply, "\n")] = true
 		}
 	}
 	out := []string{}

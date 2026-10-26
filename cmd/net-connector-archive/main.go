@@ -3,12 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/gatework/go-net-connector/archive"
-	"github.com/gatework/go-net-connector/internal/buildinfo"
-	"golang.org/x/sys/unix"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/gatework/go-net-connector/archive"
+	"github.com/gatework/go-net-connector/internal/buildinfo"
+	"golang.org/x/sys/unix"
 )
 
 func main() {

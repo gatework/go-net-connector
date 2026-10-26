@@ -175,16 +175,7 @@ func openProcess(ctx context.Context, cfg ConnectionConfig) (io.ReadWriteCloser,
 		if e != nil {
 			return nil, e
 		}
-		checking := "ask"
-		if cfg.HostKeyPolicy == "strict" {
-			checking = "yes"
-		}
-		args = append(args, cfg.LegacySSHArguments...)
-		args = append(args, "-tt", "-o", "StrictHostKeyChecking="+checking, "-o", "UserKnownHostsFile="+trust.snapshot, "-o", "GlobalKnownHostsFile=/dev/null", "-o", "UpdateHostKeys=no", "-o", "ConnectTimeout="+strconv.Itoa(max(1, int(cfg.LoginTimeout.Seconds()))), "-p", strconv.Itoa(port))
-		if cfg.Username != "" {
-			args = append(args, "-l", cfg.Username)
-		}
-		args = append(args, "--", cfg.Host)
+		args = sshArguments(cfg, trust.snapshot, port)
 	}
 	p, e := startProcess(ctx, exec.Command(program, args...))
 	if e != nil {
@@ -198,9 +189,10 @@ func openProcess(ctx context.Context, cfg ConnectionConfig) (io.ReadWriteCloser,
 }
 
 type hostTrust struct {
-	ctx                                            context.Context
-	destination, snapshot, directory, host, policy string
-	original                                       []string
+	ctx                                    context.Context
+	destination, snapshot, directory, host string
+	policy                                 HostKeyPolicy
+	original                               []string
 }
 
 func newHostTrust(ctx context.Context, cfg ConnectionConfig, port int) (*hostTrust, error) {
@@ -323,3 +315,20 @@ func (t *hostTrust) commit() error {
 	return e
 }
 func (t *hostTrust) close() error { return os.RemoveAll(t.directory) }
+
+func sshArguments(cfg ConnectionConfig, knownHosts string, port int) []string {
+	checking := "ask"
+	if cfg.HostKeyPolicy == "strict" {
+		checking = "yes"
+	}
+	args := append([]string(nil), cfg.LegacySSHArguments...)
+	args = append(args, "-tt", "-o", "StrictHostKeyChecking="+checking, "-o", "UserKnownHostsFile="+knownHosts, "-o", "GlobalKnownHostsFile=/dev/null", "-o", "UpdateHostKeys=no", "-o", "ConnectTimeout="+strconv.Itoa(max(1, int(cfg.LoginTimeout.Seconds()))), "-p", strconv.Itoa(port))
+	if cfg.IdentityFile != "" {
+		args = append(args, "-i", cfg.IdentityFile)
+	}
+	if cfg.Username != "" {
+		args = append(args, "-l", cfg.Username)
+	}
+	args = append(args, "--", cfg.Host)
+	return args
+}

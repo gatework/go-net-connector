@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/gatework/go-net-connector/transfer"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gatework/go-net-connector/transfer"
 )
 
 // PoolOptions describes local or SSH archive storage. NewPool does no I/O.
@@ -202,6 +203,13 @@ func (c *poolDoneContext) Value(any) any { return nil }
 
 func (p *Pool) Close() error {
 	p.mu.Lock()
+	if p.closed && p.cleaned && p.closeErr != nil {
+		// A completed failed attempt retains owners; a later Close retries them.
+		p.cleaned = false
+		p.closeDone = make(chan struct{})
+		defer p.mu.Unlock()
+		return p.closeLocked()
+	}
 	if p.closed {
 		done := p.closeDone
 		p.mu.Unlock()
@@ -235,6 +243,9 @@ func (p *Pool) closeLocked() error {
 		close(p.stop)
 	}
 	var err error
+	for _, client := range p.clients {
+		err = errors.Join(err, client.Close())
+	}
 	for _, master := range p.masters {
 		err = errors.Join(err, master.close())
 	}

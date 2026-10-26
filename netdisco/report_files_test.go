@@ -2,12 +2,13 @@ package netdisco
 
 import (
 	"encoding/json"
-	"github.com/gatework/go-net-connector/connector"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/gatework/go-net-connector/connector"
 )
 
 func TestReportFilesPreservesFirstReportError(t *testing.T) {

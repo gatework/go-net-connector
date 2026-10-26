@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/gatework/go-net-connector/transfer"
 	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/gatework/go-net-connector/transfer"
 )
 
 func TestInstalledWorkerPipes(t *testing.T) {

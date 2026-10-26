@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/gatework/go-net-connector/inventory"
-	"github.com/jackc/pgx/v5"
 	"math"
 	"strings"
 	"time"
+
+	"github.com/gatework/go-net-connector/inventory"
+	"github.com/jackc/pgx/v5"
 )
 
 type PostgresOptions struct {

@@ -2,8 +2,9 @@ package vendors
 
 import (
 	"errors"
-	"github.com/gatework/go-net-connector/connector"
 	"testing"
+
+	"github.com/gatework/go-net-connector/connector"
 )
 
 func TestConfigCleaningRetainsVendorSemantics(t *testing.T) {

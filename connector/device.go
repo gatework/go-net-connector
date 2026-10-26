@@ -16,7 +16,14 @@ import (
 	"github.com/gatework/go-net-connector/internal/textcodec"
 )
 
+// Device owns one conversation. Close is terminal and cancels admitted work.
+// A failed operation requires explicit Connect before another command; no replay.
+// Do not copy Device. Callbacks and borrowed writers must cooperate with cancellation.
 type Device struct {
+	lifeMu     sync.Mutex
+	closed     bool
+	cancel     context.CancelFunc
+	retired    atomic.Bool
 	profile    Profile
 	config     ConnectionConfig
 	factory    TransportFactory
@@ -33,11 +40,20 @@ type Device struct {
 }
 
 func New(profile Profile, cfg ConnectionConfig, opts ...Option) (*Device, error) {
+	if cfg.Logger != nil && nilValue(cfg.Logger) {
+		return nil, ErrInvalid
+	}
 	p, e := profile.clone()
 	if e != nil {
 		return nil, e
 	}
-	if strings.TrimSpace(cfg.Host) == "" || strings.ContainsAny(cfg.Host, "\r\n\x00\t ") || strings.HasPrefix(cfg.Host, "-") || strings.ContainsAny(cfg.Username+cfg.Password+cfg.EnablePassword, "\r\n\x00") || cfg.Port < 0 || cfg.Port > 65535 {
+	if strings.TrimSpace(cfg.Host) == "" || strings.ContainsAny(cfg.Host, "\r\n\x00\t ") || strings.HasPrefix(cfg.Host, "-") || strings.ContainsAny(cfg.Username+cfg.Password+cfg.EnablePassword+cfg.KeyPassphrase+cfg.IdentityFile+cfg.KnownHosts+cfg.SSHPath+cfg.TelnetPath, "\r\n\x00") || cfg.Port < 0 || cfg.Port > 65535 {
+		return nil, ErrInvalid
+	}
+	if cfg.LineEnding == "" {
+		cfg.LineEnding = "\n"
+	}
+	if cfg.LineEnding != "\n" && cfg.LineEnding != "\r" && cfg.LineEnding != "\r\n" {
 		return nil, ErrInvalid
 	}
 	if cfg.Protocol == "" {
@@ -93,24 +109,58 @@ func New(profile Profile, cfg ConnectionConfig, opts ...Option) (*Device, error)
 	d.log = &logWriter{target: cfg.Logger, level: cfg.LogLevel, host: cfg.Host, encoding: "auto", paused: true}
 	return d, nil
 }
-func (d *Device) Name() string               { return d.profile.Name }
+func (d *Device) ProfileName() string        { return d.profile.Name }
 func (d *Device) Host() string               { return d.config.Host }
 func (d *Device) Capabilities() Capabilities { return d.profile.Capabilities }
 func (d *Device) Connected() bool            { return d.connected.Load() }
 func (d *Device) CurrentPrompt() string      { return d.prompt.Load().(string) }
 func (d *Device) acquire() error {
+	d.lifeMu.Lock()
+	defer d.lifeMu.Unlock()
+	if d.closed {
+		return ErrClosed
+	}
 	if !d.lease.CompareAndSwap(false, true) {
 		return ErrBusy
 	}
 	return nil
 }
 func (d *Device) release() { d.lease.Store(false) }
-func (d *Device) Connect(ctx context.Context) error {
-	if e := d.acquire(); e != nil {
-		return e
+
+// operationContext links all callbacks and I/O in an admitted operation to Close.
+func (d *Device) operationContext(parent context.Context) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(parent)
+	d.lifeMu.Lock()
+	if d.closed {
+		cancel()
+	} else {
+		d.cancel = cancel
+	}
+	d.lifeMu.Unlock()
+	return ctx, func() { cancel(); d.lifeMu.Lock(); d.cancel = nil; d.lifeMu.Unlock() }
+}
+func (d *Device) Connect(ctx context.Context) (err error) {
+	if err = d.acquire(); err != nil {
+		return err
 	}
 	defer d.release()
-	return d.connect(ctx)
+	ctx, cancel := d.operationContext(ctx)
+	defer cancel()
+	returned := false
+	defer func() {
+		if !returned {
+			_ = d.closeResources()
+		} else if err != nil {
+			err = joinCleanup(err, d.closeResources())
+		}
+	}()
+	d.retired.Store(false)
+	err = d.connect(ctx)
+	if err == nil {
+		err = ctx.Err()
+	}
+	returned = true
+	return
 }
 
 var errConnectionRefused = errors.New("connector: connection refused")
@@ -120,6 +170,12 @@ var errRSATooSmall = errors.New("connector: RSA modulus too small")
 var errUnsupportedCipher = errors.New("connector: unsupported cipher")
 
 func (d *Device) connect(parent context.Context) error {
+	if err := parent.Err(); err != nil {
+		return err
+	}
+	if d.retired.Load() {
+		return ErrNotConnected
+	}
 	if d.connected.Load() {
 		return parent.Err()
 	}
@@ -171,11 +227,16 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 			_ = d.log.event("connect_failed", "error", Command{}, "failed")
 		}
 	}()
+	cfg.Challenges = cloneInteractions(cfg.Challenges)
+	cfg.LegacySSHArguments = append([]string(nil), cfg.LegacySSHArguments...)
 	t, e := d.factory(ctx, cfg)
 	if e != nil {
+		if !nilValue(t) {
+			e = errors.Join(e, t.Close())
+		}
 		return fail("connection_failed", "connect", Command{}, e)
 	}
-	if t == nil {
+	if nilValue(t) {
 		return ErrConnection
 	}
 	d.transport = t
@@ -188,15 +249,22 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 	if _, ok := t.(syscall.Conn); ok {
 		opts = append(opts, expect.WithOSPolling())
 	}
-	d.session, e = expect.NewSession(owned, opts...)
+	session, e := expect.NewSession(owned, opts...)
 	if e != nil {
 		_ = d.closeResources()
 		return e
 	}
+	d.lifeMu.Lock()
+	if d.closed {
+		d.lifeMu.Unlock()
+		return errors.Join(ErrClosed, session.Close())
+	}
+	d.session = session
+	d.lifeMu.Unlock()
 	defer func() {
 		if err != nil {
 			if cleanup := d.closeResources(); cleanup != nil {
-				err = errors.Join(err, errCleanup)
+				err = errors.Join(err, errCleanup, cleanup)
 			}
 		}
 	}()
@@ -210,8 +278,18 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 	if e != nil {
 		return e
 	}
+	d.lifeMu.Lock()
+	if d.closed || ctx.Err() != nil {
+		d.lifeMu.Unlock()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return ErrClosed
+	}
 	d.prompt.Store(strings.TrimSpace(response.prompt))
 	d.connected.Store(true)
+	d.lifeMu.Unlock()
+	d.retired.Store(false)
 	d.privileged.Store(strings.Contains(response.prompt, "]"))
 	if d.profile.AfterLogin != nil {
 		d.metadata = d.profile.AfterLogin(response)
@@ -222,11 +300,14 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 			return fail("host_key_commit_failed", "login", Command{}, e)
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return d.log.event("login_complete", "info", Command{}, "ok")
 }
 func (d *Device) baseSecrets() []string {
 	var s []string
-	for _, v := range []string{d.config.Username, d.config.Password, d.config.EnablePassword} {
+	for _, v := range []string{d.config.Username, d.config.Password, d.config.EnablePassword, d.config.KeyPassphrase} {
 		if v != "" {
 			s = append(s, v)
 		}
@@ -244,36 +325,64 @@ func (d *Device) loginInteractions(secret string) []Interaction {
 		if d.config.Username == "" {
 			return "", ErrAuthentication
 		}
-		return d.config.Username + "\n", nil
+		return d.config.Username + d.config.LineEnding, nil
 	}}
 	pass := Interaction{Pattern: d.profile.PasswordPrompt, Limit: 1, Sensitive: true, Respond: func(context.Context, string) (string, error) {
 		if secret == "" {
 			return "", ErrAuthentication
 		}
-		return secret + "\n", nil
+		return secret + d.config.LineEnding, nil
 	}}
 	replies := []Interaction{hostkey}
 	replies = append(replies, d.profile.LoginInteractions...)
 	replies = append(replies, d.config.Challenges...)
+	if d.config.KeyPassphrase != "" {
+		replies = append(replies, Interaction{Pattern: regexp.MustCompile(`(?i)Enter passphrase for key[^\r\n]*:[ \t]*\z`), Reply: d.config.KeyPassphrase + d.config.LineEnding, Limit: 1, Sensitive: true})
+	}
 	return append(replies, user, pass)
 }
+
+// Close rejects new work and interrupts admitted I/O without waiting for callbacks.
+// A later Close can retry cleanup that previously failed.
 func (d *Device) Close() error {
-	if e := d.acquire(); e != nil {
-		return e
+	d.lifeMu.Lock()
+	d.closed = true
+	d.connected.Store(false)
+	if d.cancel != nil {
+		d.cancel()
 	}
-	defer d.release()
-	return d.closeResources()
+	session := d.session
+	d.lifeMu.Unlock()
+	var err error
+	if session != nil {
+		err = session.Close()
+	}
+	if d.lease.CompareAndSwap(false, true) {
+		defer d.release()
+		err = errors.Join(err, d.closeResources())
+	}
+	if err != nil {
+		return fail("cleanup_failed", "cleanup", Command{}, err)
+	}
+	return nil
 }
+
 func (d *Device) closeResources() error {
+	d.retired.Store(true)
 	d.connected.Store(false)
 	d.privileged.Store(false)
 	d.haState.Store("")
 	d.prompt.Store("")
 	clear(d.metadata)
 	var failure error
-	if d.session != nil {
-		failure = d.session.Close()
+	d.lifeMu.Lock()
+	session := d.session
+	d.lifeMu.Unlock()
+	if session != nil {
+		failure = session.Close()
+		d.lifeMu.Lock()
 		d.session = nil
+		d.lifeMu.Unlock()
 	}
 	if d.transport != nil {
 		var e error
@@ -291,13 +400,9 @@ func (d *Device) closeResources() error {
 				d.transport = nil
 			}
 		}
-		if failure == nil {
-			failure = e
-		}
+		failure = errors.Join(failure, e)
 	}
-	if e := d.log.finish(); failure == nil {
-		failure = e
-	}
+	failure = errors.Join(failure, d.log.finish())
 	return failure
 }
 func (d *Device) ExecuteCommand(ctx context.Context, c Command, opts ExecuteOptions) (Result, error) {
@@ -315,10 +420,13 @@ func (d *Device) ExecuteScript(ctx context.Context, script Script, opts ExecuteO
 		return Result{}, e
 	}
 	defer d.release()
+	ctx, cancel := d.operationContext(ctx)
+	defer cancel()
 	return d.execute(ctx, s, opts, nil)
 }
 
 type execution struct {
+	attempts     []Attempt
 	device       *Device
 	values       map[string]string
 	valuesMu     sync.Mutex
@@ -331,12 +439,12 @@ type hookExecutor struct {
 	scope     *callScope
 }
 
-func (x *hookExecutor) Get(key string) string {
+func (x *hookExecutor) Value(key string) string {
 	x.execution.valuesMu.Lock()
 	defer x.execution.valuesMu.Unlock()
 	return x.execution.values[key]
 }
-func (x *hookExecutor) Set(key, value string) {
+func (x *hookExecutor) SetValue(key, value string) {
 	x.execution.valuesMu.Lock()
 	defer x.execution.valuesMu.Unlock()
 	x.execution.values[key] = value
@@ -362,17 +470,12 @@ func (x *execution) hook(ctx context.Context, run func(Executor) error) (err err
 	return run(executor)
 }
 func (d *Device) execute(ctx context.Context, script Script, opts ExecuteOptions, strategy ConfigStrategy) (result Result, err error) {
-	if len(script.Commands) == 0 {
-		return result, ctx.Err()
-	}
-	if err = d.connect(ctx); err != nil {
-		return
-	}
-	x := &execution{device: d, values: make(map[string]string), limit: d.config.MaxScriptOutputBytes, strategy: strategy}
-	if opts.MaxOutputBytes > 0 {
-		x.limit = opts.MaxOutputBytes
-	}
+	returned := false
 	defer func() {
+		if !returned {
+			_ = d.closeResources()
+			return
+		}
 		if e := d.log.scope(d.baseSecrets(), true); err == nil && e != nil {
 			err = fail("log_error", "logging", Command{}, e)
 		}
@@ -384,16 +487,33 @@ func (d *Device) execute(ctx context.Context, script Script, opts ExecuteOptions
 			err = e
 		}
 		if err != nil {
-			_ = d.closeResources()
+			err = joinCleanup(err, d.closeResources())
 		}
 	}()
+	result, err = d.runScript(ctx, script, opts, strategy)
+	returned = true
+	return
+}
+func (d *Device) runScript(ctx context.Context, script Script, opts ExecuteOptions, strategy ConfigStrategy) (result Result, err error) {
+	if len(script.Commands) == 0 {
+		return result, ctx.Err()
+	}
+	if err = d.connect(ctx); err != nil {
+		return
+	}
+	x := &execution{device: d, values: make(map[string]string), limit: d.config.MaxScriptOutputBytes, strategy: strategy}
+	defer func() { result.attempts = append([]Attempt(nil), x.attempts...) }()
+	if opts.MaxOutputBytes > 0 {
+		x.limit = opts.MaxOutputBytes
+	}
+
 	if !opts.SkipPrivilege && d.profile.PrivilegeCommand != "" && !d.privileged.Load() {
 		secret := d.config.EnablePassword
 		if secret == "" {
 			secret = d.config.Password
 		}
 		ac, cancel := context.WithTimeout(ctx, d.config.LoginTimeout)
-		err = d.send(ac, d.profile.PrivilegeCommand+"\n", false)
+		err = d.send(ac, d.profile.PrivilegeCommand+d.config.LineEnding, false)
 		if err == nil {
 			var s StepResult
 			s, err = d.read(ac, Command{}, d.profile.PrivilegePrompt, d.loginInteractions(secret), true, false)
@@ -467,6 +587,15 @@ func (d *Device) execute(ctx context.Context, script Script, opts ExecuteOptions
 	return
 }
 func (x *execution) command(ctx context.Context, c Command) (step StepResult, err error) {
+	attempted := false
+	written := 0
+	var response StepResult
+	defer func() {
+		if attempted {
+			x.attempts = append(x.attempts, Attempt{command: c.clone(), response: response, written: written, complete: response.prompt != "", err: err})
+		}
+	}()
+
 	d := x.device
 	if err = ctx.Err(); err != nil {
 		return step, err
@@ -511,6 +640,9 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 	if c.Timeout != nil {
 		timeout = *c.Timeout
 	}
+	if c.Poll {
+		timeout = 0
+	}
 	cc := ctx
 	cancel := func() {}
 	if timeout > 0 {
@@ -529,12 +661,19 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 		}
 		prompt = regexp.MustCompile(`(?:\A|[\r\n])[ \t\x00]*` + regexp.QuoteMeta(literal) + `[ \t\x00]*[\r\n]*\z`)
 	}
-	if err = d.send(cc, c.Text+"\n", timeout == 0); err != nil {
+	attempted = true
+	if err = d.send(cc, c.Text+d.config.LineEnding, c.Poll); err != nil {
+		var progress *expect.WriteError
+		if errors.As(err, &progress) {
+			written = progress.Written
+		}
 		return step, writeFailure("command", c, err)
 	}
+	written = len(c.Text) + len(d.config.LineEnding)
 	replies := append(cloneInteractions(c.Interactions), d.profile.Interactions...)
-	replies = append(replies, Interaction{Pattern: d.profile.Pager, Response: d.profile.PagerResponse})
-	step, err = d.read(cc, c, prompt, replies, false, timeout == 0)
+	replies = append(replies, Interaction{Pattern: d.profile.Pager, Reply: d.profile.PagerResponse, Unlimited: true})
+	step, err = d.read(cc, c, prompt, replies, false, c.Poll)
+	response = step
 	step.duration = time.Since(started)
 	if err != nil {
 		return StepResult{}, err
@@ -596,6 +735,7 @@ func (d *Device) read(ctx context.Context, c Command, prompt *regexp.Regexp, rep
 		return step, ErrInvalid
 	}
 	var raw, body strings.Builder
+	defer func() { step.command = c.clone(); step.raw = raw.String(); step.output = body.String() }()
 	completed := false
 	appendSegment := func(r expect.Result, capture bool) error {
 		raw.WriteString(r.Before)
@@ -618,7 +758,7 @@ func (d *Device) read(ctx context.Context, c Command, prompt *regexp.Regexp, rep
 	}
 	var cases []expect.Case
 	add := func(p *regexp.Regexp, h expect.Handler) {
-		pattern, _ := expect.Compile(p.String())
+		pattern, _ := expect.FromRegexp(p)
 		cases = append(cases, expect.Case{Pattern: pattern, Handler: h})
 	}
 	if login {
@@ -652,10 +792,13 @@ func (d *Device) read(ctx context.Context, c Command, prompt *regexp.Regexp, rep
 				return expect.Return, e
 			}
 			counts[i]++
-			if reply.Limit > 0 && counts[i] > reply.Limit {
-				return expect.Return, ErrAuthentication
+			if !reply.Unlimited && counts[i] > max(1, reply.Limit) {
+				if login {
+					return expect.Return, ErrAuthentication
+				}
+				return expect.Return, ErrResponseLimit
 			}
-			answer := reply.Response
+			answer := reply.Reply
 			if reply.Respond != nil {
 				var e error
 				answer, e = reply.Respond(hctx, r.Match)
@@ -688,10 +831,18 @@ func (d *Device) read(ctx context.Context, c Command, prompt *regexp.Regexp, rep
 	options := []expect.ExpectOption{expect.WithTimeout(0), expect.WithDeclarationPriority(), expect.WithStreamingFallback(func(_ context.Context, _ *expect.Session, r expect.Result) (expect.Action, error) {
 		return expect.ContinueWithoutReset, appendSegment(r, true)
 	})}
+	var final expect.Result
 	if poll {
-		_, err = d.session.Poll(ctx, cases, options...)
+		final, err = d.session.Poll(ctx, cases, options...)
 	} else {
-		_, err = d.session.Expect(ctx, cases, options...)
+		final, err = d.session.Expect(ctx, cases, options...)
+	}
+	if err != nil && !completed && final.CaseIndex < 0 && final.Before != "" {
+		// The unmatched prefix has not passed a handler or streaming fallback.
+		remaining := max(0, int(d.config.MaxOutputBytes)-raw.Len())
+		prefix := final.Before[:min(len(final.Before), remaining)]
+		raw.WriteString(prefix)
+		body.WriteString(prefix)
 	}
 	if err != nil && !completed {
 		phase := map[bool]string{true: "login", false: "command"}[login]
@@ -701,6 +852,8 @@ func (d *Device) read(ctx context.Context, c Command, prompt *regexp.Regexp, rep
 		}
 		code := "transport_error"
 		switch {
+		case errors.Is(err, ErrResponseLimit):
+			code = "response_limit_exceeded"
 		case errors.Is(err, ErrAuthentication):
 			code = "authentication_error"
 		case errors.Is(err, ErrOutputLimit), errors.Is(err, expect.ErrBufferLimit):

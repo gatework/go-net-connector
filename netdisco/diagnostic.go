@@ -3,13 +3,14 @@ package netdisco
 import (
 	"context"
 	"errors"
+	"io"
+	"strings"
+	"syscall"
+
 	"github.com/gatework/go-net-connector/archive"
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/storage"
 	"github.com/gatework/go-net-connector/transfer"
-	"io"
-	"strings"
-	"syscall"
 )
 
 var knownTypes = words(`Net::Connector::Error Net::Connector::ConnectionError Net::Connector::AuthenticationError Net::Connector::LoginTimeout
@@ -116,7 +117,7 @@ func diagnose(e error, a Artifact) Diagnostic {
 				d.ErrorCode, d.ErrorType = "directory_sync_unsupported", "Net::Connector::Storage::AtomicFile::DirectorySyncUnsupported"
 			}
 		}
-		d.ArtifactState = se.Receipt.State
+		d.ArtifactState = string(se.Receipt.State)
 		d.ArtifactPhase = se.Receipt.Phase
 		d.UnderlyingType = trustedCauseType(se.Cause)
 	}

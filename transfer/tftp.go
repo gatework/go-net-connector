@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/internal/terminal"
 	"path"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/internal/terminal"
 )
 
 var ErrInvalid = errors.New("transfer: invalid options")
@@ -38,13 +39,13 @@ func (r Result) String() string {
 }
 func (r Result) GoString() string { return r.String() }
 func reply(pattern, response string) connector.Interaction {
-	return connector.Interaction{Pattern: regexp.MustCompile(pattern), Response: response}
+	return connector.Interaction{Pattern: regexp.MustCompile(pattern), Reply: response, Unlimited: true}
 }
 func TFTP(ctx context.Context, d *connector.Device, o TFTPOptions) (result Result, err error) {
 	if d == nil {
 		return result, ErrInvalid
 	}
-	vendor := d.Name()
+	vendor := d.ProfileName()
 	if e := Validate(vendor, d.Host(), o); e != nil {
 		return result, e
 	}

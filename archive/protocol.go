@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"regexp"
 	"time"
 )
@@ -82,7 +83,7 @@ func (p *Protocol) Send(ctx context.Context, request Request) error {
 		return ErrArchive
 	}
 	if e = writeAll(p.input, append(b, '\n')); e != nil {
-		return ErrArchive
+		return protocolFailure(ctx, e)
 	}
 	return ctx.Err()
 }
@@ -98,7 +99,7 @@ func (p *Protocol) readPhase(ctx context.Context, phase string) (Proof, error) {
 	defer stop()
 	line, e := p.reader.ReadSlice('\n')
 	if e != nil || len(line) > ControlLimit {
-		return Proof{}, ErrArchive
+		return Proof{}, protocolFailure(ctx, e)
 	}
 	if e = ctx.Err(); e != nil {
 		return Proof{}, e
@@ -138,7 +139,7 @@ func (p *Protocol) Receive(ctx context.Context, proof Proof, sink io.Writer) (Pr
 		n, e := io.ReadFull(p.reader, buffer[:size])
 		stop()
 		if e != nil {
-			return proof, errors.Join(ErrArchive, sinkError)
+			return proof, protocolFailure(ctx, errors.Join(e, sinkError))
 		}
 		digest.Write(buffer[:n])
 		remaining -= int64(n)
@@ -154,4 +155,18 @@ func (p *Protocol) Receive(ctx context.Context, proof Proof, sink io.Writer) (Pr
 	}
 	proof.Verified = true
 	return proof, sinkError
+}
+
+// Error reports safe archive metadata while preserving all underlying causes.
+type Error struct{ cause error }
+
+func (e *Error) Error() string    { return "archive: operation failed" }
+func (e *Error) GoString() string { return e.Error() }
+func (e *Error) Unwrap() error    { return e.cause }
+func protocolFailure(ctx context.Context, cause error) error {
+	var deadline error
+	if errors.Is(cause, os.ErrDeadlineExceeded) {
+		deadline = context.DeadlineExceeded
+	}
+	return &Error{cause: errors.Join(ErrArchive, ctx.Err(), deadline, cause)}
 }

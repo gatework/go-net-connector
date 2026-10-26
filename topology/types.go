@@ -4,6 +4,7 @@ package topology
 import (
 	"errors"
 	"fmt"
+
 	"github.com/gatework/go-net-connector/connector"
 )
 

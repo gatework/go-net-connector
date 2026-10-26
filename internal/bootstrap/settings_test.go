@@ -2,9 +2,10 @@ package bootstrap
 
 import (
 	"context"
+	"testing"
+
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/netdisco"
-	"testing"
 )
 
 func TestPolicyDoesNotResolveCredentials(t *testing.T) {

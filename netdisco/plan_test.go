@@ -2,11 +2,12 @@ package netdisco
 
 import (
 	"context"
+	"testing"
+
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/transfer"
 	"github.com/gatework/go-net-connector/vendors"
-	"testing"
 )
 
 func TestPlanRulesSamplingAndDuplicates(t *testing.T) {

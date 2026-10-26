@@ -4,11 +4,6 @@ import (
 	"bufio"
 	"context"
 	"errors"
-	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/inventory"
-	"github.com/gatework/go-net-connector/storage"
-	"github.com/gatework/go-net-connector/transfer"
-	"github.com/gatework/go-net-connector/vendors"
 	"io"
 	"net"
 	"os"
@@ -16,6 +11,12 @@ import (
 	"regexp"
 	"testing"
 	"time"
+
+	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/inventory"
+	"github.com/gatework/go-net-connector/storage"
+	"github.com/gatework/go-net-connector/transfer"
+	"github.com/gatework/go-net-connector/vendors"
 )
 
 func TestFleetRetainsArtifactAndIsolatesCallback(t *testing.T) {
