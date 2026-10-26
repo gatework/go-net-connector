@@ -256,8 +256,7 @@ func decodeQuoted(value string, split bool) (string, error) {
 	var word strings.Builder
 	var quote rune
 	started, escape := false, false
-	runes := []rune(value)
-	for _, r := range runes {
+	for _, r := range value {
 		if escape {
 			if quote == '"' && r != '"' && r != '\\' && r != '$' && r != '`' && r != '\n' {
 				word.WriteRune('\\')
