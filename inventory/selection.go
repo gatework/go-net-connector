@@ -42,7 +42,7 @@ func NewAddressSet(values []string) (AddressSet, error) {
 			}
 			prefix = prefix.Masked()
 			first := prefix.Addr()
-			last := first
+			var last netip.Addr
 			if first.Is4() {
 				b := first.As4()
 				for i := prefix.Bits(); i < 32; i++ {

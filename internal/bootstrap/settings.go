@@ -328,6 +328,9 @@ func (s *Services) Inventory(ctx context.Context, mode string) (netdisco.CacheRe
 			}
 			dsn = append(dsn, "password="+pgQuote(password))
 			source, e = netdisco.NewPostgres(netdisco.PostgresOptions{Connection: strings.Join(dsn, " "), Query: query, Parameters: params, Limits: limits})
+			if e != nil {
+				return netdisco.CacheResult{}, e
+			}
 		}
 	default:
 		return netdisco.CacheResult{}, config.ErrInvalid

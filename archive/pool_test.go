@@ -107,10 +107,8 @@ func TestPoolLocalBatchReservationAndCollision(t *testing.T) {
 	root, _ = filepath.EvalSymlinks(root)
 	base := "2026-10-26_12-34-56"
 	report := filepath.Join(t.TempDir(), base)
-	for i, want := range []string{base, base + "_01", base + "_02"} {
-		if i == 1 {
-			// A separate batch that uses the same report name must reserve a suffix.
-		}
+	// Separate batches sharing a report name must reserve distinct suffixes.
+	for _, want := range []string{base, base + "_01", base + "_02"} {
 		p, err := NewPool(PoolOptions{Root: root, Directory: report, Parallel: 5})
 		if err != nil {
 			t.Fatal(err)
