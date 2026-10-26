@@ -1,0 +1,551 @@
+{
+  "name": "expect-ruby",
+  "head": "fa4416dca937d7c06ac11a433b68195c71a1e6da",
+  "status": " M expect-pty.gemspec\n",
+  "files": [
+    {
+      "path": ".github/ISSUE_TEMPLATE/bug_report.md",
+      "sha256": "3448117126254e234e7d96f3184e7d1cd2e0a2accbd46f0a245d9cf32b28188f"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/feature_request.md",
+      "sha256": "6b6d63ebb807a4448111393a98bebc500984494590223b49b77524adf7c93d4f"
+    },
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "sha256": "306556a760a9ad029a0543d32e24aa5f1199657a5da553823c27198aef2b38f5"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "a680dbca302fe0c9370d67f3b83514bced1a01f1f880adf70cf37a25ba2a6272"
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "sha256": "06387d7a12816cebdcb4e6b633fead2577afd9d175e7a98efcdd48b291940581"
+    },
+    {
+      "path": ".gitignore",
+      "sha256": "f2c3ae6c308e172a7b2a250f9533a080d51dfd3d8abb55019f7f69f46eb3e519"
+    },
+    {
+      "path": ".rubocop.yml",
+      "sha256": "ed1ca588f2f69fff40df66be5f04ab1034ee43ecca60261e473dd64f36850308"
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "67a90567ef24a99f75ea013839046dc5cb645fdef72ae4cf0f9c102a3548108a"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "162aac91957ce549a48b619da1d9d893ded8f7f8da77e6a537c58330cadffe15"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "sha256": "a20fc14c9b5b188e55c6e0a8409313ab1b6e7114bcda87d2faba273965322e6a"
+    },
+    {
+      "path": "Gemfile",
+      "sha256": "e5e1908ec722ce8def8a840252cc6dd0aece35a638fde2afcee1438ed2b8ef50"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "b806b2329563d2ad9c61d4a6bddbc9646efe743636729dea5e5f3bf2926489b6"
+    },
+    {
+      "path": "README.md",
+      "sha256": "166287230cc6a271e93f265900026baf675eae500e0d4c9ae60b6af8ab834466"
+    },
+    {
+      "path": "README.zh-CN.md",
+      "sha256": "2e867354f200b11156bbc994c95e10ff3eff5f67b561f3b2ee5e1d552d49e7c8"
+    },
+    {
+      "path": "Rakefile",
+      "sha256": "6c8309bacf4384d012e6197ef3073c07a1bd5b6a55d193d7bd195567a0f8b387"
+    },
+    {
+      "path": "benchmark/dispatch.rb",
+      "sha256": "1c33a951c843ab96a76a2d5c2e5094fb17d7a4d891741c3b20fd0b270e1b3f6e"
+    },
+    {
+      "path": "benchmark/logging.rb",
+      "sha256": "a7ae0d68b18417fc21f191e58c61fdc9226f91f6a901702d11aa8d7f3e4bb5c2"
+    },
+    {
+      "path": "benchmark/matching.rb",
+      "sha256": "f7246af8c5b63383fb2082108379dda2f5804ec73e8fb346c56cdb9a74188448"
+    },
+    {
+      "path": "benchmark/redactor.rb",
+      "sha256": "f2af8701d8479d783cf13156b8e1ec86f4bf3ee9c409a359fd93ccb945fb5c6f"
+    },
+    {
+      "path": "benchmark/relay.rb",
+      "sha256": "77fae81374ea8283fc872a021ff9e36efd8a368d9f8845e85b49e19b93043c7b"
+    },
+    {
+      "path": "benchmark/scaling.rb",
+      "sha256": "9eb3df9504bcb32cf0c8d2063e7cb50cc08f532c4c892efcb5472b8ef3a4a4ec"
+    },
+    {
+      "path": "benchmark/send_slow.rb",
+      "sha256": "c80813726624752830ddf38543dcb46da8885195c0444dd859dbc682cd4ef6e4"
+    },
+    {
+      "path": "benchmark/support.rb",
+      "sha256": "86060649d227352075c3f7d7d8f598b829ffc1b17b1a522a37353116a6dec32d"
+    },
+    {
+      "path": "docs/API.md",
+      "sha256": "65b81016f7d2d2e281bae5e014f7a86758219a4affdf03e6668a4087000fb825"
+    },
+    {
+      "path": "docs/COMPATIBILITY.md",
+      "sha256": "def4b78ff1cd89d6fd0462a775bd315196d3e6b0b78e18dc6758224cae195dfd"
+    },
+    {
+      "path": "docs/INTERNAL_CONTRACTS.md",
+      "sha256": "52334d2c520968e9c34d550e01e21b95852426f6bb0eae2c53fbdaddb88d5b65"
+    },
+    {
+      "path": "docs/MIGRATION.md",
+      "sha256": "1164efc9c65617e752aa19482b3a7c738914ea581cc3a47b2cb2ce32a0db4766"
+    },
+    {
+      "path": "docs/PERFORMANCE.md",
+      "sha256": "d4e2d7af01c438a12a2e42a48adda8a92e817792703ff2eccadb8cec7908d93d"
+    },
+    {
+      "path": "docs/RELEASING.md",
+      "sha256": "77db597db8e23f3a73ffeb240a85793b3e6100a10c6a52ce7af9ec864f026ae8"
+    },
+    {
+      "path": "docs/VERIFICATION.md",
+      "sha256": "9207e86101f9d722bf4843ab389ae4f06a9c0d476fda5e5a3d50848f346190df"
+    },
+    {
+      "path": "docs/review-2026-10-21.md",
+      "sha256": "ebdd584dd8114d6b411a01682fd0146821beb6b82f7068ee3248d6d2c362bf5b"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-10-18-expect-pty-hardening.md",
+      "sha256": "b8c4add13966791ffa84956110970810d3e88133fab68f472153b1c3f2b72f5c"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-10-18-expect-pty-hardening-design.md",
+      "sha256": "281ada3cbd816f6344d64a434a0fed24e495f2099cc0c6f72c7f30b3919a01e4"
+    },
+    {
+      "path": "examples/auto_response.rb",
+      "sha256": "b5c5a6a90122c58198a1719b3c30460b1770cef2548c8e6a15ad020bfeaae179"
+    },
+    {
+      "path": "examples/dialogue.rb",
+      "sha256": "3440388db3931f9135e8b807de5f67f62d484721d1936e43628fb613fdb914ec"
+    },
+    {
+      "path": "examples/kibitz/README.md",
+      "sha256": "084da2442bd68a9da56547b0738b6bbdb823e4cac0f81a4209af72dbfdab90d2"
+    },
+    {
+      "path": "examples/kibitz/kibitz.rb",
+      "sha256": "48f1068f6db23f52162bfb662b7971cbebd13c85907b5125ea5fea9e421b1c58"
+    },
+    {
+      "path": "examples/kibitz/test_kibitz.rb",
+      "sha256": "0433f4f989fe091e7e658cc7e51c79cf878b7fbc7811261ded06a549816a77f7"
+    },
+    {
+      "path": "examples/ssh_auto.rb",
+      "sha256": "8053d49435046086c98845a785a4e79d833c7c098ce4ef6a8213f79e11ef6eef"
+    },
+    {
+      "path": "examples/ssh_interact.rb",
+      "sha256": "a1262de01320365b4c2de6676d4a602392c271ccedb6500be4bc763bbb027b4d"
+    },
+    {
+      "path": "examples/ssh_login.rb",
+      "sha256": "7f88c2cbdf4bd89f990531f0d6f131368af77ee36d03c009239776ba9beb6454"
+    },
+    {
+      "path": "examples/support/ssh.rb",
+      "sha256": "9968c9cf668e645e906f138f7418e14878c580f23bfaad1f7e66459e8d7cd01a"
+    },
+    {
+      "path": "expect-pty.gemspec",
+      "sha256": "cf62a266416ad368bf0c240f39b8cc3c523f4ee666c86d972fe1f58fca5e93ab"
+    },
+    {
+      "path": "lib/expect/child_process.rb",
+      "sha256": "d3f68bc2343a85a497b66d23ccdf367fb2a6a7206c061d6dd9e3256c5485f191"
+    },
+    {
+      "path": "lib/expect/cleanup.rb",
+      "sha256": "47dcb9a51232a469c766aace28790651afce93baac513c2944390f3b0b9249c7"
+    },
+    {
+      "path": "lib/expect/interaction.rb",
+      "sha256": "0b9cf707943e1e04c8c9de08af5af6bf3361ab2a58915d08c653d97b7a5e1eb7"
+    },
+    {
+      "path": "lib/expect/literal_prefix.rb",
+      "sha256": "92148b40634d39ec057ba2bb55983c1aa016ae6b3bf463d83995d8186f300216"
+    },
+    {
+      "path": "lib/expect/literal_scan.rb",
+      "sha256": "90fd7078ec699a52b150e45743204ddc59c971c28fa86a980a3afce19fa16f1e"
+    },
+    {
+      "path": "lib/expect/logging.rb",
+      "sha256": "4b63047679b4d61546e7bcebd9f7d3ffaffc7c7e483dc69ec67fafb10e869699"
+    },
+    {
+      "path": "lib/expect/matcher.rb",
+      "sha256": "cd83503eb608caa6bdf1c18ce175d40b8716803f7c11d83306b4a2ef3c9e03b6"
+    },
+    {
+      "path": "lib/expect/pattern.rb",
+      "sha256": "c1923531435651678259689b2252280a33ef1b216fcf5027740a9e44b4349b5c"
+    },
+    {
+      "path": "lib/expect/pattern_list.rb",
+      "sha256": "aec634ab1c01f652218307063619b48abf518276b75a69ba3a404510779d7271"
+    },
+    {
+      "path": "lib/expect/pty.rb",
+      "sha256": "d07f4f0dd44e13e0e76d174d146f18c52083ae5b1f295c20d1c98265ff6292c5"
+    },
+    {
+      "path": "lib/expect/redactor.rb",
+      "sha256": "96466071226f270140fd4a9eec5330244226b97a9412ba1c24083f77d5c07285"
+    },
+    {
+      "path": "lib/expect/relay.rb",
+      "sha256": "af8346d2a7b23927446f2dc6cfbe72c29ea5bbe10f453b93c0fc1047eed618fd"
+    },
+    {
+      "path": "lib/expect/relay/writer.rb",
+      "sha256": "78196fd319d71b20b84375cdeb5b59108b5dc1d9a590b018e031c9f297d1f3ee"
+    },
+    {
+      "path": "lib/expect/resource_owner.rb",
+      "sha256": "e69ed44d22623c8acb0200f24bf6601d3a8bb0994ad2ee406cafcf782bee0adc"
+    },
+    {
+      "path": "lib/expect/responder.rb",
+      "sha256": "c19b32db9056020b742e581c1e56892e258f952657d390a7f690db60c1765665"
+    },
+    {
+      "path": "lib/expect/result.rb",
+      "sha256": "c69f350977852993cc472698502d77277b03a6bb6c6c0c11d615d092bed15eb2"
+    },
+    {
+      "path": "lib/expect/session.rb",
+      "sha256": "262d9b8569d0f2ee6336ef816109005fdab3d1b99494e8a6d9538d0fa2938df3"
+    },
+    {
+      "path": "lib/expect/session_factory.rb",
+      "sha256": "0f038bb6873c9ff1ed9c83be250ed6037e8fb0dbb9d0a3e6dd1c85e9276a9ebf"
+    },
+    {
+      "path": "lib/expect/version.rb",
+      "sha256": "54c0f1ba3368aa4b3cd32723ed1d8d9331f0896b1b4a26569762edd2ecf1f377"
+    },
+    {
+      "path": "script/check_api.rb",
+      "sha256": "162557e31afba2bc8eae892d9a2172fb785d39284ff1127c99ea31d980ff23d0"
+    },
+    {
+      "path": "script/ci",
+      "sha256": "9d00d5af584871179f2891097a54e7bf93d999d86635428acd09d14c86c316aa"
+    },
+    {
+      "path": "script/release.rb",
+      "sha256": "6b5600a279e2833c366063bf560fa45fb7d09bfe695ccc0409cb5b16a3f9a910"
+    },
+    {
+      "path": "sig/expect.rbs",
+      "sha256": "c0b347b47e60eac0aa906e146e42a92de79fa8b3d6ed2f091259f3bb914b8882"
+    },
+    {
+      "path": "test/api_check_test.rb",
+      "sha256": "34253e16e161906821866ef92f44c2b74a6fe3cdf419a50e1348fb25b9985763"
+    },
+    {
+      "path": "test/buffer_accounting_test.rb",
+      "sha256": "f464c03a80b78fe6ebcf7ad2c39f7ee328d3da193c581b36359667682b58a2a0"
+    },
+    {
+      "path": "test/buffer_handoff_test.rb",
+      "sha256": "36e474f38ab70cb24f2dfad8b507000b9ba2d493b065feaad613892118b1d6cf"
+    },
+    {
+      "path": "test/buffer_retention_test.rb",
+      "sha256": "a2ea856ce28d22eb2ecf48406403cd211a8f4fa695c827378f7879a4376f2321"
+    },
+    {
+      "path": "test/child_process_test.rb",
+      "sha256": "6f91c56e4d2c0bb0d2985f6fa63f7cc32e3b55b4999b55864163d97f9de387f9"
+    },
+    {
+      "path": "test/cleanup_priority_test.rb",
+      "sha256": "c0b9b820ca206c2c704b3604b547b6c1ef421f1509fc8fd5d0ea94ebd2feae20"
+    },
+    {
+      "path": "test/cleanup_test.rb",
+      "sha256": "07c629ba999fe23036cda102b8c63b880fb9c24a963ebd7b40d40e852476b8de"
+    },
+    {
+      "path": "test/deadline_test.rb",
+      "sha256": "c6c5de0faa1c6e7d196f4853c6f429969dde966d34e42fa6d9ac095fe4944e3b"
+    },
+    {
+      "path": "test/diagnostics_test.rb",
+      "sha256": "b74f833fb5e6f8d273f8f195fef938a4b3056c5df331a456316fdfb0e73a90da"
+    },
+    {
+      "path": "test/edge_case_test.rb",
+      "sha256": "20c5fd38700523215534ccb34e0efdee1fefd1e8e8d90ced0f5df1d746e01ce5"
+    },
+    {
+      "path": "test/entrypoint_test.rb",
+      "sha256": "e722ce9f94dea0a2f71418cc56438e7330451d8e8949eaae98b0e08aabdda0cb"
+    },
+    {
+      "path": "test/fixtures/ssh_scripts/01_identity.sh",
+      "sha256": "1cc2b6106a074b1989b686f387da611354d2a682de54b8cba745a75d9fb954b6"
+    },
+    {
+      "path": "test/fixtures/ssh_scripts/02_output.sh",
+      "sha256": "93c8d25890fa88b75a983a754cfdd9b3b3509796d1f74660778ee194793cd5eb"
+    },
+    {
+      "path": "test/fixtures/ssh_scripts/03_delayed.sh",
+      "sha256": "f6c6ade73f86f77300b0875b1fee10a0d11c5b335030636358826d613db04498"
+    },
+    {
+      "path": "test/fixtures/ssh_scripts/04_failure.sh",
+      "sha256": "ff55cce415674df634f632de9d3641527e090d61ce71d04ca4abacab539bc2b5"
+    },
+    {
+      "path": "test/fixtures/ssh_scripts/05_recovery.sh",
+      "sha256": "faf56acd0748c0327a8798df0594d36d864808a927e85dfcd534cd9d50f2b1ea"
+    },
+    {
+      "path": "test/graceful_factory_cleanup_test.rb",
+      "sha256": "8fcc28af26fcf0385770be7627c5163ce5876e6fcece2dd1d3ddda8de6eecb51"
+    },
+    {
+      "path": "test/initialization_failure_test.rb",
+      "sha256": "c536ff64e2df1c4d904787a5f409dba42b52f014fa171b2ee9ade36f0b0c768c"
+    },
+    {
+      "path": "test/integration/README.md",
+      "sha256": "e291bab7407830495ae9bfd42514341ad34d929e3a492a5e7e42b193855e041f"
+    },
+    {
+      "path": "test/integration/ssh_scripts.rb",
+      "sha256": "1e001cd014bf9b490faaa602dd40bc2b33cf3bd5d7f8871c8899847afa9f87e3"
+    },
+    {
+      "path": "test/interact_cleanup_test.rb",
+      "sha256": "f7b57a24ed3bbf7645afe7a46eeb1cc5473efbf10ea8165a1db88673ce617e49"
+    },
+    {
+      "path": "test/interact_test.rb",
+      "sha256": "234d5a5c1ee28489b94454e83cc7c29c0a5904bae5e3bcbb6b35ed91a8d3a7cb"
+    },
+    {
+      "path": "test/interconnect_test.rb",
+      "sha256": "408c7f160b9044d6a2db7cdf0a1c2bc2c0f50e0c2cb10ce17530d1efa6c08f4c"
+    },
+    {
+      "path": "test/interface_contract_test.rb",
+      "sha256": "0912cb97110b41cff05445ae6bdfbe87d817258d9f723052354ea719d13599ce"
+    },
+    {
+      "path": "test/io_test.rb",
+      "sha256": "6a7eb38271feea4c17ca0b9f028bb45b13dcbfe6a4a83e10702e9e3ce782b733"
+    },
+    {
+      "path": "test/kibitz_test.rb",
+      "sha256": "2484d882faea75ce33fd7ba903c9a60db60bccb413efa4324b5e4f0a82cae52d"
+    },
+    {
+      "path": "test/lifecycle_contract_test.rb",
+      "sha256": "a476ef8be910879328f1ec358a3164e29810f27f1589ff202a0b0df527795d80"
+    },
+    {
+      "path": "test/literal_scan_test.rb",
+      "sha256": "46263552c90283d2e6242e484eea0a2af1599e3a02fb24c73b0c2305c608ffb2"
+    },
+    {
+      "path": "test/matching_progress_test.rb",
+      "sha256": "dce35d63c1dcec6bbd48823ecb7651c2b9e387cd29a2a52e844cf7d5b006d5d0"
+    },
+    {
+      "path": "test/matching_test.rb",
+      "sha256": "07b9693adf9574a7d16bbf581ee0ec4c05d599118fc724d70c527fe0d6b7e7d2"
+    },
+    {
+      "path": "test/modernization_test.rb",
+      "sha256": "5e768127e2bf9dec3e8b08dcce94d0aeb944914829b277128944f9fa086031cf"
+    },
+    {
+      "path": "test/multi_session_test.rb",
+      "sha256": "2586d99bc893075a6d07b9b8d92563138c4ad12b476f5b763915daa3009b39c9"
+    },
+    {
+      "path": "test/ownership_sequence_test.rb",
+      "sha256": "a20759317ec899412f7fa450fd8c7ffe980f6bb3e41f869ffa9988535a45ead0"
+    },
+    {
+      "path": "test/pattern_compilation_test.rb",
+      "sha256": "17a94837d24117e9ea132edbb9e7889437fe9e598a3f0e9646e65136f2e49e7e"
+    },
+    {
+      "path": "test/pattern_offset_test.rb",
+      "sha256": "edf65d733899e504e1ea1642c48553b664a471e570c3f6c88bcb5c505b0f7664"
+    },
+    {
+      "path": "test/process_interruption_test.rb",
+      "sha256": "4eb732e4b177c6f60eb205da221f6831b62d373127c4f170c0c685557cab204c"
+    },
+    {
+      "path": "test/process_test.rb",
+      "sha256": "45a8b56c6d1c969583aeb1390ad80ddc3fe019d8e5eada3e24cdd5e9d2e5bc69"
+    },
+    {
+      "path": "test/redactor_test.rb",
+      "sha256": "f1ae3cae0bbd7e41accf07b3a7158e93c0c59b37b36f487221bf3d00b41057eb"
+    },
+    {
+      "path": "test/relay_history_test.rb",
+      "sha256": "e771b2c2c932dd9c739e8c8d3dc25b62df8ce55a74b309eb728ad4b7e50f14d1"
+    },
+    {
+      "path": "test/relay_identity_test.rb",
+      "sha256": "b6651defd5fe5ab973c8c8cbee40073e18cb2c288679ca5419973cf26bd5da17"
+    },
+    {
+      "path": "test/relay_literal_scan_test.rb",
+      "sha256": "cd1a5de20eaddd2d3147fc7e730745f4ef4d3f4d60b2dba48c0e4edf9a9ad5db"
+    },
+    {
+      "path": "test/relay_recovery_test.rb",
+      "sha256": "c05c407ddf94ce01c400213ed023ec0e0778d57295d21d36d984b977891b4d18"
+    },
+    {
+      "path": "test/relay_reentrancy_test.rb",
+      "sha256": "637f0db1909ef81fb99108153c42167b1ba5bfc9dabf5b5cbe12e3c42c1e4c9f"
+    },
+    {
+      "path": "test/relay_utf8_history_test.rb",
+      "sha256": "9d0071934ef74ac77c08e66f368fed53bbf170543b1b44c194450ab519442fa7"
+    },
+    {
+      "path": "test/release_test.rb",
+      "sha256": "21cdf7f81c2347e02553deea00637c6abb8dd81382a212cfdf2a259ea611bb45"
+    },
+    {
+      "path": "test/resource_acquisition_test.rb",
+      "sha256": "1c065a1bd303bea30e5e6a676751aedca6a7667cb3040e15253a4fe6993fe8d3"
+    },
+    {
+      "path": "test/responder_test.rb",
+      "sha256": "20429dc5e213d814c4fd589109f8d541ddf9a403ffcb93538ebcaa465f116a16"
+    },
+    {
+      "path": "test/result_inspection_test.rb",
+      "sha256": "48e9783b1b7821269be1000a897989bc4781e7349a218377ffea289dc6dbfbe2"
+    },
+    {
+      "path": "test/ruby_api_test.rb",
+      "sha256": "f00219c67d7cc2ffa8a80b5a7fe18a927393df80fb562135c0ba9a293211e3d9"
+    },
+    {
+      "path": "test/scan_reuse_test.rb",
+      "sha256": "6d32c8bf6ea8cccf7da83afe0a621444a3d959a88077fec753a9f2f65656ec0d"
+    },
+    {
+      "path": "test/script_logging_test.rb",
+      "sha256": "629218de1232c2a8b8d146241c9700eb75a5ede72f5b864b55d7fd07ffc2eda3"
+    },
+    {
+      "path": "test/search_window_test.rb",
+      "sha256": "87f032f4044af93e84753d312308fe59660a8df327cbdc713df7ae0db5bf17b6"
+    },
+    {
+      "path": "test/session_factory_test.rb",
+      "sha256": "dc7414e4e796066e2f6e7490b6ad6394ce0061085242632b38914f7cb689cae9"
+    },
+    {
+      "path": "test/session_identity_test.rb",
+      "sha256": "a166d8681bc4745f583f3c153fe1fa6297178ae87bdee7882f039c912bc800d1"
+    },
+    {
+      "path": "test/session_options_test.rb",
+      "sha256": "ea858854f920fb61806855eb8a31682c91a70fa9f2ac96322d3f565710736129"
+    },
+    {
+      "path": "test/soft_close_failure_test.rb",
+      "sha256": "9b659b282e09a3aab70e99f61b6294c6041596d8ab244936b49e44feb218757b"
+    },
+    {
+      "path": "test/spawn_error_test.rb",
+      "sha256": "021632d4f949a43ee1eb2a56d30da9a0a6e42c01b90da2874446c8d0c1c34582"
+    },
+    {
+      "path": "test/spawn_safety_test.rb",
+      "sha256": "afbe3e0f48616adf40d14d3e83087a1d7069944c3b9b73ed5f50c2a366e1fb43"
+    },
+    {
+      "path": "test/ssh_example_test.rb",
+      "sha256": "a9ea3b470d05c6ccc2c614ccb30c618481260a148c689138bae5836518783f45"
+    },
+    {
+      "path": "test/stream_contract_test.rb",
+      "sha256": "b8efc8a1a5c953cf4fd7146eac94ca44b90ae563196011403b97e7618b6e9a1f"
+    },
+    {
+      "path": "test/support/interact_probe.rb",
+      "sha256": "c1cace7584b024855d38ba1e19e3aff826285253fe5959fbd6430b4958475023"
+    },
+    {
+      "path": "test/support/kibitz_probe.rb",
+      "sha256": "ac7cfaa050caa70997d1951ebcc843332bf40764fa66cb4c1732e662cb8c14b8"
+    },
+    {
+      "path": "test/support/script_probe.rb",
+      "sha256": "009db45e7be7513556c1d4ab2a413e62ee36f270077cd0bb7f5b71704e28df3a"
+    },
+    {
+      "path": "test/support/terminal_probe.rb",
+      "sha256": "6df0af01e554190754cee772caf1f7f9d61127ab426044d3916324cf3b27f505"
+    },
+    {
+      "path": "test/terminal_test.rb",
+      "sha256": "9ba1e8f235555cee05aac8917dfcff31830f28da746c999c7fd61aed681500c2"
+    },
+    {
+      "path": "test/test_helper.rb",
+      "sha256": "643ef8a9e15147bc474f19b4a99ea71cab70d93244b7a87ee668d016972cff2f"
+    },
+    {
+      "path": "test/time_validation_test.rb",
+      "sha256": "d0edb83e746dec35e69bca29cd667aadab467d8088a9f846e2d7c72781abc3d4"
+    },
+    {
+      "path": "test/timeout_test.rb",
+      "sha256": "6a4993453d648eba20081ef06aabdb7c1b042ed8d21a72a9747d757f6d90173a"
+    },
+    {
+      "path": "test/wait_polling_test.rb",
+      "sha256": "4c9f5ca1a190c1872b0c2303096f5d4d93c0f94549c8cb2ce053cfddc67db664"
+    },
+    {
+      "path": "test/write_contract_test.rb",
+      "sha256": "ebd64ecfd3e9ac811e8c7dbbb51633a0b35885a5cfc1a2f865a9ae3dbe124d4f"
+    }
+  ]
+}

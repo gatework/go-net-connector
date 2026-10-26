@@ -1,0 +1,23 @@
+go version go1.27.2 linux/arm64
+ok  	github.com/gatework/go-net-connector/archive	1.596s
+?   	github.com/gatework/go-net-connector/cmd/net-backup	[no test files]
+?   	github.com/gatework/go-net-connector/cmd/net-backup-batch	[no test files]
+?   	github.com/gatework/go-net-connector/cmd/net-backup-tftp	[no test files]
+?   	github.com/gatework/go-net-connector/cmd/net-connector-archive	[no test files]
+?   	github.com/gatework/go-net-connector/cmd/net-topology	[no test files]
+ok  	github.com/gatework/go-net-connector/config	1.306s
+ok  	github.com/gatework/go-net-connector/connector	1.141s
+ok  	github.com/gatework/go-net-connector/internal/bootstrap	1.036s
+ok  	github.com/gatework/go-net-connector/internal/cli	1.477s
+ok  	github.com/gatework/go-net-connector/internal/terminal	1.011s
+ok  	github.com/gatework/go-net-connector/inventory	1.006s
+ok  	github.com/gatework/go-net-connector/netdisco	1.235s
+ok  	github.com/gatework/go-net-connector/parallel	1.035s
+ok  	github.com/gatework/go-net-connector/storage	1.020s
+ok  	github.com/gatework/go-net-connector/textfsm	2.912s
+ok  	github.com/gatework/go-net-connector/topology	2.301s
+ok  	github.com/gatework/go-net-connector/transfer	1.031s
+ok  	github.com/gatework/go-net-connector/vendors	1.107s
+ok  	github.com/gatework/go-expect	2.181s
+?   	github.com/gatework/go-expect/examples/dialogue	[no test files]
+ok  	github.com/gatework/go-expect/expecttest	1.008s
