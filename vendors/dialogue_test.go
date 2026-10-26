@@ -16,7 +16,7 @@ import (
 type exchange struct{ send, receive string }
 
 // Fixtures reproduce the frozen Ruby tests against a full connector session.
-func dialogue(t *testing.T, name, login string, events []exchange) (*connector.Device, func()) {
+func dialogue(t *testing.T, name, login string, events []exchange, configs ...connector.ConnectionConfig) (*connector.Device, func()) {
 	t.Helper()
 	p, e := Profile(name)
 	if e != nil {
@@ -51,7 +51,12 @@ func dialogue(t *testing.T, name, login string, events []exchange) (*connector.D
 		}()
 		return a, nil
 	}
-	d, e := connector.New(p, connector.ConnectionConfig{Host: "fixture", LoginTimeout: time.Second, CommandTimeout: time.Second}, connector.WithTransportFactory(factory))
+	cfg := connector.ConnectionConfig{}
+	if len(configs) > 0 {
+		cfg = configs[0]
+	}
+	cfg.Host, cfg.LoginTimeout, cfg.CommandTimeout = "fixture", time.Second, time.Second
+	d, e := connector.New(p, cfg, connector.WithTransportFactory(factory))
 	if e != nil {
 		t.Fatal(e)
 	}

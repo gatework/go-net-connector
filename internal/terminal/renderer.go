@@ -9,12 +9,17 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/gatework/go-net-connector/internal/textcodec"
 )
 
 var ErrLimit = errors.New("terminal: line or escape sequence exceeds limit")
 var ErrEncoding = errors.New("terminal: invalid UTF-8")
 
 type Renderer struct {
+	// Encoding selects decoding after a complete terminal line is assembled.
+	// Empty preserves the original UTF-8 behavior.
+	Encoding      string
 	target        io.Writer
 	line          []byte
 	cursor, limit int
@@ -27,8 +32,14 @@ func New(w io.Writer, limit int, strict bool) *Renderer {
 	return &Renderer{target: w, limit: limit, strict: strict}
 }
 func Render(input []byte, strict bool) (string, error) {
+	return RenderEncoded(input, strict, "")
+}
+
+// RenderEncoded applies terminal byte edits before converting visible lines.
+func RenderEncoded(input []byte, strict bool, encoding string) (string, error) {
 	var b strings.Builder
 	r := New(&b, 32<<20, strict)
+	r.Encoding = encoding
 	if _, e := r.Write(input); e != nil {
 		return "", e
 	}
@@ -161,6 +172,14 @@ func (r *Renderer) escape(b byte) error {
 }
 func (r *Renderer) emit(newline bool) error {
 	line := bytes.TrimRight(r.line, " \t")
+	if r.Encoding != "" && r.Encoding != "utf-8" {
+		text, _, err := textcodec.Decode(string(line), r.Encoding)
+		if err == nil {
+			line = []byte(text)
+		} else if r.strict {
+			return ErrEncoding
+		}
+	}
 	if !utf8.Valid(line) {
 		if r.strict {
 			return ErrEncoding

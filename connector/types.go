@@ -146,12 +146,17 @@ func (s Script) clone() (Script, error) {
 type StepResult struct {
 	command             Command
 	raw, output, prompt string
+	outputEncoding      string
 	duration            time.Duration
 }
 
-func (s StepResult) Command() Command        { return s.command.clone() }
-func (s StepResult) Raw() string             { return s.raw }
-func (s StepResult) Output() string          { return s.output }
+func (s StepResult) Command() Command { return s.command.clone() }
+func (s StepResult) Raw() string      { return s.raw }
+func (s StepResult) Output() string   { return s.output }
+
+// OutputEncoding reports the encoding selected for the original response.
+// Output is converted to UTF-8; Raw retains the original device bytes.
+func (s StepResult) OutputEncoding() string  { return s.outputEncoding }
 func (s StepResult) Prompt() string          { return s.prompt }
 func (s StepResult) Duration() time.Duration { return s.duration }
 func (s StepResult) String() string          { return fmt.Sprintf("connector.StepResult{bytes:%d}", len(s.raw)) }

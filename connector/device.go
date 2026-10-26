@@ -13,6 +13,7 @@ import (
 
 	expect "github.com/gatework/go-expect"
 	"github.com/gatework/go-net-connector/internal/terminal"
+	"github.com/gatework/go-net-connector/internal/textcodec"
 )
 
 type Device struct {
@@ -89,7 +90,7 @@ func New(profile Profile, cfg ConnectionConfig, opts ...Option) (*Device, error)
 	d := &Device{profile: p, config: cfg, factory: o.factory, metadata: make(map[string]string)}
 	d.prompt.Store("")
 	d.haState.Store("")
-	d.log = &logWriter{target: cfg.Logger, level: cfg.LogLevel, host: cfg.Host, paused: true}
+	d.log = &logWriter{target: cfg.Logger, level: cfg.LogLevel, host: cfg.Host, encoding: "auto", paused: true}
 	return d, nil
 }
 func (d *Device) Name() string               { return d.profile.Name }
@@ -538,7 +539,28 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 	if err != nil {
 		return StepResult{}, err
 	}
-	diagnostic := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(step.output, "")
+	wireOutput := step.output
+	step.output, step.outputEncoding, err = textcodec.Decode(step.output, "auto")
+	if err != nil {
+		return StepResult{}, fail("invalid_output_encoding", "parse", c, err)
+	}
+	// Diagnose the decoded response as well as the visible terminal text, so
+	// overwritten device errors remain failures. Cursor offsets belong to the
+	// original bytes; converting GBK first would shift those offsets in UTF-8.
+	diagnostic := step.output
+	if step.outputEncoding != "utf-8" {
+		step.output, err = terminal.RenderEncoded([]byte(wireOutput), true, step.outputEncoding)
+		if err == nil {
+			step.prompt, err = terminal.RenderEncoded([]byte(step.prompt), true, step.outputEncoding)
+		}
+		if err != nil {
+			return StepResult{}, fail("invalid_output_encoding", "parse", c, err)
+		}
+	}
+	if int64(len(step.output)) > d.config.MaxOutputBytes {
+		return step, fail("output_limit_exceeded", "parse", c, ErrOutputLimit)
+	}
+	diagnostic = regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(diagnostic, "")
 	diagnostic = strings.ReplaceAll(strings.ReplaceAll(diagnostic, "\r\n", "\n"), "\r", "\n")
 	rendered, renderErr := terminal.Render([]byte(step.output), true)
 	if renderErr != nil {
@@ -706,15 +728,15 @@ func (d *Device) read(ctx context.Context, c Command, prompt *regexp.Regexp, rep
 }
 
 type logWriter struct {
-	mu                 sync.Mutex
-	target             io.Writer
-	level, host        string
-	line               strings.Builder
-	redactor, rendered *expect.Redactor
-	renderer           *terminal.Renderer
-	secrets            []string
-	paused             bool
-	count              func(int)
+	mu                    sync.Mutex
+	target                io.Writer
+	level, host, encoding string
+	line                  strings.Builder
+	redactor, rendered    *expect.Redactor
+	renderer              *terminal.Renderer
+	secrets               []string
+	paused                bool
+	count                 func(int)
 }
 type writerFunc func([]byte) (int, error)
 
@@ -729,7 +751,7 @@ func (l *logWriter) scope(secrets []string, paused bool) error {
 }
 func (l *logWriter) startLocked(secrets []string, paused bool) error {
 	var e error
-	l.redactor, e = expect.NewRedactor(secrets, "[REDACTED]")
+	l.redactor, e = expect.NewRedactor(textcodec.SecretVariants(secrets, l.encoding), "[REDACTED]")
 	if e != nil {
 		return e
 	}
@@ -745,6 +767,7 @@ func (l *logWriter) startLocked(secrets []string, paused bool) error {
 		}
 		return len(p), nil
 	}), 32<<20, false)
+	l.renderer.Encoding = l.encoding
 	return nil
 }
 func (l *logWriter) push(secrets []string, paused bool) (func() error, error) {
@@ -781,7 +804,7 @@ func (l *logWriter) addSecret(secret string) error {
 	if l.redactor == nil {
 		return l.startLocked(l.secrets, l.paused)
 	}
-	tail, e := l.redactor.SetSecrets(l.secrets)
+	tail, e := l.redactor.SetSecrets(textcodec.SecretVariants(l.secrets, l.encoding))
 	if e != nil {
 		return e
 	}
