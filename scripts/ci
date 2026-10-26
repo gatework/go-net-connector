@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+export GOWORK=off GOFLAGS=-mod=readonly GOTOOLCHAIN=local
+python3 scripts/release.py check-modules
+go version
+go mod verify
+go mod tidy -diff
+git diff --exit-code -- go.mod go.sum
+ci_tmp=$(mktemp -d)
+trap 'rm -rf "$ci_tmp"' EXIT
+go build -o "$ci_tmp/bin/" ./cmd/...
+export NC_TEST_ARCHIVE_WORKER="$ci_tmp/bin/net-connector-archive"
+if [[ -z "${NC_TEST_POSTGRES_BIN:-}" ]]; then
+  ci_pg_candidates=()
+  if command -v pg_config >/dev/null 2>&1; then
+    ci_pg_candidates+=("$(pg_config --bindir)")
+  fi
+  shopt -s nullglob
+  ci_pg_candidates+=(/usr/lib/postgresql/*/bin /opt/homebrew/opt/postgresql*/bin /usr/local/opt/postgresql*/bin)
+  for ci_pg_bin in "${ci_pg_candidates[@]}"; do
+    if [[ -x "$ci_pg_bin/initdb" && -x "$ci_pg_bin/pg_ctl" ]]; then
+      export NC_TEST_POSTGRES_BIN="$ci_pg_bin"
+      break
+    fi
+  done
+fi
+if [[ -n "${NC_TEST_POSTGRES_BIN:-}" ]]; then
+  echo "PostgreSQL integration enabled: $NC_TEST_POSTGRES_BIN"
+else
+  echo 'PostgreSQL integration SKIPPED: initdb and pg_ctl unavailable; unit/fake tests still run.'
+fi
+for ci_binary in net-backup net-backup-batch net-backup-tftp net-topology net-connector-archive; do
+  "$ci_tmp/bin/$ci_binary" --version
+done
+go test -race -shuffle=on -count=1 -v ./...
+go vet ./...

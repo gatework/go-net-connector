@@ -2,6 +2,7 @@ package cli
 
 import (
 	"github.com/gatework/go-net-connector/config"
+	"github.com/gatework/go-net-connector/internal/buildinfo"
 	"github.com/spf13/pflag"
 	"io"
 	"net/netip"
@@ -30,8 +31,8 @@ func parse(args []string, program string, out io.Writer) (options, error) {
 	f := pflag.NewFlagSet(program, pflag.ContinueOnError)
 	f.SetOutput(io.Discard)
 	o.flags = f
-	f.Bool("version", false, "Show development version")
-	f.BoolP("version-short", "v", false, "Show development version")
+	f.Bool("version", false, "Show version and source revision")
+	f.BoolP("version-short", "v", false, "Show version and source revision")
 	f.BoolVarP(&o.help, "help", "h", false, "Show options without loading files")
 	f.BoolVar(&o.help, "help-all", false, "Show all options")
 	f.BoolVar(&o.help, "examples", false, "Show usage examples")
@@ -87,7 +88,7 @@ func parse(args []string, program string, out io.Writer) (options, error) {
 	for _, arg := range args {
 		if arg == "--version" || arg == "-v" {
 			o.help = true
-			_, e := io.WriteString(out, "go-net-connector development (Ruby parity baseline 0.18.0)\n")
+			_, e := io.WriteString(out, buildinfo.Identity+"\n")
 			return o, e
 		}
 		if arg == "--help" || arg == "-h" || arg == "--help-all" {
