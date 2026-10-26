@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/gatework/go-net-connector/archive"
+	"github.com/gatework/go-net-connector/internal/buildinfo"
 	"golang.org/x/sys/unix"
 	"os"
 	"os/signal"
@@ -12,7 +13,7 @@ import (
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
-		fmt.Printf("net-connector-archive protocol %d\n", archive.Version)
+		fmt.Printf("net-connector-archive protocol %d; %s\n", archive.Version, buildinfo.Identity)
 		return
 	}
 	if len(os.Args) != 1 {

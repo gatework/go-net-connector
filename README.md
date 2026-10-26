@@ -119,6 +119,8 @@ Go API 直接注入 `ConnectionConfig.Logger` 且不设置 `LogLevel` 时，保�
 
 ## 验证与边界
 
+首版发布流程与产物校验见 [发布说明](docs/releasing.md)，当前发布验证状态见 [发布验证](docs/release-verification.md)。
+
 ```sh
 go test -race ./...
 go vet ./...
