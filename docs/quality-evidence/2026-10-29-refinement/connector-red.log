@@ -1,0 +1,5 @@
+--- FAIL: TestHookAndReceiptErrorsBothSurvive (0.00s)
+    refinement_test.go:22: missing simultaneous error: connector: after_command_failed (script)
+FAIL
+FAIL	github.com/gatework/go-net-connector/connector	0.681s
+FAIL

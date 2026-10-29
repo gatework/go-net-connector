@@ -13,12 +13,16 @@ import (
 
 type eventFailWriter struct {
 	bytes.Buffer
-	event string
+	event   string
+	failure error
 }
 
 func (w *eventFailWriter) Write(p []byte) (int, error) {
 	if bytes.Contains(p, []byte("event="+w.event)) {
-		return 0, errors.New("PRIVATE_SINK_CAUSE")
+		if w.failure == nil {
+			w.failure = errors.New("PRIVATE_SINK_CAUSE")
+		}
+		return 0, w.failure
 	}
 	return w.Buffer.Write(p)
 }
@@ -56,7 +60,7 @@ func TestTextLogFailurePreservesPrimaryDeviceError(t *testing.T) {
 	sink := &eventFailWriter{event: "command_complete"}
 	d := textLogDevice(t, "debug", sink, "% Invalid PRIVATE_RESPONSE\r\nsw#")
 	r, err := d.ExecuteCommand(t.Context(), Command{Text: "change"}, ExecuteOptions{})
-	if !errors.Is(err, ErrDevice) || len(r.Steps()) != 0 {
+	if !errors.Is(err, ErrDevice) || !errors.Is(err, sink.failure) || len(r.Steps()) != 0 {
 		t.Fatalf("primary=%v steps=%d", err, len(r.Steps()))
 	}
 }

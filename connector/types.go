@@ -153,29 +153,51 @@ func (s Script) clone() (Script, error) {
 	return out, nil
 }
 
+// StepResult retains an accepted command response, including later callback failures.
 type StepResult struct {
-	command             Command
-	raw, output, prompt string
-	outputEncoding      string
-	duration            time.Duration
+	response Response
+	command  Command
+	duration time.Duration
 }
 
-func (s StepResult) Command() Command { return s.command.clone() }
-func (s StepResult) Raw() string      { return s.raw }
-func (s StepResult) Output() string   { return s.output }
+func (s StepResult) Command() Command   { return s.command.clone() }
+func (s StepResult) Response() Response { return s.response }
+func (s StepResult) Raw() string        { return s.response.Raw() }
 
-// OutputEncoding reports the encoding selected for the original response.
-// Output is converted to UTF-8; Raw retains the original device bytes.
-func (s StepResult) OutputEncoding() string  { return s.outputEncoding }
-func (s StepResult) Prompt() string          { return s.prompt }
+// Output is the compatibility accessor; use Response.Output to check conversion.
+func (s StepResult) Output() string {
+	if s.response.data == nil {
+		return ""
+	}
+	return s.response.data.output
+}
+func (s StepResult) Rendered() (string, error) {
+	if s.response.data == nil {
+		return "", nil
+	}
+	return s.response.Rendered()
+}
+func (s StepResult) OutputEncoding() string { return s.response.Encoding() }
+
+// Prompt preserves the historical wire prompt for UTF-8 responses.
+// Response.Prompt returns verified terminal-visible text for every encoding.
+func (s StepResult) Prompt() string {
+	if s.OutputEncoding() == "" || s.OutputEncoding() == "utf-8" {
+		return s.response.RawPrompt()
+	}
+	prompt, _ := s.response.Prompt()
+	return prompt
+}
 func (s StepResult) Duration() time.Duration { return s.duration }
-func (s StepResult) String() string          { return fmt.Sprintf("connector.StepResult{bytes:%d}", len(s.raw)) }
-func (s StepResult) GoString() string        { return s.String() }
+func (s StepResult) String() string {
+	return fmt.Sprintf("connector.StepResult{bytes:%d}", len(s.Raw()))
+}
+func (s StepResult) GoString() string { return s.String() }
 func (s StepResult) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Bytes    int     `json:"bytes"`
 		Duration float64 `json:"duration"`
-	}{len(s.raw), s.duration.Seconds()})
+	}{len(s.Raw()), s.duration.Seconds()})
 }
 
 type Result struct {
@@ -188,18 +210,19 @@ type Result struct {
 // Complete observes a prompt, not device acceptance or persistence.
 type Attempt struct {
 	command  Command
-	response StepResult
+	response Response
 	written  int
 	complete bool
 	err      error
 }
 
-func (a Attempt) Command() Command { return a.command.clone() }
-func (a Attempt) Raw() string      { return a.response.raw }
-func (a Attempt) Prompt() string   { return a.response.prompt }
-func (a Attempt) Written() int     { return a.written }
-func (a Attempt) Complete() bool   { return a.complete }
-func (a Attempt) Err() error       { return a.err }
+func (a Attempt) Response() Response { return a.response }
+func (a Attempt) Command() Command   { return a.command.clone() }
+func (a Attempt) Raw() string        { return a.response.Raw() }
+func (a Attempt) Prompt() string     { return a.response.RawPrompt() }
+func (a Attempt) Written() int       { return a.written }
+func (a Attempt) Complete() bool     { return a.complete }
+func (a Attempt) Err() error         { return a.err }
 func (a Attempt) String() string {
 	return fmt.Sprintf("connector.Attempt{written:%d complete:%t failed:%t}", a.written, a.complete, a.err != nil)
 }
@@ -218,18 +241,23 @@ func (r Result) Attempts() []Attempt { return append([]Attempt(nil), r.attempts.
 
 func (r Result) Steps() []StepResult {
 	out := append([]StepResult(nil), r.steps...)
-	for i := range out {
-		out[i].command = out[i].command.clone()
-	}
 	return out
 }
 func (r Result) Output() string {
 	if r.config != nil {
 		return *r.config
 	}
+	if len(r.steps) == 1 {
+		return r.steps[0].Output()
+	}
 	var b strings.Builder
+	size := 0
 	for _, s := range r.steps {
-		b.WriteString(s.output)
+		size += len(s.Output())
+	}
+	b.Grow(size)
+	for _, s := range r.steps {
+		b.WriteString(s.Output())
 	}
 	return b.String()
 }
@@ -275,38 +303,26 @@ type Profile struct {
 	CommandTimeout                                                                     time.Duration
 	Prepare                                                                            func(context.Context, Command, Executor) (Command, bool, error)
 	AfterCommand                                                                       func(context.Context, Command, StepResult, Executor) error
-	AfterLogin                                                                         func(StepResult) map[string]string
+	AfterLogin                                                                         func(context.Context, StepResult) (LoginState, error)
 	ConfigStrategy                                                                     func() ConfigStrategy
 	Capabilities                                                                       Capabilities
 }
+
+// LoginState contains the device state discovered by AfterLogin.
+type LoginState struct{ HAState string }
+
 type ConfigStrategy interface {
 	Prompt(command, current string) string
 	Validate(context.Context, Command, StepResult, Executor) error
-	Finish(Result) (string, error)
+	// Finish receives the operation's Close-linked context and must cooperate
+	// with cancellation. Each collection owns its own strategy instance.
+	Finish(context.Context, Result) (string, error)
 }
 type Capabilities struct{ Save, TFTP, RemoteBackup, Neighbors, Descriptions, TopologyWrite bool }
 
 func (p Profile) clone() (Profile, error) {
-	if p.Name == "" || p.LoginPrompt == nil || p.CommandPrompt == nil {
-		return Profile{}, ErrInvalid
-	}
-	for _, r := range []*regexp.Regexp{p.LoginPrompt, p.CommandPrompt, p.UsernamePrompt, p.PasswordPrompt, p.PrivilegePrompt, p.Pager} {
-		if r != nil && r.MatchString("") {
-			return Profile{}, ErrInvalid
-		}
-	}
-	if p.PrivilegeCommand != "" {
-		if e := (Command{Text: p.PrivilegeCommand}).validate(); e != nil {
-			return Profile{}, e
-		}
-		if p.PrivilegePrompt == nil {
-			return Profile{}, ErrInvalid
-		}
-	}
-	for _, replies := range [][]Interaction{p.LoginInteractions, p.Interactions} {
-		if e := validateInteractions(replies); e != nil {
-			return Profile{}, e
-		}
+	if e := p.Validate(); e != nil {
+		return Profile{}, e
 	}
 	p.LoginPrompt = clonePattern(p.LoginPrompt)
 	p.CommandPrompt = clonePattern(p.CommandPrompt)
@@ -319,9 +335,6 @@ func (p Profile) clone() (Profile, error) {
 	for _, list := range []*[]*regexp.Regexp{&p.AuthenticationErrors, &p.CommandErrors} {
 		*list = append([]*regexp.Regexp(nil), (*list)...)
 		for i, r := range *list {
-			if r == nil || r.MatchString("") {
-				return Profile{}, ErrInvalid
-			}
 			(*list)[i] = clonePattern(r)
 		}
 	}
@@ -330,38 +343,25 @@ func (p Profile) clone() (Profile, error) {
 	} else {
 		p.LegacySSHArguments = append([]string{}, p.LegacySSHArguments...)
 	}
-	for _, arg := range p.LegacySSHArguments {
-		if arg == "" || strings.ContainsAny(arg, "\x00\r\n") {
-			return Profile{}, ErrInvalid
-		}
-	}
 	p.ConfigCommands = append([]string(nil), p.ConfigCommands...)
 	p.SaveCommands = append([]string(nil), p.SaveCommands...)
-	for _, text := range append(append([]string(nil), p.ConfigCommands...), p.SaveCommands...) {
-		if e := (Command{Text: text}).validate(); e != nil {
-			return Profile{}, e
-		}
-	}
-	if p.CommandTimeout < 0 {
-		return Profile{}, ErrInvalid
-	}
 	if p.CommandTimeout == 0 {
 		p.CommandTimeout = 25 * time.Second
 	}
 	if p.UsernamePrompt == nil {
-		p.UsernamePrompt = regexp.MustCompile(`(?i)(?:login|username|name):\s*\z`)
+		p.UsernamePrompt = defaultUsername
 	}
 	if p.PasswordPrompt == nil {
-		p.PasswordPrompt = regexp.MustCompile(`(?i)password:\s*\z`)
+		p.PasswordPrompt = defaultPassword
 	}
 	if p.Pager == nil {
-		p.Pager = regexp.MustCompile(`(?im)(?:^|[\r\n])[ \t]*(?:--More--|---- More ----)[ \t\x00\x08]*(?:\r|\n|\z)`)
+		p.Pager = defaultPager
 	}
 	if p.PagerResponse == "" {
 		p.PagerResponse = " "
 	}
 	if len(p.AuthenticationErrors) == 0 {
-		p.AuthenticationErrors = []*regexp.Regexp{regexp.MustCompile(`(?i)(?:authentication failed|permission denied|access denied|login incorrect)`)}
+		p.AuthenticationErrors = []*regexp.Regexp{defaultAuthError}
 	}
 	return p, nil
 }
@@ -454,4 +454,27 @@ func joinCleanup(primary, cleanup error) error {
 		return primary
 	}
 	return &cleanupError{cause: errors.Join(primary, cleanup)}
+}
+
+// joinedFailure retains both causes without formatting arbitrary callback errors.
+// Primary metadata is first in the errors.Is/As traversal.
+type joinedFailure struct{ primary, secondary error }
+
+func (e *joinedFailure) Error() string {
+	var classified *Error
+	if errors.As(e.primary, &classified) {
+		return classified.Error()
+	}
+	return "connector: multiple failures"
+}
+func (e *joinedFailure) GoString() string { return e.Error() }
+func (e *joinedFailure) Unwrap() []error  { return []error{e.primary, e.secondary} }
+func joinFailures(primary, secondary error) error {
+	if primary == nil {
+		return secondary
+	}
+	if secondary == nil {
+		return primary
+	}
+	return &joinedFailure{primary, secondary}
 }

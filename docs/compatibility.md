@@ -21,4 +21,4 @@ Go 包采用直接命名：Ruby Device/Engine → `connector`，Vendor → `vend
 
 API 采用 Go 的 context、组合和类型化结果；不模拟 Ruby 动态加载或异常语法。已报告完成与服务器核验、完成命令与持久化文件、原始结果与脱敏诊断均维持独立。无自动 commit、回滚、重新上传或发布。
 
-原始 go-expect 在冻结后出现新的并行改动。本项目依赖校验后的冻结快照与独立补丁；尚未把这些后续修改迁入候选。公共依赖版本尚未发布，独立消费者需要显式 replace 到已准备的候选，见 `scripts/verify-consumer.py`。
+当前构建依赖 go.mod 固定的 GitHub go-expect 版本，使用 GOWORK=off，不使用历史快照或本地 replace。scripts/verify-consumer.py 在仓库之外复制当前源码，验证公开 API、模板与 CLI；它不代表当前未发布源码已能被外部版本化消费者获取。

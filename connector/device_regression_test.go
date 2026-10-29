@@ -76,7 +76,7 @@ func TestOperationExpiresAndDrainsAdmittedCall(t *testing.T) {
 	done := make(chan error, 1)
 	outer := make(chan error, 1)
 	go func() {
-		outer <- d.WithOperation(t.Context(), func(o *Operation) error {
+		outer <- d.WithOperation(t.Context(), func(ctx context.Context, o *Operation) error {
 			go func() {
 				_, e := o.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{OnReceipt: func(ctx context.Context, _ StepResult) error {
 					close(entered)

@@ -1,0 +1,40 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandOutput/64KiB-10         	      36	   5967471 ns/op	  10.98 MB/s	 1370002 B/op	     683 allocs/op
+BenchmarkCommandOutput/64KiB-10         	      45	   5190664 ns/op	  12.63 MB/s	 1370161 B/op	     680 allocs/op
+BenchmarkCommandOutput/64KiB-10         	      44	   5222851 ns/op	  12.55 MB/s	 1369241 B/op	     679 allocs/op
+BenchmarkCommandOutput/64KiB-10         	      44	   5244667 ns/op	  12.50 MB/s	 1370896 B/op	     679 allocs/op
+BenchmarkCommandOutput/64KiB-10         	      45	   5233979 ns/op	  12.52 MB/s	 1376573 B/op	     679 allocs/op
+BenchmarkCommandOutput/1024KiB-10       	       2	 105202166 ns/op	   9.97 MB/s	27550152 B/op	     856 allocs/op
+BenchmarkCommandOutput/1024KiB-10       	       2	 105200625 ns/op	   9.97 MB/s	27555664 B/op	     869 allocs/op
+BenchmarkCommandOutput/1024KiB-10       	       2	 105261229 ns/op	   9.96 MB/s	27555192 B/op	     868 allocs/op
+BenchmarkCommandOutput/1024KiB-10       	       2	 104894250 ns/op	  10.00 MB/s	27555200 B/op	     868 allocs/op
+BenchmarkCommandOutput/1024KiB-10       	       2	 105151354 ns/op	   9.97 MB/s	27555280 B/op	     869 allocs/op
+BenchmarkCommandOutput/8192KiB-10       	       1	 851372916 ns/op	   9.85 MB/s	220775208 B/op	    1818 allocs/op
+BenchmarkCommandOutput/8192KiB-10       	       1	 840718708 ns/op	   9.98 MB/s	220774872 B/op	    1815 allocs/op
+BenchmarkCommandOutput/8192KiB-10       	       1	 846372875 ns/op	   9.91 MB/s	220725496 B/op	    1779 allocs/op
+BenchmarkCommandOutput/8192KiB-10       	       1	 844444500 ns/op	   9.93 MB/s	220749544 B/op	    1834 allocs/op
+BenchmarkCommandOutput/8192KiB-10       	       1	 851372792 ns/op	   9.85 MB/s	220781648 B/op	    1837 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandOutput/64KiB-10         	      42	   5299631 ns/op	  12.37 MB/s	 1374323 B/op	     683 allocs/op
+BenchmarkCommandOutput/64KiB-10         	      43	   5390700 ns/op	  12.16 MB/s	 1378456 B/op	     684 allocs/op
+BenchmarkCommandOutput/64KiB-10         	      44	   5307902 ns/op	  12.35 MB/s	 1373625 B/op	     682 allocs/op
+BenchmarkCommandOutput/64KiB-10         	      45	   5202493 ns/op	  12.60 MB/s	 1368392 B/op	     678 allocs/op
+BenchmarkCommandOutput/64KiB-10         	      45	   5198731 ns/op	  12.61 MB/s	 1372383 B/op	     679 allocs/op
+BenchmarkCommandOutput/1024KiB-10       	       2	 105118875 ns/op	   9.98 MB/s	27551492 B/op	     860 allocs/op
+BenchmarkCommandOutput/1024KiB-10       	       2	 104882938 ns/op	  10.00 MB/s	27552372 B/op	     862 allocs/op
+BenchmarkCommandOutput/1024KiB-10       	       2	 104606208 ns/op	  10.02 MB/s	27556352 B/op	     870 allocs/op
+BenchmarkCommandOutput/1024KiB-10       	       2	 104628083 ns/op	  10.02 MB/s	27534356 B/op	     863 allocs/op
+BenchmarkCommandOutput/1024KiB-10       	       2	 104909771 ns/op	  10.00 MB/s	27558964 B/op	     882 allocs/op
+BenchmarkCommandOutput/8192KiB-10       	       1	 846775375 ns/op	   9.91 MB/s	220780832 B/op	    1829 allocs/op
+BenchmarkCommandOutput/8192KiB-10       	       1	 845144917 ns/op	   9.93 MB/s	220781808 B/op	    1831 allocs/op
+BenchmarkCommandOutput/8192KiB-10       	       1	 839943250 ns/op	   9.99 MB/s	220770560 B/op	    1807 allocs/op
+BenchmarkCommandOutput/8192KiB-10       	       1	 843896167 ns/op	   9.94 MB/s	220744048 B/op	    1827 allocs/op
+BenchmarkCommandOutput/8192KiB-10       	       1	 863364459 ns/op	   9.72 MB/s	220738504 B/op	    1813 allocs/op
+PASS

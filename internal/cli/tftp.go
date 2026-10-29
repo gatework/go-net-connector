@@ -14,9 +14,9 @@ import (
 
 	"github.com/gatework/go-net-connector/archive"
 	"github.com/gatework/go-net-connector/config"
+	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/internal/bootstrap"
 	"github.com/gatework/go-net-connector/inventory"
-	"github.com/gatework/go-net-connector/netdisco"
 	"github.com/gatework/go-net-connector/storage"
 	"github.com/gatework/go-net-connector/transfer"
 )
@@ -31,27 +31,27 @@ func (r Runtime) runTFTP(ctx context.Context, s *bootstrap.Services, rows []inve
 	if o.all {
 		limit = 0
 	}
-	plan, e := netdisco.NewPlan(rows, s.Rules(), netdisco.PlanOptions{Mode: "tftp", LimitPerVendor: limit, AllowFixedNameReuse: true, Target: func(d netdisco.Record) (netdisco.Target, error) {
+	plan, e := fleet.NewPlan(rows, s.Rules(), fleet.PlanOptions{Mode: "tftp", LimitPerVendor: limit, AllowFixedNameReuse: true, Target: func(d fleet.Record) (fleet.Target, error) {
 		target, e := policy.For(d.Host, d.Vendor)
 		if e != nil {
-			return netdisco.Target{}, e
+			return fleet.Target{}, e
 		}
 		path, e := transfer.InventoryFilename(d.Vendor, d.Host, d.Name)
 		if e != nil {
-			return netdisco.Target{}, e
+			return fleet.Target{}, e
 		}
 		target.Path = path
 		if target.Server == "" {
-			return netdisco.Target{}, config.ErrInvalid
+			return fleet.Target{}, config.ErrInvalid
 		}
 		if e = transfer.Validate(d.Vendor, d.Host, target.TFTPOptions); e != nil {
-			return netdisco.Target{}, e
+			return fleet.Target{}, e
 		}
 		if d.Vendor == "palo_alto" && target.Root == "" {
-			return netdisco.Target{}, transfer.ErrInvalid
+			return fleet.Target{}, transfer.ErrInvalid
 		}
 		effective[d.Host] = target
-		return netdisco.Target{Server: target.Server, Path: path}, nil
+		return fleet.Target{Server: target.Server, Path: path}, nil
 	}})
 	if e != nil {
 		return r.fail(program, e)
@@ -120,7 +120,7 @@ func (r Runtime) runTFTP(ctx context.Context, s *bootstrap.Services, rows []inve
 		return r.fail(program, e)
 	}
 	defer events.Close()
-	batch, runErr := netdisco.Run(ctx, plan, netdisco.FleetOptions{Workers: s.Workers(), Run: func(ctx context.Context, task netdisco.Task) (artifact netdisco.Artifact, err error) {
+	batch, runErr := fleet.Run(ctx, plan, fleet.RunOptions{Workers: s.Workers(), Run: func(ctx context.Context, task fleet.Task) (artifact fleet.Artifact, err error) {
 		target := effective[task.Device.Host]
 		filename := target.Path
 		if target.Root == "" {
@@ -138,9 +138,7 @@ func (r Runtime) runTFTP(ctx context.Context, s *bootstrap.Services, rows []inve
 				return receipt, e
 			}
 			defer func() {
-				if e := closeDevice(); err == nil {
-					err = e
-				}
+				err = joinDeviceCleanup(err, closeDevice())
 			}()
 			opts := target.TFTPOptions
 			opts.Path = name
@@ -162,7 +160,7 @@ func (r Runtime) runTFTP(ctx context.Context, s *bootstrap.Services, rows []inve
 			artifact.Transfer = &receipt
 		}
 		return artifact, err
-	}, OnOutcome: func(_ context.Context, out netdisco.Outcome) error {
+	}, OnOutcome: func(_ context.Context, out fleet.Outcome) error {
 		var progressErr error
 		if !o.quiet {
 			_, progressErr = fmt.Fprintf(r.Error, "%s: %s\n", out.Device.Host, out.Status)
@@ -170,7 +168,7 @@ func (r Runtime) runTFTP(ctx context.Context, s *bootstrap.Services, rows []inve
 		eventErr := json.NewEncoder(events).Encode(map[string]any{"host": out.Device.Host, "vendor": out.Device.Vendor, "artifact": artifactView(out.Artifact), "status": out.Status, "duration_ms": out.Duration.Milliseconds(), "error_code": nullable(out.ErrorCode), "error_type": nullable(out.ErrorType)})
 		return errors.Join(progressErr, eventErr)
 	}})
-	report, e := netdisco.NewReport(batch, o.policy)
+	report, e := fleet.NewReport(batch, o.policy)
 	if e != nil {
 		return r.fail(program, e)
 	}
@@ -183,11 +181,11 @@ func (r Runtime) runTFTP(ctx context.Context, s *bootstrap.Services, rows []inve
 			report = report.WithReportError(e, "")
 		}
 	}
-	report = netdisco.WriteReport(context.WithoutCancel(ctx), report, directory, plan, s.Workers())
+	report = fleet.WriteReport(context.WithoutCancel(ctx), report, directory, plan, s.Workers())
 	outputErr := r.finishReport(report, directory, o, program, ctx.Err() != nil)
 	if outputErr != nil && report.Statistics()["report_error"] == nil {
 		location, _ := report.Statistics()["report_location"].(string)
-		report = netdisco.WriteReport(context.WithoutCancel(ctx), report.WithReportError(outputErr, location), directory, plan, s.Workers())
+		report = fleet.WriteReport(context.WithoutCancel(ctx), report.WithReportError(outputErr, location), directory, plan, s.Workers())
 	}
 	if ctx.Err() != nil || errors.Is(runErr, context.Canceled) {
 		return 130

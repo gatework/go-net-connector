@@ -1,0 +1,204 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandOutput/64KiB-10 	      36	   6218448 ns/op	  10.54 MB/s	  652739 B/op	     593 allocs/op
+BenchmarkCommandOutput/64KiB-10 	      46	   5066014 ns/op	  12.94 MB/s	  653417 B/op	     590 allocs/op
+BenchmarkCommandOutput/64KiB-10 	      45	   5100563 ns/op	  12.85 MB/s	  655578 B/op	     590 allocs/op
+BenchmarkCommandOutput/64KiB-10 	      46	   5623503 ns/op	  11.65 MB/s	  662377 B/op	     591 allocs/op
+BenchmarkCommandOutput/64KiB-10 	      42	   7875364 ns/op	   8.32 MB/s	  649768 B/op	     586 allocs/op
+BenchmarkCommandOutput/64KiB-10 	      40	   5776467 ns/op	  11.35 MB/s	  654304 B/op	     589 allocs/op
+BenchmarkCommandOutput/64KiB-10 	      34	   9312838 ns/op	   7.04 MB/s	  645345 B/op	     587 allocs/op
+BenchmarkCommandOutput/64KiB-10 	      38	  10175376 ns/op	   6.44 MB/s	  646086 B/op	     587 allocs/op
+BenchmarkCommandOutput/64KiB-10 	      21	  10596204 ns/op	   6.18 MB/s	  651332 B/op	     588 allocs/op
+BenchmarkCommandOutput/64KiB-10 	      21	  10723627 ns/op	   6.11 MB/s	  648988 B/op	     586 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       1	 200936000 ns/op	   5.22 MB/s	12388904 B/op	     749 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       1	 224114209 ns/op	   4.68 MB/s	12387928 B/op	     747 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       1	 221726583 ns/op	   4.73 MB/s	12387928 B/op	     747 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       2	 130958708 ns/op	   8.01 MB/s	12384952 B/op	     738 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       2	 117257604 ns/op	   8.94 MB/s	12409348 B/op	     755 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       2	 114289770 ns/op	   9.17 MB/s	12403732 B/op	     741 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       2	 113472834 ns/op	   9.24 MB/s	12406312 B/op	     748 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       2	 112194000 ns/op	   9.35 MB/s	12406792 B/op	     749 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       2	 113985167 ns/op	   9.20 MB/s	12383300 B/op	     736 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       2	 110094958 ns/op	   9.52 MB/s	12390100 B/op	     752 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 917002958 ns/op	   9.15 MB/s	99054728 B/op	    1674 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 901979666 ns/op	   9.30 MB/s	99018152 B/op	    1670 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 893030625 ns/op	   9.39 MB/s	99018152 B/op	    1670 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 918287208 ns/op	   9.14 MB/s	99016904 B/op	    1660 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 959143208 ns/op	   8.75 MB/s	99055080 B/op	    1677 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 972025834 ns/op	   8.63 MB/s	99054840 B/op	    1675 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 990076042 ns/op	   8.47 MB/s	99055208 B/op	    1675 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 968679250 ns/op	   8.66 MB/s	99055320 B/op	    1676 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 955872833 ns/op	   8.78 MB/s	99019064 B/op	    1675 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 970899916 ns/op	   8.64 MB/s	99054744 B/op	    1674 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3661310417 ns/op	   9.16 MB/s	389455040 B/op	    4737 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3544563208 ns/op	   9.47 MB/s	389455088 B/op	    4738 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3521815167 ns/op	   9.53 MB/s	389462776 B/op	    4757 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3495506083 ns/op	   9.60 MB/s	389455040 B/op	    4737 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3497398208 ns/op	   9.59 MB/s	389424072 B/op	    4747 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3557433292 ns/op	   9.43 MB/s	389461112 B/op	    4752 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3567967083 ns/op	   9.40 MB/s	389461832 B/op	    4755 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3561382750 ns/op	   9.42 MB/s	389461112 B/op	    4752 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3550820791 ns/op	   9.45 MB/s	389425080 B/op	    4753 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3526501500 ns/op	   9.51 MB/s	389456464 B/op	    4740 allocs/op
+BenchmarkCommandPaged1000-10              	      45	   5378968 ns/op	  994075 B/op	   14944 allocs/op
+BenchmarkCommandPaged1000-10              	      44	   5421459 ns/op	  993438 B/op	   14940 allocs/op
+BenchmarkCommandPaged1000-10              	      44	   5382832 ns/op	  986898 B/op	   14935 allocs/op
+BenchmarkCommandPaged1000-10              	      43	   5337115 ns/op	  983142 B/op	   14920 allocs/op
+BenchmarkCommandPaged1000-10              	      46	   5332204 ns/op	  989511 B/op	   14928 allocs/op
+BenchmarkCommandPaged1000-10              	      44	   5404042 ns/op	  983538 B/op	   14939 allocs/op
+BenchmarkCommandPaged1000-10              	      44	   5389767 ns/op	  995734 B/op	   14933 allocs/op
+BenchmarkCommandPaged1000-10              	      45	   5304086 ns/op	  970897 B/op	   14901 allocs/op
+BenchmarkCommandPaged1000-10              	      46	   5273780 ns/op	  979848 B/op	   14903 allocs/op
+BenchmarkCommandPaged1000-10              	      44	   5330845 ns/op	  991383 B/op	   14921 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       2	 137014938 ns/op	   7.65 MB/s	12377972 B/op	     738 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       2	 133731062 ns/op	   7.84 MB/s	12381040 B/op	     747 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       2	 134105146 ns/op	   7.82 MB/s	12381040 B/op	     747 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       2	 132923917 ns/op	   7.89 MB/s	12381048 B/op	     747 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       2	 133793562 ns/op	   7.84 MB/s	12381048 B/op	     747 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       2	 132479854 ns/op	   7.91 MB/s	12362504 B/op	     744 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       2	 132113479 ns/op	   7.94 MB/s	12381064 B/op	     747 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       2	 132269334 ns/op	   7.93 MB/s	12381040 B/op	     747 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       2	 129944583 ns/op	   8.07 MB/s	12362504 B/op	     744 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       2	 132482020 ns/op	   7.91 MB/s	12362504 B/op	     744 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1042752875 ns/op	   8.04 MB/s	98987008 B/op	    1654 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1078072459 ns/op	   7.78 MB/s	99030440 B/op	    1678 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1058756083 ns/op	   7.92 MB/s	99030216 B/op	    1676 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1063036000 ns/op	   7.89 MB/s	98993160 B/op	    1671 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1074099458 ns/op	   7.81 MB/s	99024112 B/op	    1659 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1065946000 ns/op	   7.87 MB/s	98993272 B/op	    1672 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1053438625 ns/op	   7.96 MB/s	98999296 B/op	    1688 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1047723375 ns/op	   8.01 MB/s	99024096 B/op	    1659 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1068513084 ns/op	   7.85 MB/s	99030216 B/op	    1676 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1050311250 ns/op	   7.99 MB/s	98993160 B/op	    1671 allocs/op
+BenchmarkCommandLogging/nil-10            	   27106	      8824 ns/op	    5210 B/op	      72 allocs/op
+BenchmarkCommandLogging/nil-10            	   27420	      8787 ns/op	    5191 B/op	      72 allocs/op
+BenchmarkCommandLogging/nil-10            	   27577	      8709 ns/op	    5200 B/op	      72 allocs/op
+BenchmarkCommandLogging/nil-10            	   27315	      8768 ns/op	    5209 B/op	      72 allocs/op
+BenchmarkCommandLogging/nil-10            	   27514	      8754 ns/op	    5194 B/op	      72 allocs/op
+BenchmarkCommandLogging/nil-10            	   27250	      8819 ns/op	    5194 B/op	      72 allocs/op
+BenchmarkCommandLogging/nil-10            	   27210	      8793 ns/op	    5219 B/op	      72 allocs/op
+BenchmarkCommandLogging/nil-10            	   27576	      8737 ns/op	    5176 B/op	      72 allocs/op
+BenchmarkCommandLogging/nil-10            	   27313	      8778 ns/op	    5192 B/op	      72 allocs/op
+BenchmarkCommandLogging/nil-10            	   27423	      8745 ns/op	    5182 B/op	      72 allocs/op
+BenchmarkCommandLogging/info-10           	   21776	     10990 ns/op	    7409 B/op	     128 allocs/op
+BenchmarkCommandLogging/info-10           	   22694	     10784 ns/op	    7390 B/op	     128 allocs/op
+BenchmarkCommandLogging/info-10           	   21873	     11014 ns/op	    7390 B/op	     128 allocs/op
+BenchmarkCommandLogging/info-10           	   22042	     10938 ns/op	    7380 B/op	     128 allocs/op
+BenchmarkCommandLogging/info-10           	   21842	     11668 ns/op	    7386 B/op	     128 allocs/op
+BenchmarkCommandLogging/info-10           	   14772	     14748 ns/op	    7383 B/op	     127 allocs/op
+BenchmarkCommandLogging/info-10           	   22184	     10791 ns/op	    7378 B/op	     128 allocs/op
+BenchmarkCommandLogging/info-10           	   22264	     10505 ns/op	    7380 B/op	     128 allocs/op
+BenchmarkCommandLogging/info-10           	   22586	     10584 ns/op	    7373 B/op	     128 allocs/op
+BenchmarkCommandLogging/info-10           	   23236	     10247 ns/op	    7371 B/op	     128 allocs/op
+BenchmarkCommandLogging/debug-10          	   18871	     12706 ns/op	   12567 B/op	     253 allocs/op
+BenchmarkCommandLogging/debug-10          	   18448	     12780 ns/op	   12531 B/op	     253 allocs/op
+BenchmarkCommandLogging/debug-10          	   19140	     12478 ns/op	   12502 B/op	     253 allocs/op
+BenchmarkCommandLogging/debug-10          	   19356	     12385 ns/op	   12521 B/op	     253 allocs/op
+BenchmarkCommandLogging/debug-10          	   18388	     13161 ns/op	   12535 B/op	     253 allocs/op
+BenchmarkCommandLogging/debug-10          	   17378	     13856 ns/op	   12571 B/op	     253 allocs/op
+BenchmarkCommandLogging/debug-10          	   17893	     13306 ns/op	   12589 B/op	     253 allocs/op
+BenchmarkCommandLogging/debug-10          	   18541	     12791 ns/op	   12514 B/op	     253 allocs/op
+BenchmarkCommandLogging/debug-10          	   19137	     13087 ns/op	   12529 B/op	     253 allocs/op
+BenchmarkCommandLogging/debug-10          	   17433	     13744 ns/op	   12541 B/op	     253 allocs/op
+PASS
+ok  	github.com/gatework/go-net-connector/connector	73.236s
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/vendors
+cpu: Apple M5
+BenchmarkRunningConfig/1024KiB-10         	       1	 579558833 ns/op	   1.81 MB/s	14319648 B/op	     485 allocs/op
+BenchmarkRunningConfig/1024KiB-10         	       1	 561539084 ns/op	   1.87 MB/s	14301704 B/op	     442 allocs/op
+BenchmarkRunningConfig/1024KiB-10         	       1	 567844792 ns/op	   1.85 MB/s	14314552 B/op	     476 allocs/op
+BenchmarkRunningConfig/1024KiB-10         	       1	 561210625 ns/op	   1.87 MB/s	14307632 B/op	     457 allocs/op
+BenchmarkRunningConfig/1024KiB-10         	       1	 575755125 ns/op	   1.82 MB/s	14301000 B/op	     434 allocs/op
+BenchmarkRunningConfig/1024KiB-10         	       1	 565356542 ns/op	   1.85 MB/s	14299072 B/op	     430 allocs/op
+BenchmarkRunningConfig/1024KiB-10         	       1	 553517875 ns/op	   1.89 MB/s	14343096 B/op	     460 allocs/op
+BenchmarkRunningConfig/1024KiB-10         	       1	 565318208 ns/op	   1.85 MB/s	14306184 B/op	     450 allocs/op
+BenchmarkRunningConfig/1024KiB-10         	       1	 561299958 ns/op	   1.87 MB/s	14343576 B/op	     462 allocs/op
+BenchmarkRunningConfig/1024KiB-10         	       1	 544842000 ns/op	   1.92 MB/s	14305688 B/op	     453 allocs/op
+BenchmarkRunningConfig/8192KiB-10         	       1	4457306500 ns/op	   1.88 MB/s	114627192 B/op	    1356 allocs/op
+BenchmarkRunningConfig/8192KiB-10         	       1	4494954209 ns/op	   1.87 MB/s	114632024 B/op	    1372 allocs/op
+BenchmarkRunningConfig/8192KiB-10         	       1	4450126917 ns/op	   1.89 MB/s	114588720 B/op	    1349 allocs/op
+BenchmarkRunningConfig/8192KiB-10         	       1	4440460750 ns/op	   1.89 MB/s	114588944 B/op	    1351 allocs/op
+BenchmarkRunningConfig/8192KiB-10         	       1	4401008709 ns/op	   1.91 MB/s	114588720 B/op	    1349 allocs/op
+BenchmarkRunningConfig/8192KiB-10         	       1	4431831584 ns/op	   1.89 MB/s	114589680 B/op	    1355 allocs/op
+BenchmarkRunningConfig/8192KiB-10         	       1	4489316792 ns/op	   1.87 MB/s	114595448 B/op	    1368 allocs/op
+BenchmarkRunningConfig/8192KiB-10         	       1	4462085334 ns/op	   1.88 MB/s	114619976 B/op	    1340 allocs/op
+BenchmarkRunningConfig/8192KiB-10         	       1	4470091708 ns/op	   1.88 MB/s	114625824 B/op	    1355 allocs/op
+BenchmarkRunningConfig/8192KiB-10         	       1	4438549416 ns/op	   1.89 MB/s	114589872 B/op	    1356 allocs/op
+PASS
+ok  	github.com/gatework/go-net-connector/vendors	50.796s
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/textfsm
+cpu: Apple M5
+BenchmarkEmbeddedTemplate/1-10  	  122817	      1714 ns/op	  24.51 MB/s	    6518 B/op	      20 allocs/op
+BenchmarkEmbeddedTemplate/1-10  	  169130	      1431 ns/op	  29.35 MB/s	    6511 B/op	      20 allocs/op
+BenchmarkEmbeddedTemplate/1-10  	  163950	      1414 ns/op	  29.71 MB/s	    6511 B/op	      20 allocs/op
+BenchmarkEmbeddedTemplate/1-10  	  173348	      1401 ns/op	  29.97 MB/s	    6510 B/op	      20 allocs/op
+BenchmarkEmbeddedTemplate/1-10  	  173757	      1398 ns/op	  30.05 MB/s	    6510 B/op	      20 allocs/op
+BenchmarkEmbeddedTemplate/1-10  	  173528	      1404 ns/op	  29.92 MB/s	    6511 B/op	      20 allocs/op
+BenchmarkEmbeddedTemplate/1-10  	  169615	      1403 ns/op	  29.94 MB/s	    6510 B/op	      20 allocs/op
+BenchmarkEmbeddedTemplate/1-10  	  174726	      1390 ns/op	  30.21 MB/s	    6511 B/op	      20 allocs/op
+BenchmarkEmbeddedTemplate/1-10  	  170407	      1388 ns/op	  30.25 MB/s	    6511 B/op	      20 allocs/op
+BenchmarkEmbeddedTemplate/1-10  	  176851	      1500 ns/op	  27.99 MB/s	    6510 B/op	      20 allocs/op
+BenchmarkEmbeddedTemplate/1000-10         	     264	    891320 ns/op	  47.12 MB/s	 1239429 B/op	   14017 allocs/op
+BenchmarkEmbeddedTemplate/1000-10         	     274	    869079 ns/op	  48.33 MB/s	 1239434 B/op	   14017 allocs/op
+BenchmarkEmbeddedTemplate/1000-10         	     276	    873859 ns/op	  48.06 MB/s	 1239452 B/op	   14018 allocs/op
+BenchmarkEmbeddedTemplate/1000-10         	     274	    873461 ns/op	  48.08 MB/s	 1239441 B/op	   14017 allocs/op
+BenchmarkEmbeddedTemplate/1000-10         	     274	    874471 ns/op	  48.03 MB/s	 1239440 B/op	   14017 allocs/op
+BenchmarkEmbeddedTemplate/1000-10         	     273	    875112 ns/op	  47.99 MB/s	 1239449 B/op	   14017 allocs/op
+BenchmarkEmbeddedTemplate/1000-10         	     277	    864630 ns/op	  48.58 MB/s	 1239434 B/op	   14017 allocs/op
+BenchmarkEmbeddedTemplate/1000-10         	     280	    856480 ns/op	  49.04 MB/s	 1239441 B/op	   14017 allocs/op
+BenchmarkEmbeddedTemplate/1000-10         	     271	    863073 ns/op	  48.66 MB/s	 1239438 B/op	   14017 allocs/op
+BenchmarkEmbeddedTemplate/1000-10         	     277	    858493 ns/op	  48.92 MB/s	 1239447 B/op	   14017 allocs/op
+BenchmarkIndexedTemplate-10               	  146832	      1612 ns/op	    6510 B/op	      20 allocs/op
+BenchmarkIndexedTemplate-10               	  149326	      1613 ns/op	    6511 B/op	      20 allocs/op
+BenchmarkIndexedTemplate-10               	  149910	      1605 ns/op	    6510 B/op	      20 allocs/op
+BenchmarkIndexedTemplate-10               	  147171	      1623 ns/op	    6510 B/op	      20 allocs/op
+BenchmarkIndexedTemplate-10               	  149643	      1613 ns/op	    6510 B/op	      20 allocs/op
+BenchmarkIndexedTemplate-10               	  149553	      1606 ns/op	    6510 B/op	      20 allocs/op
+BenchmarkIndexedTemplate-10               	  148134	      1609 ns/op	    6510 B/op	      20 allocs/op
+BenchmarkIndexedTemplate-10               	  151365	      1610 ns/op	    6510 B/op	      20 allocs/op
+BenchmarkIndexedTemplate-10               	  147453	      1594 ns/op	    6510 B/op	      20 allocs/op
+BenchmarkIndexedTemplate-10               	  152175	      1591 ns/op	    6510 B/op	      20 allocs/op
+PASS
+ok  	github.com/gatework/go-net-connector/textfsm	7.602s
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/fleet
+cpu: Apple M5
+BenchmarkMockFleet/1000-10  	     522	    407817 ns/op	 2259334 B/op	    2031 allocs/op
+BenchmarkMockFleet/1000-10  	     624	    392388 ns/op	 2259017 B/op	    2030 allocs/op
+BenchmarkMockFleet/1000-10  	     609	    392566 ns/op	 2258957 B/op	    2030 allocs/op
+BenchmarkMockFleet/1000-10  	     616	    377007 ns/op	 2258945 B/op	    2030 allocs/op
+BenchmarkMockFleet/1000-10  	     632	    374912 ns/op	 2258952 B/op	    2030 allocs/op
+BenchmarkMockFleet/1000-10  	     601	    378149 ns/op	 2258984 B/op	    2030 allocs/op
+BenchmarkMockFleet/1000-10  	     616	    407660 ns/op	 2258971 B/op	    2030 allocs/op
+BenchmarkMockFleet/1000-10  	     626	    377045 ns/op	 2258947 B/op	    2030 allocs/op
+BenchmarkMockFleet/1000-10  	     636	    378559 ns/op	 2258944 B/op	    2030 allocs/op
+BenchmarkMockFleet/1000-10  	     624	    404816 ns/op	 2258964 B/op	    2030 allocs/op
+BenchmarkMockFleet/10000-10 	      64	   3614764 ns/op	28830171 B/op	   20038 allocs/op
+BenchmarkMockFleet/10000-10 	      63	   4023855 ns/op	28830155 B/op	   20038 allocs/op
+BenchmarkMockFleet/10000-10 	      58	   3559509 ns/op	28830181 B/op	   20038 allocs/op
+BenchmarkMockFleet/10000-10 	      63	   4052791 ns/op	28830202 B/op	   20038 allocs/op
+BenchmarkMockFleet/10000-10 	      60	   3860756 ns/op	28830216 B/op	   20038 allocs/op
+BenchmarkMockFleet/10000-10 	      64	   3913446 ns/op	28830313 B/op	   20038 allocs/op
+BenchmarkMockFleet/10000-10 	      58	   4172407 ns/op	28830220 B/op	   20038 allocs/op
+BenchmarkMockFleet/10000-10 	      68	   3506997 ns/op	28830157 B/op	   20038 allocs/op
+BenchmarkMockFleet/10000-10 	      54	   3989089 ns/op	28830233 B/op	   20038 allocs/op
+BenchmarkMockFleet/10000-10 	      64	   3688633 ns/op	28830152 B/op	   20038 allocs/op
+BenchmarkRulesResolve-10    	   37796	      6085 ns/op	    1221 B/op	      92 allocs/op
+BenchmarkRulesResolve-10    	   41289	      5798 ns/op	    1217 B/op	      92 allocs/op
+BenchmarkRulesResolve-10    	   42157	      5673 ns/op	    1218 B/op	      92 allocs/op
+BenchmarkRulesResolve-10    	   42648	      5697 ns/op	    1216 B/op	      92 allocs/op
+BenchmarkRulesResolve-10    	   42402	      5612 ns/op	    1217 B/op	      92 allocs/op
+BenchmarkRulesResolve-10    	   41091	      5671 ns/op	    1214 B/op	      92 allocs/op
+BenchmarkRulesResolve-10    	   43404	      5495 ns/op	    1216 B/op	      92 allocs/op
+BenchmarkRulesResolve-10    	   43946	      5555 ns/op	    1218 B/op	      92 allocs/op
+BenchmarkRulesResolve-10    	   42976	      5584 ns/op	    1218 B/op	      92 allocs/op
+BenchmarkRulesResolve-10    	   42934	      5553 ns/op	    1221 B/op	      92 allocs/op
+PASS
+ok  	github.com/gatework/go-net-connector/fleet	10.591s

@@ -58,14 +58,18 @@ func (t *Topology) Neighbors(ctx context.Context) (peers []Neighbor, result Resu
 	if err = t.supportsNeighbors(); err != nil {
 		return
 	}
-	err = t.device.WithOperation(ctx, func(op *connector.Operation) error { var e error; peers, e = t.neighbors(ctx, op, &result); return e })
+	err = t.device.WithOperation(ctx, func(ctx context.Context, op *connector.Operation) error {
+		var e error
+		peers, e = t.neighbors(ctx, op, &result)
+		return e
+	})
 	return
 }
 func (t *Topology) Descriptions(ctx context.Context) (descriptions map[string]string, result Result, err error) {
 	if err = t.supportsDescriptions(); err != nil {
 		return
 	}
-	err = t.device.WithOperation(ctx, func(op *connector.Operation) error {
+	err = t.device.WithOperation(ctx, func(ctx context.Context, op *connector.Operation) error {
 		var e error
 		descriptions, e = t.descriptions(ctx, op, &result)
 		return e
@@ -79,7 +83,11 @@ func (t *Topology) Discover(ctx context.Context) (snapshot Snapshot, err error) 
 	if err = t.supportsDescriptions(); err != nil {
 		return
 	}
-	err = t.device.WithOperation(ctx, func(op *connector.Operation) error { var e error; snapshot, e = t.discover(ctx, op); return e })
+	err = t.device.WithOperation(ctx, func(ctx context.Context, op *connector.Operation) error {
+		var e error
+		snapshot, e = t.discover(ctx, op)
+		return e
+	})
 	return
 }
 func (t *Topology) discover(ctx context.Context, op *connector.Operation) (s Snapshot, err error) {
@@ -163,7 +171,7 @@ func (t *Topology) Plan(ctx context.Context, opts FormatOptions) (plan Plan, err
 	if err = t.supportsWrite(); err != nil {
 		return
 	}
-	err = t.device.WithOperation(ctx, func(op *connector.Operation) error {
+	err = t.device.WithOperation(ctx, func(ctx context.Context, op *connector.Operation) error {
 		s, e := t.discover(ctx, op)
 		plan.Receipts = s.Receipts
 		if e != nil {
@@ -183,7 +191,7 @@ func (t *Topology) Audit(ctx context.Context, opts FormatOptions) (audit Audit, 
 	if err = t.supportsDescriptions(); err != nil {
 		return
 	}
-	err = t.device.WithOperation(ctx, func(op *connector.Operation) error {
+	err = t.device.WithOperation(ctx, func(ctx context.Context, op *connector.Operation) error {
 		s, e := t.discover(ctx, op)
 		audit.Receipts = s.Receipts
 		if e != nil {
@@ -216,7 +224,7 @@ func (t *Topology) Apply(ctx context.Context, plan Plan, opts ApplyOptions) (res
 	if err = t.supportsWrite(); err != nil {
 		return
 	}
-	err = t.device.WithOperation(ctx, func(op *connector.Operation) error { return t.apply(ctx, op, plan, opts, &result) })
+	err = t.device.WithOperation(ctx, func(ctx context.Context, op *connector.Operation) error { return t.apply(ctx, op, plan, opts, &result) })
 	return
 }
 
@@ -226,7 +234,7 @@ func (t *Topology) Sync(ctx context.Context, opts FormatOptions) (result Result,
 	if err = t.supportsWrite(); err != nil {
 		return
 	}
-	err = t.device.WithOperation(ctx, func(op *connector.Operation) error {
+	err = t.device.WithOperation(ctx, func(ctx context.Context, op *connector.Operation) error {
 		s, e := t.discover(ctx, op)
 		result.Receipts = append(result.Receipts, s.Receipts...)
 		if e != nil {

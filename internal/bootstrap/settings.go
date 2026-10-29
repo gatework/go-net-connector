@@ -14,20 +14,21 @@ import (
 
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/netdisco"
 	"github.com/gatework/go-net-connector/vendors"
 	"github.com/samber/do/v2"
 )
 
-var ErrCredentials = netdisco.ErrMissingCredentials
+var ErrCredentials = fleet.ErrMissingCredentials
 
 type Secret func(string) string
 type DeviceFactory func(connector.Profile, connector.ConnectionConfig) (*connector.Device, error)
 type Services struct {
 	policy  config.Snapshot
 	secret  Secret
-	rules   *netdisco.Rules
+	rules   *fleet.Rules
 	factory DeviceFactory
 	scope   *do.RootScope
 }
@@ -39,13 +40,13 @@ func New(policy config.Snapshot, secret Secret) (*Services, error) {
 	scope := do.New()
 	do.ProvideValue(scope, policy)
 	do.ProvideValue(scope, secret)
-	do.ProvideValue[netdisco.ProfileLookup](scope, vendors.Profile)
-	do.Provide(scope, func(i do.Injector) (*netdisco.Rules, error) {
+	do.ProvideValue[fleet.ProfileLookup](scope, vendors.Profile)
+	do.Provide(scope, func(i do.Injector) (*fleet.Rules, error) {
 		p, e := do.Invoke[config.Snapshot](i)
 		if e != nil {
 			return nil, e
 		}
-		lookup, e := do.Invoke[netdisco.ProfileLookup](i)
+		lookup, e := do.Invoke[fleet.ProfileLookup](i)
 		if e != nil {
 			return nil, e
 		}
@@ -53,9 +54,9 @@ func New(policy config.Snapshot, secret Secret) (*Services, error) {
 		if e != nil {
 			return nil, e
 		}
-		return netdisco.NewRules(o, lookup)
+		return fleet.NewRules(o, lookup)
 	})
-	rules, e := do.Invoke[*netdisco.Rules](scope)
+	rules, e := do.Invoke[*fleet.Rules](scope)
 	if e != nil {
 		return nil, e
 	}
@@ -68,8 +69,10 @@ func New(policy config.Snapshot, secret Secret) (*Services, error) {
 		if e != nil {
 			return nil, e
 		}
-		c.Host = "192.0.2.1"
-		if _, e = connector.New(p, c); e != nil {
+		if e = p.Validate(); e != nil {
+			return nil, e
+		}
+		if e = c.ValidateOptions(); e != nil {
 			return nil, e
 		}
 	}
@@ -95,7 +98,7 @@ func (s *Services) Close() {
 	}
 }
 func (s *Services) Policy() config.Snapshot { return s.policy }
-func (s *Services) Rules() *netdisco.Rules  { return s.rules }
+func (s *Services) Rules() *fleet.Rules     { return s.rules }
 func (s *Services) WithDeviceFactory(factory DeviceFactory) *Services {
 	copy := *s
 	copy.factory = factory
@@ -159,8 +162,8 @@ func mapping(p config.Snapshot, k string) (map[string]string, error) {
 	}
 	return out, nil
 }
-func ruleOptions(p config.Snapshot) (netdisco.RuleOptions, error) {
-	o := netdisco.RuleOptions{Selection: inventory.SelectionOptions{IncludeHosts: list(p, "inventory.include_hosts"), ExcludeHosts: list(p, "inventory.exclude_hosts"), IncludeNames: list(p, "inventory.include_names"), ExcludeNames: list(p, "inventory.exclude_names"), IncludeVendors: list(p, "inventory.include_vendors"), ExcludeVendors: list(p, "inventory.exclude_vendors"), IncludeModels: list(p, "inventory.include_models"), ExcludeModels: list(p, "inventory.exclude_models"), NameMatch: str(p, "inventory.name_match", "contains"), ModelMatch: str(p, "inventory.model_match", "contains")}}
+func ruleOptions(p config.Snapshot) (fleet.RuleOptions, error) {
+	o := fleet.RuleOptions{Selection: inventory.SelectionOptions{IncludeHosts: list(p, "inventory.include_hosts"), ExcludeHosts: list(p, "inventory.exclude_hosts"), IncludeNames: list(p, "inventory.include_names"), ExcludeNames: list(p, "inventory.exclude_names"), IncludeVendors: list(p, "inventory.include_vendors"), ExcludeVendors: list(p, "inventory.exclude_vendors"), IncludeModels: list(p, "inventory.include_models"), ExcludeModels: list(p, "inventory.exclude_models"), NameMatch: str(p, "inventory.name_match", "contains"), ModelMatch: str(p, "inventory.model_match", "contains")}}
 	var e error
 	o.VendorOverrides, e = mapping(p, "inventory.vendor_overrides")
 	if e != nil {
@@ -176,7 +179,7 @@ func ruleOptions(p config.Snapshot) (netdisco.RuleOptions, error) {
 			if !ok {
 				return o, config.ErrInvalid
 			}
-			rule := netdisco.Mapping{}
+			rule := fleet.Mapping{}
 			for k, v := range m {
 				if v == nil && (k == "os" || k == "model_prefix") {
 					continue
@@ -220,10 +223,10 @@ func (s *Services) connection(vendor string) (connector.ConnectionConfig, error)
 	}
 	return c, nil
 }
-func (s *Services) Device(ctx context.Context, r netdisco.Record) (*connector.Device, error) {
+func (s *Services) Device(ctx context.Context, r fleet.Record) (*connector.Device, error) {
 	return s.DeviceWithLogger(ctx, r, nil)
 }
-func (s *Services) DeviceWithLogger(ctx context.Context, r netdisco.Record, logger io.Writer) (*connector.Device, error) {
+func (s *Services) DeviceWithLogger(ctx context.Context, r fleet.Record, logger io.Writer) (*connector.Device, error) {
 	if e := ctx.Err(); e != nil {
 		return nil, e
 	}

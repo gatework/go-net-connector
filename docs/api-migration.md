@@ -52,3 +52,99 @@ Pool.Close retries retained failed owners. A direct Client.Close should follow
 completed/canceled transactions; active work stays owned by its context and Close
 returns ErrArchive until that work has returned. Borrowed writers must cooperate
 and must not reenter their owning stream/log sink.
+
+## 2026-10-29 quality changes
+
+- `vendors.Open` is removed. Use `vendors.Profile`, `connector.New`, register
+  `Close`, then call `Connect`. A connection error never transfers cleanup
+  responsibility away from the caller. Repeated `Close` retries failed cleanup;
+  successful cleanup is not repeated. Commands are never replayed.
+- `Profile.Validate`, `ConnectionConfig.Validate` and `ValidateOptions` perform
+  pure checks. The last checks reusable options without requiring a bound Host.
+  Constructors validate, normalize defaults and detach mutable configuration.
+- `StepResult.Rendered() (string, error)` exposes strict terminal-visible UTF-8.
+  Completed steps share immutable derived text. `Raw`, `Output`, failed Attempts,
+  accepted Steps and metadata-only formatting keep their existing contracts.
+- Planning, batch execution, reports and diagnostics moved from `netdisco` to
+  `fleet`; `netdisco.FleetOptions` becomes `fleet.RunOptions`. Inventory sources
+  and cache stay in `netdisco`. CLI/YAML/JSON vocabulary is unchanged.
+- `parallel.ErrWorkerExit` reports callbacks terminating with `runtime.Goexit`.
+  The batch stops admitting work and joins admitted workers. Fleet preserves
+  completed outcomes before invoking observers and records abnormal observers.
+  Panics still propagate; cancellation and callbacks remain cooperative.
+
+## 2026-10-29 callback and response refinement
+
+Three pre-v1 callback signatures change. Always pass the callback's supplied
+context to nested work; it includes cancellation from `Device.Close`:
+
+```go
+device.WithOperation(ctx, func(ctx context.Context, op *connector.Operation) error {
+    _, err := op.ExecuteCommand(ctx, command, connector.ExecuteOptions{})
+    return err
+})
+
+profile.AfterLogin = func(ctx context.Context, step connector.StepResult) (connector.LoginState, error) {
+    // Parse the explicit response accessors as needed.
+    return connector.LoginState{HAState: "active"}, ctx.Err()
+}
+
+// ConfigStrategy implementations now use:
+// Finish(context.Context, connector.Result) (string, error)
+```
+
+`AfterLogin` returns a value instead of a borrowed metadata map. Its errors stop
+login. `Finish` receives the admitted operation context. Callbacks remain
+cooperative: Close interrupts owned I/O without waiting for application callbacks.
+
+`StepResult.Response()` and `Attempt.Response()` expose an immutable `Response`.
+`Raw`, `RawPrompt`, and `Encoding` return explicit evidence. `Output`, `Rendered`,
+and `Prompt` return `(string, error)`; the latter two provide terminal-visible
+UTF-8. Missing conversion returns `ErrIncomplete`, and invalid conversion retains
+its original cause. Accessors never retry detection or decoding. A device-rejected
+completed response can therefore retain verified text even though it has no
+accepted Step. `Attempt.Complete` still means a prompt arrived, not acceptance.
+
+```go
+view := attempt.Response()
+text, err := view.Output()
+if err != nil {
+    text = view.Raw() // explicitly incomplete/invalid text evidence
+}
+```
+
+Existing Step convenience accessors remain; `Step.Prompt` preserves its historical
+UTF-8 wire form. Prefer `Response.Prompt` for verified visible text. Login callbacks
+also receive verified response snapshots. Formatting and JSON remain metadata-only.
+`Result.Steps` returns an independent outer slice, while immutable responses are
+shared; `Command()` still detaches mutable fields. Simultaneous operation, receipt,
+logging and cleanup failures remain discoverable with `errors.Is/As`, with the
+primary failure controlling fleet diagnostic classification. No command is replayed.
+
+`vendors.Profile` returns independent mutable declarations backed by a finite
+compiled catalog. Device snapshots and fixed matchers are private. `NewPlan`
+resolves capabilities once per vendor per plan; custom lookup state is not cached
+across plans. Each configuration collection still gets its own strategy instance.
+
+Optional source probes are `scripts/verify-firemon-source.py ADAPTER_PATH` and
+`scripts/verify-expect-source.py EXPECT_PATH`. They migrate or rebind imports only
+inside temporary source copies, without `replace` or `go.work`. The real modules
+remain pinned; passing these probes does not establish published adoption.
+
+Example lifecycle (the deferred Close also runs on a failed Connect):
+
+```go
+profile, err := vendors.Profile("cisco_ios")
+if err != nil { return err }
+device, err := connector.New(profile, cfg)
+if err != nil { return err }
+defer device.Close()
+if err := device.Connect(ctx); err != nil { return err }
+```
+
+`archive.Client.Close` still returns `ErrArchive` while transactions or Prepare
+are active; their caller contexts own cancellation. Pool performs cancellation
+and joining. Prepare waiters can cancel without waiting for another network
+preflight. Canceled/closed calls do not take the prepared fast path or begin
+local setup. Channel endpoints must be non-nil, own a Close function and support
+working deadlines; deadline failures preserve the original cause.

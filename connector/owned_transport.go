@@ -4,6 +4,7 @@ import (
 	"io"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // closeOwner separates transport cleanup from Session.Close's output errors.
@@ -31,4 +32,18 @@ func (t *closeOwner) complete() bool { t.mu.Lock(); defer t.mu.Unlock(); return 
 type osCloseOwner struct {
 	*closeOwner
 	syscall.Conn
+}
+
+func (t *osCloseOwner) SetReadDeadline(deadline time.Time) error {
+	if stream, ok := t.ReadWriteCloser.(interface{ SetReadDeadline(time.Time) error }); ok {
+		return stream.SetReadDeadline(deadline)
+	}
+	return ErrUnsupported
+}
+
+func (t *osCloseOwner) NormalizeReadError(err error) error {
+	if stream, ok := t.ReadWriteCloser.(interface{ NormalizeReadError(error) error }); ok {
+		return stream.NormalizeReadError(err)
+	}
+	return err
 }

@@ -93,6 +93,7 @@ device, err := connector.New(profile, connector.ConnectionConfig{
 })
 if err != nil { return err }
 defer device.Close()
+if err = device.Connect(ctx); err != nil { return err }
 result, err := device.RunningConfig(ctx)
 if err != nil { return err }
 configuration, ok := result.Config()
@@ -100,7 +101,7 @@ _ = configuration
 _ = ok
 ```
 
-`connector.New` 不连接设备；`vendors.Open` 会建立连接。`ExecuteScript` 先校验完整脚本，再取得设备操作租约，操作并发或重入返回忙错误。每条命令共享发送、分页和交互的绝对期限；默认响应上限 32 MiB，也支持脚本累计预算。
+`connector.New` 不连接设备；先登记 `Close`，再显式调用 `Connect`，连接失败时仍由调用方持有清理责任。`vendors.Open` 已移除。`ExecuteScript` 先校验完整脚本，再取得设备操作租约，操作并发或重入返回忙错误。每条命令共享发送、分页和交互的绝对期限；默认响应上限 32 MiB，也支持脚本累计预算。
 
 常用包：
 
@@ -109,7 +110,8 @@ _ = ok
 - `topology`：发现、描述审计、纯规划、确认后应用、读回验证和保存。
 - `transfer`：原生 TFTP、Junos FTP/SCP、目标策略及设备报告回执。
 - `archive`：本地/SSH 归档池、worker 协议和服务器核验。常规归档使用 `NewPool`；`Client` 是低层协议组合接口。
-- `inventory` / `netdisco` / `parallel`：纯选择器、HTTP/PG 来源、缓存、计划、Fleet、报告和有界并发。
+- `inventory` / `netdisco`：清单选择器、HTTP/PG 来源与缓存。
+- `fleet` / `parallel`：通用计划、批次、报告及有界并发。
 - `storage`：稳定路径锁、私有日志、原子写入与提交/持久化回执。
 - `config`：不可变配置快照；`internal/bootstrap` 是唯一 samber/do 组合根。
 
@@ -118,6 +120,8 @@ Go API 直接注入 `ConnectionConfig.Logger` 且不设置 `LogLevel` 时，保�
 操作失败时仍需检查返回结果：已完成的命令、已提交文件和已确认上传可能保留在部分回执中。库不会自动重放设备写入。`device_reported` 仅表示设备报告完成；`server_verified` 表示已读取并核验服务器文件。用户回调、日志 sink 和上传回调必须配合 context；库不以遗弃 goroutine 的方式模拟取消。
 
 ## 验证与边界
+
+本轮改进、基准和平台验证见 [2026-10-29 优化记录](docs/2026-10-29-quality-verification.md)，公开 API 变更见 [迁移说明](docs/api-migration.md)。
 
 首版发布流程与产物校验见 [发布说明](docs/releasing.md)，当前发布验证状态见 [发布验证](docs/release-verification.md)。
 

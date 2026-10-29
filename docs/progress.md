@@ -1,5 +1,7 @@
 # Implementation progress
 
+The latest local quality pass is complete; see [2026-10-29 verification](2026-10-29-quality-verification.md). The following delivery notes are historical and do not authorize publication of the new work.
+
 Implementation and final scoped review are complete. The user authorized a private GitHub commit/push and first release on 2026-10-26. Release preparation is in progress; deployment remains outside scope.
 
 | Stage | Status |
@@ -51,3 +53,31 @@ The user explicitly authorized committing and pushing both repositories. This su
 The current connector changes implement terminal Close/cancellation and explicit recovery, failed-attempt evidence, key authentication and line endings, shared save validation, API naming and typed policies, archive channel cleanup, and migration documentation. go-expect resolves directly from the immutable GitHub version pinned in go.mod with GOWORK=off and no dependency replacement.
 
 Fresh local verification passed: connector full race/shuffle suite, go vet, goimports, go mod verify, and the independent consumer/outside-checkout CLI check. The paired go-expect script/ci and actionlint checks also passed. These checks do not establish remote CI, full cross-platform integration, final implementation review, real-device behavior, or a formal release.
+
+## 2026-10-29: foundation quality pass
+
+Approved plan: [2026-10-29-quality-plan.md](2026-10-29-quality-plan.md). Worktrees relative to `/Users/crate/Works/go`: `.worktrees/connector-unification/go-expect` (base `3d3b1ef`) and `.worktrees/connector-quality/go-net-connector` (base `c68c42b`). Existing fleet migration and archive/validation WIP was preserved and completed; original checkouts remain separate.
+
+Lifecycle fixes own partial factory transports, retain primary and cleanup causes, stop mutating borrowed AfterLogin metadata, and make archive Prepare cancellation responsive. The public surface now includes pure validation and immutable rendered response access; `vendors.Open` was removed and fleet orchestration moved to `fleet`. Rendering, disabled logging, rule compilation and bounded embedded TextFSM compilation were optimized. go-expect receives OS scratch reuse, incremental literal-All matching and public Redactor improvements without changing arbitrary regexp matching or the polling architecture.
+
+Independent review found and resolved rendered-prompt/configuration evidence mismatch, overlapping parent-cancellation/Goexit cause loss, and a quadratic long-secret redaction boundary path. Regression checks and independent source re-review are complete; no source-review blockers remain. Both repositories passed Go 1.26/1.27 macOS/Linux race/vet checks and fixed-count fuzzing. Connector full CI also covered the installed worker, temporary PostgreSQL, public source consumer and current firemon adapter contracts. Go 1.27.3 vulnerability scans passed after the older host toolchain was identified separately. The [verification report](2026-10-29-quality-verification.md) records raw benchmark artifacts, slower cases, repeated output measurements and delivery limits. No current authorization to commit, push, publish or deploy is inferred from the historical delivery section above.
+
+## 2026-10-29 second refinement
+
+Completed the [seven-task refinement](2026-10-29-refinement-plan.md): admitted
+callback contexts and typed login state; immutable failed/accepted response
+evidence; preserved simultaneous errors and primary diagnostics; reusable vendor
+definitions and plan capabilities; output sharing; and connector forwarding for
+expect's runtime read deadlines/PTY normalization. The paired expect worktree
+adds the runtime read pump, owned Poll fence, receive-tail release and incremental
+long-rule redaction. No dependency replacement or version change was made.
+
+Both independent scoped reviews and final integration review passed. All final
+platform gates, race/vet, fuzz, lint, vulnerability and source-consumer checks are
+recorded in the [refinement verification](2026-10-29-refinement-verification.md).
+Ten-sample serial comparisons passed the final performance gate after correcting
+an intermediate redactor allocation regression and a heap measurement baseline.
+The full ten-thousand-device plan is about 97% faster; generic command timing is
+unchanged, configuration allocation drops about one full normalized output copy.
+Expect's idle resource, PTY, redaction and receive-storage results are reported
+separately. Original WIP is preserved; changes remain local and uncommitted.

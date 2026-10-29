@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"reflect"
 	"time"
 )
 
@@ -18,6 +19,9 @@ type Launcher func(context.Context) (Channel, error)
 
 // runChannel owns a launched channel, including partial returns with an error.
 func runChannel(ctx context.Context, launch Launcher, timeout time.Duration, run func(*Protocol) error, retain func(func() error)) (err error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	ch, e := launch(ctx)
 	closeChannel := func() error {
 		err := ch.Close()
@@ -39,21 +43,43 @@ func runChannel(ctx context.Context, launch Launcher, timeout time.Duration, run
 			}
 		}()
 	}
+	if ch.Close == nil || nilEndpoint(ch.Input) || nilEndpoint(ch.Output) {
+		return ErrArchive
+	}
 	input, ok := ch.Input.(interface{ SetWriteDeadline(time.Time) error })
-	if !ok || ch.Output == nil {
+	if !ok {
 		return ErrArchive
 	}
 	output, ok := ch.Output.(interface{ SetReadDeadline(time.Time) error })
 	if !ok {
 		return ErrArchive
 	}
-	// Reject endpoints whose deadline methods exist but cannot enforce deadlines.
+	// Verify actual deadline support before any protocol bytes are exchanged.
 	deadline := time.Now().Add(time.Second)
-	if input.SetWriteDeadline(deadline) != nil || output.SetReadDeadline(deadline) != nil {
-		return ErrArchive
+	for _, set := range []func(time.Time) error{input.SetWriteDeadline, output.SetReadDeadline} {
+		if err := set(deadline); err != nil {
+			return &Error{cause: errors.Join(ErrArchive, err)}
+		}
 	}
-	if input.SetWriteDeadline(time.Time{}) != nil || output.SetReadDeadline(time.Time{}) != nil {
-		return ErrArchive
+	for _, set := range []func(time.Time) error{input.SetWriteDeadline, output.SetReadDeadline} {
+		if err := set(time.Time{}); err != nil {
+			return &Error{cause: errors.Join(ErrArchive, err)}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	return run(NewProtocol(ch.Input, ch.Output, timeout))
+}
+
+func nilEndpoint(v any) bool {
+	if v == nil {
+		return true
+	}
+	r := reflect.ValueOf(v)
+	switch r.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return r.IsNil()
+	}
+	return false
 }

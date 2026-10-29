@@ -40,3 +40,9 @@ for ci_binary in net-backup net-backup-batch net-backup-tftp net-topology net-co
 done
 go test -race -shuffle=on -count=1 -v ./...
 go vet ./...
+
+# Fixed execution counts avoid fuzz coordinator deadline races.
+go test -run '^$' -fuzz '^FuzzYAMLBoundary$' -fuzztime=100000x -parallel=2 ./config
+go test -run '^$' -fuzz '^FuzzTargetValidation$' -fuzztime=100000x -parallel=2 ./transfer
+go test -run '^$' -fuzz '^FuzzRenderString$' -fuzztime=100000x -parallel=2 ./internal/terminal
+python3 scripts/verify-consumer.py

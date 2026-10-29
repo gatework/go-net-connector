@@ -25,6 +25,7 @@ type Device struct {
 	cancel     context.CancelFunc
 	retired    atomic.Bool
 	profile    Profile
+	patterns   map[*regexp.Regexp]expect.Pattern
 	config     ConnectionConfig
 	factory    TransportFactory
 	lease      atomic.Bool
@@ -36,46 +37,24 @@ type Device struct {
 	transport  io.ReadWriteCloser
 	owner      *closeOwner
 	log        *logWriter
-	metadata   map[string]string
 }
 
 func New(profile Profile, cfg ConnectionConfig, opts ...Option) (*Device, error) {
-	if cfg.Logger != nil && nilValue(cfg.Logger) {
-		return nil, ErrInvalid
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 	p, e := profile.clone()
 	if e != nil {
 		return nil, e
 	}
-	if strings.TrimSpace(cfg.Host) == "" || strings.ContainsAny(cfg.Host, "\r\n\x00\t ") || strings.HasPrefix(cfg.Host, "-") || strings.ContainsAny(cfg.Username+cfg.Password+cfg.EnablePassword+cfg.KeyPassphrase+cfg.IdentityFile+cfg.KnownHosts+cfg.SSHPath+cfg.TelnetPath, "\r\n\x00") || cfg.Port < 0 || cfg.Port > 65535 {
-		return nil, ErrInvalid
-	}
 	if cfg.LineEnding == "" {
 		cfg.LineEnding = "\n"
 	}
-	if cfg.LineEnding != "\n" && cfg.LineEnding != "\r" && cfg.LineEnding != "\r\n" {
-		return nil, ErrInvalid
-	}
 	if cfg.Protocol == "" {
-		cfg.Protocol = "ssh"
-	}
-	if cfg.Protocol != "ssh" && cfg.Protocol != "telnet" {
-		return nil, ErrInvalid
+		cfg.Protocol = ProtocolSSH
 	}
 	if cfg.HostKeyPolicy == "" {
-		cfg.HostKeyPolicy = "strict"
-	}
-	if cfg.HostKeyPolicy != "strict" && cfg.HostKeyPolicy != "accept_new" && cfg.HostKeyPolicy != "replace" {
-		return nil, ErrInvalid
-	}
-	if cfg.HostKeyPolicy == "replace" && strings.TrimSpace(cfg.KnownHosts) == "" {
-		return nil, ErrInvalid
-	}
-	if cfg.LogLevel != "" && logPriority(cfg.LogLevel) < 0 {
-		return nil, ErrInvalid
-	}
-	if cfg.LoginTimeout < 0 || cfg.CommandTimeout < 0 || cfg.WriteTimeout < 0 || cfg.MaxOutputBytes < 0 || cfg.MaxScriptOutputBytes < 0 {
-		return nil, ErrInvalid
+		cfg.HostKeyPolicy = HostKeyStrict
 	}
 	if cfg.LoginTimeout == 0 {
 		cfg.LoginTimeout = 10 * time.Second
@@ -103,7 +82,8 @@ func New(profile Profile, cfg ConnectionConfig, opts ...Option) (*Device, error)
 			return nil, e
 		}
 	}
-	d := &Device{profile: p, config: cfg, factory: o.factory, metadata: make(map[string]string)}
+	d := &Device{profile: p, config: cfg, factory: o.factory}
+	d.compilePatterns()
 	d.prompt.Store("")
 	d.haState.Store("")
 	d.log = &logWriter{target: cfg.Logger, level: cfg.LogLevel, host: cfg.Host, encoding: "auto", paused: true}
@@ -230,17 +210,17 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 	cfg.Challenges = cloneInteractions(cfg.Challenges)
 	cfg.LegacySSHArguments = append([]string(nil), cfg.LegacySSHArguments...)
 	t, e := d.factory(ctx, cfg)
+	// A partial factory return still transfers cleanup responsibility.
+	if !nilValue(t) {
+		d.transport = t
+		d.owner = &closeOwner{ReadWriteCloser: t}
+	}
 	if e != nil {
-		if !nilValue(t) {
-			e = errors.Join(e, t.Close())
-		}
-		return fail("connection_failed", "connect", Command{}, e)
+		return joinCleanup(fail("connection_failed", "connect", Command{}, e), d.closeResources())
 	}
 	if nilValue(t) {
 		return ErrConnection
 	}
-	d.transport = t
-	d.owner = &closeOwner{ReadWriteCloser: t}
 	var owned io.ReadWriteCloser = d.owner
 	if conn, ok := t.(syscall.Conn); ok {
 		owned = &osCloseOwner{closeOwner: d.owner, Conn: conn}
@@ -251,8 +231,7 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 	}
 	session, e := expect.NewSession(owned, opts...)
 	if e != nil {
-		_ = d.closeResources()
-		return e
+		return joinCleanup(e, d.closeResources())
 	}
 	d.lifeMu.Lock()
 	if d.closed {
@@ -264,7 +243,7 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 	defer func() {
 		if err != nil {
 			if cleanup := d.closeResources(); cleanup != nil {
-				err = errors.Join(err, errCleanup, cleanup)
+				err = joinFailures(err, fail("cleanup_failed", "cleanup", Command{}, errors.Join(errCleanup, cleanup)))
 			}
 		}
 	}()
@@ -286,14 +265,20 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 		}
 		return ErrClosed
 	}
-	d.prompt.Store(strings.TrimSpace(response.prompt))
+	d.prompt.Store(strings.TrimSpace(response.Prompt()))
 	d.connected.Store(true)
 	d.lifeMu.Unlock()
 	d.retired.Store(false)
-	d.privileged.Store(strings.Contains(response.prompt, "]"))
+	d.privileged.Store(strings.Contains(response.Prompt(), "]"))
 	if d.profile.AfterLogin != nil {
-		d.metadata = d.profile.AfterLogin(response)
-		d.haState.Store(d.metadata["ha_state"])
+		// Freeze verified text before publishing the login response. A callback
+		// may inspect conversion errors or choose to consume only the raw banner.
+		_, _ = response.response.data.convert()
+		state, err := d.profile.AfterLogin(ctx, response)
+		if err != nil {
+			return fail("after_login_failed", "login", Command{}, err)
+		}
+		d.haState.Store(state.HAState)
 	}
 	if c, ok := t.(interface{ Authenticated() error }); ok {
 		if e = c.Authenticated(); e != nil {
@@ -315,7 +300,7 @@ func (d *Device) baseSecrets() []string {
 	return s
 }
 func (d *Device) loginInteractions(secret string) []Interaction {
-	hostkey := Interaction{Pattern: regexp.MustCompile(`(?i)\(yes/no(?:/\[fingerprint\])?\)\?\s*\z`), Limit: 1, Respond: func(context.Context, string) (string, error) {
+	hostkey := Interaction{Pattern: hostKeyQuestion, Limit: 1, Respond: func(context.Context, string) (string, error) {
 		if d.config.HostKeyPolicy == "strict" {
 			return "", ErrAuthentication
 		}
@@ -337,7 +322,7 @@ func (d *Device) loginInteractions(secret string) []Interaction {
 	replies = append(replies, d.profile.LoginInteractions...)
 	replies = append(replies, d.config.Challenges...)
 	if d.config.KeyPassphrase != "" {
-		replies = append(replies, Interaction{Pattern: regexp.MustCompile(`(?i)Enter passphrase for key[^\r\n]*:[ \t]*\z`), Reply: d.config.KeyPassphrase + d.config.LineEnding, Limit: 1, Sensitive: true})
+		replies = append(replies, Interaction{Pattern: keyPassphraseQuestion, Reply: d.config.KeyPassphrase + d.config.LineEnding, Limit: 1, Sensitive: true})
 	}
 	return append(replies, user, pass)
 }
@@ -373,7 +358,6 @@ func (d *Device) closeResources() error {
 	d.privileged.Store(false)
 	d.haState.Store("")
 	d.prompt.Store("")
-	clear(d.metadata)
 	var failure error
 	d.lifeMu.Lock()
 	session := d.session
@@ -424,6 +408,8 @@ func (d *Device) ExecuteScript(ctx context.Context, script Script, opts ExecuteO
 	defer cancel()
 	return d.execute(ctx, s, opts, nil)
 }
+
+var ansiColor = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 type execution struct {
 	attempts     []Attempt
@@ -476,15 +462,15 @@ func (d *Device) execute(ctx context.Context, script Script, opts ExecuteOptions
 			_ = d.closeResources()
 			return
 		}
-		if e := d.log.scope(d.baseSecrets(), true); err == nil && e != nil {
-			err = fail("log_error", "logging", Command{}, e)
+		if e := d.log.scope(d.baseSecrets(), true); e != nil {
+			err = joinFailures(err, fail("log_error", "logging", Command{}, e))
 		}
 		level, status := "info", "completed"
 		if err != nil {
 			level, status = "error", "failed"
 		}
-		if e := d.log.event("operation_complete", level, Command{}, status); err == nil && e != nil {
-			err = e
+		if e := d.log.event("operation_complete", level, Command{}, status); e != nil {
+			err = joinFailures(err, e)
 		}
 		if err != nil {
 			err = joinCleanup(err, d.closeResources())
@@ -518,7 +504,7 @@ func (d *Device) runScript(ctx context.Context, script Script, opts ExecuteOptio
 			var s StepResult
 			s, err = d.read(ac, Command{}, d.profile.PrivilegePrompt, d.loginInteractions(secret), true, false)
 			if err == nil {
-				d.prompt.Store(strings.TrimSpace(s.prompt))
+				d.prompt.Store(strings.TrimSpace(s.Prompt()))
 				d.privileged.Store(true)
 			}
 		}
@@ -548,7 +534,7 @@ func (d *Device) runScript(ctx context.Context, script Script, opts ExecuteOptio
 		}
 		var step StepResult
 		step, err = x.command(ctx, c)
-		if step.prompt != "" {
+		if step.Prompt() != "" {
 			result.steps = append(result.steps, step)
 		}
 		if err == nil && d.profile.AfterCommand != nil {
@@ -563,9 +549,9 @@ func (d *Device) runScript(ctx context.Context, script Script, opts ExecuteOptio
 				err = configurationFailure(c, e)
 			}
 		}
-		if step.prompt != "" && opts.OnReceipt != nil {
-			if e := opts.OnReceipt(ctx, step); err == nil && e != nil {
-				err = fail("receipt_callback_failed", "script", c, e)
+		if step.Prompt() != "" && opts.OnReceipt != nil {
+			if e := opts.OnReceipt(ctx, step); e != nil {
+				err = joinFailures(err, fail("receipt_callback_failed", "script", c, e))
 			}
 		}
 		if err != nil {
@@ -589,10 +575,10 @@ func (d *Device) runScript(ctx context.Context, script Script, opts ExecuteOptio
 func (x *execution) command(ctx context.Context, c Command) (step StepResult, err error) {
 	attempted := false
 	written := 0
-	var response StepResult
+	var response Response
 	defer func() {
 		if attempted {
-			x.attempts = append(x.attempts, Attempt{command: c.clone(), response: response, written: written, complete: response.prompt != "", err: err})
+			x.attempts = append(x.attempts, Attempt{command: c.clone(), response: response, written: written, complete: response.RawPrompt() != "", err: err})
 		}
 	}()
 
@@ -615,8 +601,8 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 		return step, fail("log_error", "logging", c, e)
 	}
 	defer func() {
-		if e := restore(); err == nil && e != nil {
-			err = fail("log_error", "logging", c, e)
+		if e := restore(); e != nil {
+			err = joinFailures(err, fail("log_error", "logging", c, e))
 		}
 	}()
 	if e := d.log.event("command_start", "info", c, ""); e != nil {
@@ -627,8 +613,8 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 		if err != nil {
 			level, status = "error", "failed"
 		}
-		if e := d.log.event("command_complete", level, c, status); err == nil && e != nil {
-			err = e
+		if e := d.log.event("command_complete", level, c, status); e != nil {
+			err = joinFailures(err, e)
 		}
 	}()
 	d.log.count = func(n int) { x.bytes += int64(n) }
@@ -673,44 +659,31 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 	replies := append(cloneInteractions(c.Interactions), d.profile.Interactions...)
 	replies = append(replies, Interaction{Pattern: d.profile.Pager, Reply: d.profile.PagerResponse, Unlimited: true})
 	step, err = d.read(cc, c, prompt, replies, false, c.Poll)
-	response = step
+	response = step.Response()
 	step.duration = time.Since(started)
 	if err != nil {
 		return StepResult{}, err
 	}
-	wireOutput := step.output
-	step.output, step.outputEncoding, err = textcodec.Decode(step.output, "auto")
-	if err != nil {
-		return StepResult{}, fail("invalid_output_encoding", "parse", c, err)
+	diagnostic, conversionErr := response.data.convert()
+	if conversionErr != nil {
+		return StepResult{}, fail("invalid_output_encoding", "parse", c, conversionErr)
 	}
-	// Diagnose the decoded response as well as the visible terminal text, so
-	// overwritten device errors remain failures. Cursor offsets belong to the
-	// original bytes; converting GBK first would shift those offsets in UTF-8.
-	diagnostic := step.output
-	if step.outputEncoding != "utf-8" {
-		step.output, err = terminal.RenderEncoded([]byte(wireOutput), true, step.outputEncoding)
-		if err == nil {
-			step.prompt, err = terminal.RenderEncoded([]byte(step.prompt), true, step.outputEncoding)
-		}
-		if err != nil {
-			return StepResult{}, fail("invalid_output_encoding", "parse", c, err)
-		}
-	}
-	if int64(len(step.output)) > d.config.MaxOutputBytes {
+	if int64(len(step.Output())) > d.config.MaxOutputBytes {
 		return step, fail("output_limit_exceeded", "parse", c, ErrOutputLimit)
 	}
-	diagnostic = regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(diagnostic, "")
-	diagnostic = strings.ReplaceAll(strings.ReplaceAll(diagnostic, "\r\n", "\n"), "\r", "\n")
-	rendered, renderErr := terminal.Render([]byte(step.output), true)
-	if renderErr != nil {
-		return StepResult{}, fail("invalid_output_encoding", "parse", c, renderErr)
+	if len(d.profile.CommandErrors) > 0 {
+		if strings.Contains(diagnostic, "\x1b[") {
+			diagnostic = ansiColor.ReplaceAllString(diagnostic, "")
+		}
+		diagnostic = strings.ReplaceAll(strings.ReplaceAll(diagnostic, "\r\n", "\n"), "\r", "\n")
 	}
+	rendered, _ := response.Rendered()
 	for _, pattern := range d.profile.CommandErrors {
 		if pattern.MatchString(diagnostic) || pattern.MatchString(rendered) {
 			return StepResult{}, fail("device_error", "command", c, ErrDevice)
 		}
 	}
-	d.prompt.Store(strings.TrimSpace(step.prompt))
+	d.prompt.Store(strings.TrimSpace(step.Prompt()))
 	if x.limit > 0 && x.bytes > x.limit {
 		return step, fail("script_output_limit_exceeded", "script", c, ErrScriptLimit)
 	}
@@ -735,14 +708,34 @@ func (d *Device) read(ctx context.Context, c Command, prompt *regexp.Regexp, rep
 		return step, ErrInvalid
 	}
 	var raw, body strings.Builder
-	defer func() { step.command = c.clone(); step.raw = raw.String(); step.output = body.String() }()
+	var rawPrompt string
+	separate := false
+	defer func() {
+		step.command = c.clone()
+		wire := raw.String()
+		output := wire
+		if separate {
+			output = body.String()
+		}
+		step.response = Response{data: &responseData{raw: wire, rawPrompt: rawPrompt, output: output,
+			outputErr: ErrIncomplete, renderErr: ErrIncomplete, promptErr: ErrIncomplete}}
+	}()
 	completed := false
 	appendSegment := func(r expect.Result, capture bool) error {
+		if !capture && !separate {
+			// Most responses never remove a pager marker: share raw until then.
+			body.WriteString(raw.String())
+			separate = true
+		}
 		raw.WriteString(r.Before)
 		raw.WriteString(r.Match)
-		body.WriteString(r.Before)
+		if separate {
+			body.WriteString(r.Before)
+		}
 		if capture {
-			body.WriteString(r.Match)
+			if separate {
+				body.WriteString(r.Match)
+			}
 		} else {
 			// Go regex boundaries consume delimiters that Ruby lookarounds retain.
 			for _, b := range r.Match {
@@ -758,24 +751,16 @@ func (d *Device) read(ctx context.Context, c Command, prompt *regexp.Regexp, rep
 	}
 	var cases []expect.Case
 	add := func(p *regexp.Regexp, h expect.Handler) {
-		pattern, _ := expect.FromRegexp(p)
+		pattern := d.pattern(p)
 		cases = append(cases, expect.Case{Pattern: pattern, Handler: h})
 	}
 	if login {
-		for _, failure := range []struct {
-			pattern string
-			cause   error
-		}{
-			{`(?i)Connection refused`, errConnectionRefused},
-			{`(?i)(?:REMOTE HOST IDEN|IDENTIFICATION CHANGED)`, errHostKeyChanged},
-			{`(?i)RSA modulus too small`, errRSATooSmall},
-			{`(?i)Selected cipher type <unknown> not supported by server`, errUnsupportedCipher},
-		} {
-			add(regexp.MustCompile(failure.pattern), func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
+		for _, failure := range loginFailures {
+			add(failure.pattern, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
 				return expect.Return, failure.cause
 			})
 		}
-		failures := append([]*regexp.Regexp{regexp.MustCompile(`(?i)(?:REMOTE HOST IDENTIFICATION|Host key verification failed|Connection refused|No route to host|Connection reset|(?:Operation|Connection) timed out)`)}, d.profile.AuthenticationErrors...)
+		failures := append([]*regexp.Regexp{loginAuthError}, d.profile.AuthenticationErrors...)
 		for _, p := range failures {
 			add(p, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
 				return expect.Return, ErrAuthentication
@@ -824,7 +809,7 @@ func (d *Device) read(ctx context.Context, c Command, prompt *regexp.Regexp, rep
 		if e := appendSegment(r, true); e != nil {
 			return expect.Return, e
 		}
-		step = StepResult{command: c.clone(), raw: raw.String(), output: body.String(), prompt: r.Match}
+		rawPrompt = r.Match
 		completed = true
 		return expect.Return, nil
 	})
@@ -842,7 +827,9 @@ func (d *Device) read(ctx context.Context, c Command, prompt *regexp.Regexp, rep
 		remaining := max(0, int(d.config.MaxOutputBytes)-raw.Len())
 		prefix := final.Before[:min(len(final.Before), remaining)]
 		raw.WriteString(prefix)
-		body.WriteString(prefix)
+		if separate {
+			body.WriteString(prefix)
+		}
 	}
 	if err != nil && !completed {
 		phase := map[bool]string{true: "login", false: "command"}[login]
@@ -903,6 +890,11 @@ func (l *logWriter) scope(secrets []string, paused bool) error {
 	return l.startLocked(secrets, paused)
 }
 func (l *logWriter) startLocked(secrets []string, paused bool) error {
+	l.secrets = append([]string(nil), secrets...)
+	l.paused = paused
+	if paused || l.target == nil || l.level != "" && l.level != "debug" {
+		return nil
+	}
 	var e error
 	l.redactor, e = expect.NewRedactor(textcodec.SecretVariants(secrets, l.encoding), "[REDACTED]")
 	if e != nil {
@@ -912,8 +904,6 @@ func (l *logWriter) startLocked(secrets []string, paused bool) error {
 	if e != nil {
 		return e
 	}
-	l.secrets = append([]string(nil), secrets...)
-	l.paused = paused
 	l.renderer = terminal.New(writerFunc(func(p []byte) (int, error) {
 		if e := l.emit(l.rendered.Append(p)); e != nil {
 			return 0, e

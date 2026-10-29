@@ -7,8 +7,11 @@ import (
 	"encoding/csv"
 	"errors"
 	"io"
+	"io/fs"
+	"maps"
 	"regexp"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/gatework/go-net-connector/internal/terminal"
@@ -26,58 +29,126 @@ var (
 //go:embed templates
 var templates embed.FS
 
-// Parse selects a template using the complete vendor key and command.
-func Parse(vendor, command, output string) ([]map[string]any, error) {
-	data, e := templates.ReadFile("templates/index")
-	if e != nil {
+type indexEntry struct {
+	vendor, command *regexp.Regexp
+	template        string
+}
+type catalog struct {
+	index     []indexEntry
+	templates map[string]func() (fsm.TextFSM, error)
+}
+
+var embeddedCatalog = sync.OnceValues(loadCatalog)
+
+func loadCatalog() (*catalog, error) {
+	c := &catalog{templates: make(map[string]func() (fsm.TextFSM, error))}
+	err := fs.WalkDir(templates, "templates", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".textfsm") {
+			return nil
+		}
+		c.templates[strings.TrimPrefix(path, "templates/")] = sync.OnceValues(func() (fsm.TextFSM, error) {
+			data, err := templates.ReadFile(path)
+			if err != nil {
+				return fsm.TextFSM{}, ErrTemplateMissing
+			}
+			return compileTemplate(string(data))
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, ErrTemplateInvalid
+	}
+	data, err := templates.ReadFile("templates/index")
+	if err != nil {
 		return nil, ErrTemplateInvalid
 	}
 	reader := csv.NewReader(strings.NewReader(string(data)))
 	reader.TrimLeadingSpace = true
-	header, e := reader.Read()
-	if e != nil || len(header) != 3 || header[0] != "Template" || header[1] != "Vendor" || header[2] != "Command" {
+	header, err := reader.Read()
+	if err != nil || len(header) != 3 || header[0] != "Template" || header[1] != "Vendor" || header[2] != "Command" {
 		return nil, ErrTemplateInvalid
 	}
 	for {
-		row, e := reader.Read()
-		if errors.Is(e, io.EOF) {
-			return nil, ErrTemplateMissing
+		row, err := reader.Read()
+		if errors.Is(err, io.EOF) {
+			return c, nil
 		}
-		if e != nil || len(row) != 3 {
+		if err != nil || len(row) != 3 {
 			return nil, ErrTemplateInvalid
 		}
-		vr, e := regexp.Compile(strings.TrimSpace(row[1]))
-		if e != nil {
+		vendor, err := regexp.Compile(strings.TrimSpace(row[1]))
+		if err != nil {
 			return nil, ErrTemplateInvalid
 		}
-		cr, e := regexp.Compile(strings.TrimSpace(row[2]))
-		if e != nil {
+		command, err := regexp.Compile(strings.TrimSpace(row[2]))
+		if err != nil {
 			return nil, ErrTemplateInvalid
 		}
-		if vr.MatchString(vendor) && cr.MatchString(command) {
-			data, e := templates.ReadFile("templates/" + strings.TrimSpace(row[0]))
-			if e != nil {
-				return nil, ErrTemplateMissing
-			}
-			return ParseTemplate(string(data), output)
+		c.index = append(c.index, indexEntry{vendor, command, strings.TrimSpace(row[0])})
+	}
+}
+
+// Parse selects a template using the complete vendor key and command.
+func Parse(vendor, command, output string) ([]map[string]any, error) {
+	c, err := embeddedCatalog()
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range c.index {
+		if entry.vendor.MatchString(vendor) && entry.command.MatchString(command) {
+			return ParseTemplate(entry.template, output)
 		}
 	}
+	return nil, ErrTemplateMissing
+}
+
+// compileTemplate contains dependency panic paths at the untrusted input boundary.
+func compileTemplate(source string) (machine fsm.TextFSM, err error) {
+	defer func() {
+		if recover() != nil {
+			machine = fsm.TextFSM{}
+			err = ErrTemplateInvalid
+		}
+	}()
+	if !utf8.ValidString(source) {
+		return machine, ErrEncoding
+	}
+	if err = machine.ParseScanner(newScanner(source)); err != nil {
+		return fsm.TextFSM{}, ErrTemplateInvalid
+	}
+	return machine, nil
 }
 
 // ParseTemplate accepts TextFSM source or an embedded template path (for example
 // cisco/show_running_config.textfsm). It does not read arbitrary filesystem paths.
 // Errors deliberately discard dependency messages containing device text.
 func ParseTemplate(template, output string) (rows []map[string]any, err error) {
-	if !strings.Contains(template, "\n") && strings.HasSuffix(template, ".textfsm") {
-		data, e := templates.ReadFile("templates/" + template)
-		if e != nil {
-			return nil, ErrTemplateMissing
-		}
-		template = string(data)
-	}
-	if !utf8.ValidString(template) || !utf8.ValidString(output) {
+	if !utf8.ValidString(output) {
 		return nil, ErrEncoding
 	}
+	var machine fsm.TextFSM
+	if !strings.Contains(template, "\n") && strings.HasSuffix(template, ".textfsm") {
+		c, e := embeddedCatalog()
+		if e != nil {
+			return nil, e
+		}
+		load, ok := c.templates[template]
+		if !ok {
+			return nil, ErrTemplateMissing
+		}
+		machine, err = load()
+	} else {
+		machine, err = compileTemplate(template)
+	}
+	if err != nil {
+		return nil, err
+	}
+	// gotextfsm mutates Values during parsing. The cached pristine values and
+	// read-only states/regexps are never handed to its parser directly.
+	machine.Values = maps.Clone(machine.Values)
 	// The dependency has panic paths for malformed custom expressions; keep that
 	// implementation detail from escaping this untrusted-input boundary.
 	defer func() {
@@ -86,20 +157,15 @@ func ParseTemplate(template, output string) (rows []map[string]any, err error) {
 			err = ErrTemplateInvalid
 		}
 	}()
-	text, e := terminal.Render([]byte(output), true)
+	text, e := terminal.RenderString(output, true)
 	if e != nil {
 		if errors.Is(e, terminal.ErrEncoding) {
 			return nil, ErrEncoding
 		}
 		return nil, ErrIncomplete
 	}
-	var machine fsm.TextFSM
-	scanner := newScanner(template)
-	if e = machine.ParseScanner(scanner); e != nil {
-		return nil, ErrTemplateInvalid
-	}
 	var parsed fsm.ParserOutput
-	scanner = newScanner(text)
+	scanner := newScanner(text)
 	if e = parsed.ParseTextScanner(scanner, machine, true); e != nil {
 		if scanner.Err() != nil {
 			return nil, ErrIncomplete

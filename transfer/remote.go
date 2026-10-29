@@ -42,7 +42,7 @@ func RemoteBackup(ctx context.Context, d *connector.Device, o RemoteOptions) (re
 	if o.Password != "" {
 		command.Interactions = []connector.Interaction{{Pattern: regexp.MustCompile(`(?i)(?:password(?: for [^\r\n:]*)?):\s*$`), Reply: o.Password + "\n", Sensitive: true, Limit: 1}}
 	}
-	err = d.WithOperation(ctx, func(op *connector.Operation) error {
+	err = d.WithOperation(ctx, func(ctx context.Context, op *connector.Operation) error {
 		r, e := op.ExecuteCommand(ctx, command, connector.ExecuteOptions{SkipPrivilege: true})
 		result.Steps = r.Steps()
 		lines, outputs, parseErr := evidence(result.Steps)

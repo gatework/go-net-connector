@@ -16,6 +16,7 @@ import (
 
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/internal/bootstrap"
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/netdisco"
@@ -247,7 +248,7 @@ func (r Runtime) Run(ctx context.Context, program string) int {
 	if o.all {
 		limit = 0
 	}
-	plan, e := netdisco.NewPlan(rows, services.Rules(), netdisco.PlanOptions{Mode: "backup", LimitPerVendor: limit})
+	plan, e := fleet.NewPlan(rows, services.Rules(), fleet.PlanOptions{Mode: "backup", LimitPerVendor: limit})
 	if e != nil {
 		return r.fail(program, e)
 	}
@@ -307,7 +308,7 @@ func (r Runtime) fail(program string, e error) int {
 	fmt.Fprintln(r.Error, program+": operation failed (invalid input, unavailable source, or I/O error)")
 	return 2
 }
-func planView(p netdisco.Plan, program string) map[string]any {
+func planView(p fleet.Plan, program string) map[string]any {
 	ready := 0
 	skipped := map[string]int{}
 	issues := map[string]int{}
@@ -362,7 +363,7 @@ func nullable(s string) any {
 	}
 	return s
 }
-func (r Runtime) backup(ctx context.Context, services *bootstrap.Services, plan netdisco.Plan, o options, program string) int {
+func (r Runtime) backup(ctx context.Context, services *bootstrap.Services, plan fleet.Plan, o options, program string) int {
 	directory := services.Directory()
 	if program != "net-backup" {
 		var e error
@@ -400,22 +401,20 @@ func (r Runtime) backup(ctx context.Context, services *bootstrap.Services, plan 
 		return r.fail(program, e)
 	}
 	defer events.Close()
-	batch, runErr := netdisco.Run(ctx, plan, netdisco.FleetOptions{Workers: services.Workers(), Run: func(ctx context.Context, task netdisco.Task) (artifact netdisco.Artifact, err error) {
+	batch, runErr := fleet.Run(ctx, plan, fleet.RunOptions{Workers: services.Workers(), Run: func(ctx context.Context, task fleet.Task) (artifact fleet.Artifact, err error) {
 		device, closeDevice, e := openDevice(ctx, services, task.Device, services.LogDirectory(program, "backup", directory))
 		if e != nil {
 			return artifact, e
 		}
 		defer func() {
-			if e := closeDevice(); err == nil && e != nil {
-				err = e
-			}
+			err = joinDeviceCleanup(err, closeDevice())
 		}()
 		receipt, e := device.Backup(ctx, connector.BackupOptions{Path: paths[task.Index], RejectSymlink: true, LockTimeout: 5 * time.Second})
 		if receipt.Path != "" {
 			artifact.Backup = &receipt
 		}
 		return artifact, e
-	}, OnOutcome: func(_ context.Context, out netdisco.Outcome) error {
+	}, OnOutcome: func(_ context.Context, out fleet.Outcome) error {
 		var progressErr error
 		if !o.quiet {
 			_, progressErr = fmt.Fprintf(r.Error, "%s: %s\n", out.Device.Host, out.Status)
@@ -423,7 +422,7 @@ func (r Runtime) backup(ctx context.Context, services *bootstrap.Services, plan 
 		eventErr := json.NewEncoder(events).Encode(map[string]any{"host": out.Device.Host, "vendor": out.Device.Vendor, "artifact": artifactView(out.Artifact), "status": out.Status, "duration_ms": out.Duration.Milliseconds(), "error_code": nullable(out.ErrorCode), "error_type": nullable(out.ErrorType)})
 		return errors.Join(progressErr, eventErr)
 	}})
-	report, e := netdisco.NewReport(batch, o.policy)
+	report, e := fleet.NewReport(batch, o.policy)
 	report = report.WithLogDirectory(services.LogDirectory(program, "backup", directory))
 	if e != nil {
 		return r.fail(program, e)
@@ -431,11 +430,11 @@ func (r Runtime) backup(ctx context.Context, services *bootstrap.Services, plan 
 	if e = events.Sync(); e != nil {
 		report = report.WithReportError(e, "")
 	}
-	report = netdisco.WriteReport(context.WithoutCancel(ctx), report, directory, plan, services.Workers())
+	report = fleet.WriteReport(context.WithoutCancel(ctx), report, directory, plan, services.Workers())
 	outputErr := r.finishReport(report, directory, o, program, ctx.Err() != nil)
 	if outputErr != nil && report.Statistics()["report_error"] == nil {
 		location, _ := report.Statistics()["report_location"].(string)
-		report = netdisco.WriteReport(context.WithoutCancel(ctx), report.WithReportError(outputErr, location), directory, plan, services.Workers())
+		report = fleet.WriteReport(context.WithoutCancel(ctx), report.WithReportError(outputErr, location), directory, plan, services.Workers())
 	}
 	if ctx.Err() != nil || errors.Is(runErr, context.Canceled) {
 		return 130

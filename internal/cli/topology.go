@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/gatework/go-net-connector/config"
+	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/internal/bootstrap"
 	"github.com/gatework/go-net-connector/inventory"
-	"github.com/gatework/go-net-connector/netdisco"
 	"github.com/gatework/go-net-connector/parallel"
 	"github.com/gatework/go-net-connector/storage"
 	"github.com/gatework/go-net-connector/topology"
@@ -25,7 +25,7 @@ import (
 )
 
 type topologyOutcome struct {
-	device netdisco.Record
+	device fleet.Record
 	plan   *topology.Plan
 	row    map[string]any
 }
@@ -80,11 +80,11 @@ func (r Runtime) runTopology(ctx context.Context, services *bootstrap.Services, 
 		return r.fail("net-topology", config.ErrInvalid)
 	}
 	// The inventory plan owns duplicate-address classification for every CLI.
-	plan, e := netdisco.NewPlan(rows, services.Rules(), netdisco.PlanOptions{Mode: "backup"})
+	plan, e := fleet.NewPlan(rows, services.Rules(), fleet.PlanOptions{Mode: "backup"})
 	if e != nil {
 		return r.fail("net-topology", e)
 	}
-	devices := []netdisco.Record{}
+	devices := []fleet.Record{}
 	inventoryRows := []map[string]any{}
 	issues := map[string]int{}
 	unexpected := false
@@ -136,7 +136,7 @@ func (r Runtime) runTopology(ctx context.Context, services *bootstrap.Services, 
 		limit, _ = p.Value("topology.limit").(int)
 	}
 	if limit > 0 {
-		selected := []netdisco.Record{}
+		selected := []fleet.Record{}
 		capable := 0
 		for _, d := range devices {
 			profile, _ := vendors.Profile(d.Vendor)
@@ -232,7 +232,7 @@ func (r Runtime) runTopology(ctx context.Context, services *bootstrap.Services, 
 			}
 		}
 	}
-	execute := func(ctx context.Context, d netdisco.Record, previous *topologyOutcome) (out topologyOutcome, err error) {
+	execute := func(ctx context.Context, d fleet.Record, previous *topologyOutcome) (out topologyOutcome, err error) {
 		start := time.Now()
 		out = topologyOutcome{device: d, row: map[string]any{"host": d.Host, "vendor": d.Vendor, "status": "failed"}}
 		if previous != nil {
@@ -278,9 +278,7 @@ func (r Runtime) runTopology(ctx context.Context, services *bootstrap.Services, 
 			return out, e
 		}
 		defer func() {
-			if e := closeDevice(); err == nil {
-				err = e
-			}
+			err = joinDeviceCleanup(err, closeDevice())
 		}()
 		t, e := topology.New(device)
 		if e != nil {
@@ -327,7 +325,7 @@ func (r Runtime) runTopology(ctx context.Context, services *bootstrap.Services, 
 		out.row["status"] = status
 		return out, nil
 	}
-	collected, collectErr := parallel.Map(ctx, workers, devices, func(ctx context.Context, d netdisco.Record) (topologyOutcome, error) { return execute(ctx, d, nil) })
+	collected, collectErr := parallel.Map(ctx, workers, devices, func(ctx context.Context, d fleet.Record) (topologyOutcome, error) { return execute(ctx, d, nil) })
 	outcomes := make([]topologyOutcome, len(devices))
 	for i, item := range collected {
 		if item.Started {

@@ -5,7 +5,7 @@ flowchart TD
   CLI[四个 CLI] --> Bootstrap[bootstrap: samber/do 组合根]
   Bootstrap --> Policy[不可变配置及纯规划]
   Bootstrap --> Source[HTTP / PostgreSQL / Cache]
-  Policy --> Fleet[Fleet: 有界并发和顺序结果]
+  Policy --> Fleet[fleet: 有界并发和顺序结果]
   Fleet --> Device[Device: 操作租约与回执]
   Device --> Profile[厂商档案及策略]
   Device --> Expect[go-expect: 匹配和 I/O]
@@ -28,3 +28,5 @@ Archive Pool 每个 SSH 主连接最多 4 个通道，总槽位不超过批次�
 HTTP/PG 来源拥有各自请求/连接，返回整份有效清单或错误；不交付半页结果。Cache 保存 schema1、身份双 SHA-256 和完整清单，来源失败时可显式使用已校验旧缓存。Fleet 在库存顺序输出结果，取消后停止接纳新任务并等待已接纳任务退出。
 
 配置和纯计划不打开设备，不查询设备凭据。批次预检覆盖所有有能力的设备，抽样不能隐藏无效策略。主机过滤以地址区间比较，不展开 IPv4/IPv6 网段。原始源码基线及兼容补丁独立保留，避免把并行工作区变化当成本次改动。
+
+响应处理区分原始字节、解码正文与可见文本；完成步骤复用不可变渲染结果。分页剥离首次发生时才分离正文缓冲。无回显日志仅保留预算计数与安全事件元数据。TextFSM 仅缓存内嵌模板的只读编译状态，每次解析复制 Values 并创建独立 ParserOutput；自定义模板不缓存。
