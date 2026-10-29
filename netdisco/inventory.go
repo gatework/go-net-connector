@@ -1,4 +1,4 @@
-// Package netdisco integrates inventories with device operations and reports.
+// Package netdisco provides bounded inventory sources and their cache.
 package netdisco
 
 import (

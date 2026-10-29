@@ -9,7 +9,10 @@ type Operation struct {
 	scope  *callScope
 }
 
-func (d *Device) WithOperation(ctx context.Context, run func(*Operation) error) (err error) {
+// WithOperation admits one sequential composite operation. The callback context
+// includes cancellation from Close; use it for nested I/O and application work.
+// The borrowed Operation expires when run returns, even after an error.
+func (d *Device) WithOperation(ctx context.Context, run func(context.Context, *Operation) error) (err error) {
 	if run == nil {
 		return ErrInvalid
 	}
@@ -34,7 +37,7 @@ func (d *Device) WithOperation(ctx context.Context, run func(*Operation) error) 
 			err = joinCleanup(err, d.closeResources())
 		}
 	}()
-	err = run(o)
+	err = run(ctx, o)
 	returned = true
 	if err == nil {
 		err = ctx.Err()

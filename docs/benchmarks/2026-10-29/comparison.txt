@@ -1,0 +1,82 @@
+goos: darwin
+goarch: arm64
+cpu: Apple M5
+                            │ /tmp/connector-quality-20261029/connector-before-complete.txt │ /tmp/connector-quality-20261029/connector-after-complete.txt │
+                            │                            sec/op                             │                sec/op                 vs base                │
+CommandOutput/64KiB-10                                                         5.302m ±  1%                           7.047m ± 50%  +32.92% (p=0.043 n=10)
+CommandOutput/1024KiB-10                                                       105.6m ±  0%                           115.8m ± 92%   +9.66% (p=0.000 n=10)
+CommandOutput/8192KiB-10                                                       850.1m ±  0%                           957.5m ±  6%  +12.64% (p=0.000 n=10)
+CommandOutput/32768KiB-10                                                       3.479 ±  3%                            3.548 ±  1%   +1.98% (p=0.004 n=10)
+CommandPaged1000-10                                                            5.471m ±  2%                           5.358m ±  1%   -2.07% (p=0.029 n=10)
+CommandMultiline/1024KiB-10                                                    129.6m ±  4%                           132.7m ±  1%        ~ (p=0.063 n=10)
+CommandMultiline/8192KiB-10                                                     1.050 ±  0%                            1.061 ±  1%        ~ (p=0.063 n=10)
+CommandLogging/nil-10                                                         11.116µ ±  1%                           8.773µ ±  1%  -21.08% (p=0.000 n=10)
+CommandLogging/info-10                                                         13.48µ ±  0%                           10.86µ ±  7%  -19.40% (p=0.002 n=10)
+CommandLogging/debug-10                                                        15.27µ ±  0%                           12.94µ ±  6%  -15.24% (p=0.000 n=10)
+RunningConfig/1024KiB-10                                                       558.4m ±  2%                           563.4m ±  2%        ~ (p=0.218 n=10)
+RunningConfig/8192KiB-10                                                        4.485 ±  1%                            4.454 ±  1%        ~ (p=0.165 n=10)
+EmbeddedTemplate/1-10                                                        258.071µ ± 15%                           1.404µ ±  7%  -99.46% (p=0.000 n=10)
+EmbeddedTemplate/1000-10                                                      1190.1µ ±  2%                           871.3µ ±  1%  -26.79% (p=0.000 n=10)
+IndexedTemplate-10                                                           304.179µ ±  3%                           1.610µ ±  1%  -99.47% (p=0.000 n=10)
+MockFleet/1000-10                                                              396.9µ ±  6%                           385.5µ ±  6%        ~ (p=0.247 n=10)
+MockFleet/10000-10                                                             3.827m ± 14%                           3.887m ±  8%        ~ (p=0.529 n=10)
+RulesResolve-10                                                               42.218µ ±  1%                           5.642µ ±  3%  -86.64% (p=0.000 n=10)
+geomean                                                                        5.715m                                 2.794m        -51.11%
+
+                            │ /tmp/connector-quality-20261029/connector-before-complete.txt │ /tmp/connector-quality-20261029/connector-after-complete.txt │
+                            │                              B/s                              │                B/s                 vs base                   │
+CommandOutput/64KiB-10                                                       11.792Mi ±  1%                       8.993Mi ± 36%     -23.74% (p=0.041 n=10)
+CommandOutput/1024KiB-10                                                      9.470Mi ±  0%                       8.636Mi ± 48%      -8.81% (p=0.000 n=10)
+CommandOutput/8192KiB-10                                                      9.408Mi ±  0%                       8.359Mi ±  6%     -11.15% (p=0.000 n=10)
+CommandOutput/32768KiB-10                                                     9.198Mi ±  3%                       9.022Mi ±  1%      -1.92% (p=0.004 n=10)
+CommandMultiline/1024KiB-10                                                   7.715Mi ±  4%                       7.534Mi ±  1%      -2.35% (p=0.050 n=10)
+CommandMultiline/8192KiB-10                                                   7.620Mi ±  0%                       7.539Mi ±  1%           ~ (p=0.065 n=10)
+RunningConfig/1024KiB-10                                                      1.793Mi ±  2%                       1.774Mi ±  2%           ~ (p=0.177 n=10)
+RunningConfig/8192KiB-10                                                      1.783Mi ±  1%                       1.798Mi ±  1%           ~ (p=0.151 n=10)
+EmbeddedTemplate/1-10                                                         161.1Ki ± 15%                     29228.5Ki ±  6%  +18039.39% (p=0.000 n=10)
+EmbeddedTemplate/1000-10                                                      33.66Mi ±  2%                       45.97Mi ±  1%     +36.58% (p=0.000 n=10)
+geomean                                                                       4.993Mi                             8.210Mi           +64.45%
+
+                            │ /tmp/connector-quality-20261029/connector-before-complete.txt │ /tmp/connector-quality-20261029/connector-after-complete.txt │
+                            │                             B/op                              │                 B/op                  vs base                │
+CommandOutput/64KiB-10                                                        1340.1Ki ± 0%                           636.8Ki ± 1%  -52.49% (p=0.000 n=10)
+CommandOutput/1024KiB-10                                                       26.28Mi ± 0%                           11.82Mi ± 0%  -55.04% (p=0.000 n=10)
+CommandOutput/8192KiB-10                                                      210.53Mi ± 0%                           94.47Mi ± 0%  -55.13% (p=0.000 n=10)
+CommandOutput/32768KiB-10                                                      862.5Mi ± 0%                           371.4Mi ± 0%  -56.94% (p=0.000 n=10)
+CommandPaged1000-10                                                           1040.8Ki ± 1%                           965.0Ki ± 1%   -7.28% (p=0.000 n=10)
+CommandMultiline/1024KiB-10                                                    23.98Mi ± 0%                           11.81Mi ± 0%  -50.77% (p=0.000 n=10)
+CommandMultiline/8192KiB-10                                                   192.50Mi ± 0%                           94.42Mi ± 0%  -50.95% (p=0.000 n=10)
+CommandLogging/nil-10                                                         10.219Ki ± 0%                           5.072Ki ± 0%  -50.37% (p=0.000 n=10)
+CommandLogging/info-10                                                        15.408Ki ± 0%                           7.208Ki ± 0%  -53.22% (p=0.000 n=10)
+CommandLogging/debug-10                                                        17.28Ki ± 0%                           12.24Ki ± 0%  -29.15% (p=0.000 n=10)
+RunningConfig/1024KiB-10                                                       41.03Mi ± 0%                           13.64Mi ± 0%  -66.75% (p=0.000 n=10)
+RunningConfig/8192KiB-10                                                       328.3Mi ± 0%                           109.3Mi ± 0%  -66.71% (p=0.000 n=10)
+EmbeddedTemplate/1-10                                                        707.803Ki ± 0%                           6.358Ki ± 0%  -99.10% (p=0.000 n=10)
+EmbeddedTemplate/1000-10                                                       2.088Mi ± 0%                           1.182Mi ± 0%  -43.40% (p=0.000 n=10)
+IndexedTemplate-10                                                           887.259Ki ± 0%                           6.357Ki ± 0%  -99.28% (p=0.000 n=10)
+MockFleet/1000-10                                                              2.154Mi ± 0%                           2.154Mi ± 0%   +0.01% (p=0.001 n=10)
+MockFleet/10000-10                                                             27.49Mi ± 0%                           27.49Mi ± 0%   +0.00% (p=0.005 n=10)
+RulesResolve-10                                                              113.460Ki ± 0%                           1.189Ki ± 0%  -98.95% (p=0.000 n=10)
+geomean                                                                        3.555Mi                                988.3Ki       -72.85%
+
+                            │ /tmp/connector-quality-20261029/connector-before-complete.txt │ /tmp/connector-quality-20261029/connector-after-complete.txt │
+                            │                           allocs/op                           │              allocs/op                vs base                │
+CommandOutput/64KiB-10                                                           678.5 ± 0%                             588.5 ± 0%  -13.26% (p=0.000 n=10)
+CommandOutput/1024KiB-10                                                         867.0 ± 1%                             747.5 ± 1%  -13.78% (p=0.000 n=10)
+CommandOutput/8192KiB-10                                                        1.815k ± 1%                            1.675k ± 0%   -7.74% (p=0.000 n=10)
+CommandOutput/32768KiB-10                                                       4.901k ± 0%                            4.750k ± 0%   -3.09% (p=0.000 n=10)
+CommandPaged1000-10                                                             16.01k ± 0%                            14.93k ± 0%   -6.74% (p=0.000 n=10)
+CommandMultiline/1024KiB-10                                                    70763.5 ± 0%                             747.0 ± 0%  -98.94% (p=0.000 n=10)
+CommandMultiline/8192KiB-10                                                   561.062k ± 0%                            1.671k ± 1%  -99.70% (p=0.000 n=10)
+CommandLogging/nil-10                                                           149.00 ± 0%                             72.00 ± 0%  -51.68% (p=0.000 n=10)
+CommandLogging/info-10                                                           249.0 ± 0%                             128.0 ± 0%  -48.59% (p=0.000 n=10)
+CommandLogging/debug-10                                                          329.0 ± 0%                             253.0 ± 0%  -23.10% (p=0.000 n=10)
+RunningConfig/1024KiB-10                                                      280340.5 ± 0%                             455.0 ± 5%  -99.84% (p=0.000 n=10)
+RunningConfig/8192KiB-10                                                     2238.648k ± 0%                            1.355k ± 1%  -99.94% (p=0.000 n=10)
+EmbeddedTemplate/1-10                                                          7227.00 ± 0%                             20.00 ± 0%  -99.72% (p=0.000 n=10)
+EmbeddedTemplate/1000-10                                                        24.25k ± 0%                            14.02k ± 0%  -42.19% (p=0.000 n=10)
+IndexedTemplate-10                                                             9163.00 ± 0%                             20.00 ± 0%  -99.78% (p=0.000 n=10)
+MockFleet/1000-10                                                               2.028k ± 0%                            2.030k ± 0%   +0.10% (p=0.000 n=10)
+MockFleet/10000-10                                                              20.04k ± 0%                            20.04k ± 0%   +0.01% (p=0.000 n=10)
+RulesResolve-10                                                                1157.00 ± 0%                             92.00 ± 0%  -92.05% (p=0.000 n=10)
+geomean                                                                         7.065k                                  707.4       -89.99%

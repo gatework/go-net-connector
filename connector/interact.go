@@ -33,7 +33,7 @@ type inputResult struct {
 }
 
 func (d *Device) Interact(parent context.Context, o InteractOptions) (result InteractResult, err error) {
-	if o.Input == nil || o.Output == nil {
+	if o.Input == nil || nilValue(o.Output) {
 		return result, ErrInvalid
 	}
 	if e := d.acquire(); e != nil {
@@ -55,9 +55,7 @@ func (d *Device) Interact(parent context.Context, o InteractOptions) (result Int
 			return result, e
 		}
 		defer func() {
-			if e := term.Restore(fd, state); err == nil && e != nil {
-				err = e
-			}
+			err = joinCleanup(err, term.Restore(fd, state))
 		}()
 	}
 	ctx, cancel := context.WithCancel(parent)
@@ -85,6 +83,7 @@ func (d *Device) Interact(parent context.Context, o InteractOptions) (result Int
 	}}, {Pattern: expect.EOF()}}, expect.WithTimeout(0))
 	cancel()
 	cleanupErr := d.closeResources()
+	defer func() { err = joinCleanup(err, cleanupErr) }()
 	input := <-done
 	returned = true
 	result = InteractResult{Reason: input.reason, PendingInput: append([]byte(nil), input.pending...)}
@@ -100,7 +99,7 @@ func (d *Device) Interact(parent context.Context, o InteractOptions) (result Int
 	if result.Reason == "" {
 		result.Reason = "peer_eof"
 	}
-	return result, cleanupErr
+	return result, nil
 }
 func (d *Device) relayInput(ctx context.Context, session *expect.Session, fd int, escape []byte) inputResult {
 	buffer := make([]byte, 4096)

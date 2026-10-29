@@ -218,3 +218,58 @@ func (r *Renderer) Finish() error {
 	}
 	return nil
 }
+
+// RenderString avoids byte buffers for ordinary UTF-8 lines. Terminal edits and
+// malformed encodings still use the byte-oriented renderer.
+func RenderString(input string, strict bool) (string, error) {
+	if !utf8.ValidString(input) {
+		return Render([]byte(input), strict)
+	}
+	for i := 0; i < len(input); i++ {
+		c := input[i]
+		if c < 32 && c != '\n' && c != '\t' && !(c == '\r' && i+1 < len(input) && input[i+1] == '\n') {
+			return Render([]byte(input), strict)
+		}
+	}
+	var out strings.Builder
+	start := 0
+	changed := false
+	for start < len(input) {
+		n := strings.IndexByte(input[start:], '\n')
+		end := len(input)
+		newline := n >= 0
+		if newline {
+			end = start + n
+		}
+		line := input[start:end]
+		// The byte renderer resets its cursor on CR but retains the existing line.
+		if newline {
+			line = strings.TrimSuffix(line, "\r")
+		}
+		if len(line) > 32<<20 {
+			return "", ErrLimit
+		}
+		line = strings.TrimRight(line, " \t")
+		originalEnd := end
+		if newline {
+			originalEnd++
+		}
+		differs := len(line) != end-start
+		if differs && !changed {
+			out.Grow(len(input))
+			out.WriteString(input[:start])
+			changed = true
+		}
+		if changed {
+			out.WriteString(line)
+			if newline {
+				out.WriteByte('\n')
+			}
+		}
+		start = originalEnd
+	}
+	if !changed {
+		return input, nil
+	}
+	return out.String(), nil
+}

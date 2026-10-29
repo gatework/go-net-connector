@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gatework/go-net-connector/connector"
@@ -19,21 +20,6 @@ func Names() []string {
 	return n
 }
 
-// Open builds a vendor device and authenticates its connection.
-func Open(ctx context.Context, key string, cfg connector.ConnectionConfig, opts ...connector.Option) (*connector.Device, error) {
-	p, e := Profile(key)
-	if e != nil {
-		return nil, e
-	}
-	d, e := connector.New(p, cfg, opts...)
-	if e != nil {
-		return nil, e
-	}
-	if e = d.Connect(ctx); e != nil {
-		return nil, e
-	}
-	return d, nil
-}
 func re(s string) *regexp.Regexp { return regexp.MustCompile(s) }
 func rules(patterns ...string) []*regexp.Regexp {
 	out := make([]*regexp.Regexp, len(patterns))
@@ -52,9 +38,65 @@ func loginReply(pattern, response string) connector.Interaction {
 	return r
 }
 
-// Profile constructs an independent declaration from the frozen Ruby dialect.
-// Running-configuration strategies carry state only for one collection.
+// Profile returns an independent mutable declaration. Static expressions are
+// compiled once; callers may customize their copy before passing it to New.
+// ConfigStrategy still constructs independent state for every collection.
 func Profile(name string) (connector.Profile, error) {
+	p, ok := builtinProfiles()[name]
+	if !ok {
+		return connector.Profile{}, fmt.Errorf("vendors: unknown vendor: %w", connector.ErrUnsupported)
+	}
+	return copyProfile(p), nil
+}
+
+var builtinProfiles = sync.OnceValue(func() map[string]connector.Profile {
+	profiles := make(map[string]connector.Profile)
+	for _, name := range Names() {
+		p, err := buildProfile(name)
+		if err != nil {
+			panic(err)
+		} // Names and the built-in declarations must agree.
+		profiles[name] = p
+	}
+	return profiles
+})
+
+// Copy mutable declarations without taking ownership of callback closures.
+func copyProfile(p connector.Profile) connector.Profile {
+	copyPattern := func(r *regexp.Regexp) *regexp.Regexp {
+		if r == nil {
+			return nil
+		}
+		// Keep each declaration's Longest setting independently mutable.
+		return r.Copy() //nolint:staticcheck // Copy preserves POSIX/Longest semantics.
+	}
+	p.LoginPrompt = copyPattern(p.LoginPrompt)
+	p.CommandPrompt = copyPattern(p.CommandPrompt)
+	p.UsernamePrompt = copyPattern(p.UsernamePrompt)
+	p.PasswordPrompt = copyPattern(p.PasswordPrompt)
+	p.PrivilegePrompt = copyPattern(p.PrivilegePrompt)
+	p.Pager = copyPattern(p.Pager)
+	for _, list := range []*[]*regexp.Regexp{&p.AuthenticationErrors, &p.CommandErrors} {
+		*list = append([]*regexp.Regexp(nil), (*list)...)
+		for i, pattern := range *list {
+			(*list)[i] = copyPattern(pattern)
+		}
+	}
+	for _, list := range []*[]connector.Interaction{&p.LoginInteractions, &p.Interactions} {
+		*list = append([]connector.Interaction(nil), (*list)...)
+		for i := range *list {
+			(*list)[i].Pattern = copyPattern((*list)[i].Pattern)
+		}
+	}
+	if p.LegacySSHArguments != nil {
+		p.LegacySSHArguments = append([]string{}, p.LegacySSHArguments...)
+	}
+	p.ConfigCommands = append([]string(nil), p.ConfigCommands...)
+	p.SaveCommands = append([]string(nil), p.SaveCommands...)
+	return p
+}
+
+func buildProfile(name string) (connector.Profile, error) {
 	p := connector.Profile{Name: name, UsernamePrompt: re(`(?i)(?:login|username|name):\s*\z`), PasswordPrompt: re(`(?i)password:\s*\z`), PrivilegePrompt: re(`#\s*\z`), Pager: re(`(?i)(?:\A|[\r\n])[ \t]*(?:--More--|---- More ----)[ \t\x00\x08]*(?:\r|\n|\z)`), PagerResponse: " ", AuthenticationErrors: rules(`(?i)(?:authentication failed|permission denied|access denied|login incorrect)`)}
 	var seconds int
 	switch name {
@@ -115,12 +157,12 @@ func Profile(name string) (connector.Profile, error) {
 		p.CommandPrompt = re(`(?:\A|[\r\n])[^\r\n]+#\s*\z`)
 		p.CommandErrors = rules(`(?im)^[ \t]*(?:Unknown|Invalid|Error)\s+command\b`)
 		p.Interactions = []connector.Interaction{reply(`(?i)Confirm\s+Sync\s+to\s+Peer\s+\[y/n\]:\s*\z`, "y\n"), reply(`(?i)Synchronize\s+configuration\s+changes\?\s+\[y/n\]:\s*\z`, "y\n"), reply(`(?i)Confirm\s+saving\s+to\s+FLASH\s+\[y/n\]:\s*\z`, "y\n"), reply(`(?i)Confirm\s+operation\s+without\s+applying\s+changes\s+\(leave\s+them\s+pending\)\s+\[y/n\]:\s*\z`, "y\n"), reply(`(?i)Confirm\s+operation\s+without\s+saving\s+changes\s+\(leave\s+them\s+pending\)\s+\[y/n\]:?\s*\z`, "y\n"), reply(`(?i)Confirm\s+seeing\s+above\s+note\s+\[y\]:\s*\z`, "y\n"), reply(`(?i)Please\s+enter\s+y\s+to\s+perform\s+the\s+action,\s+n\s+to\s+skip\s+it:\s*\z`, "y\n"), reply(`(?i)Display\s+private\s+keys\?\s+\[y/n\]:\s*\z`, "n\n")}
-		p.AfterLogin = func(s connector.StepResult) map[string]string {
-			m := re(`(?im)^\s*HA\s+State:\s*(\S+)`).FindStringSubmatch(s.Raw())
+		p.AfterLogin = func(_ context.Context, s connector.StepResult) (connector.LoginState, error) {
+			m := haStatePattern.FindStringSubmatch(s.Raw())
 			if len(m) > 1 {
-				return map[string]string{"ha_state": m[1]}
+				return connector.LoginState{HAState: m[1]}, nil
 			}
-			return nil
+			return connector.LoginState{}, nil
 		}
 	case "palo_alto":
 		p.ConfigCommands = []string{"set cli pager off", "set cli config-output-format set", "show config diff", "configure", "show", "exit", "show config diff"}
@@ -192,3 +234,5 @@ func afterH3C(ctx context.Context, c connector.Command, _ connector.StepResult, 
 	x.SetValue("rule_id", m[1])
 	return nil
 }
+
+var haStatePattern = re(`(?im)^\s*HA\s+State:\s*(\S+)`)

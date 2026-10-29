@@ -28,6 +28,7 @@ type Client struct {
 	launch                 Launcher
 	timeout                time.Duration
 	slots                  chan struct{}
+	prepareGate            chan struct{}
 	mu                     sync.Mutex
 	prepared               bool
 }
@@ -45,9 +46,12 @@ func NewClient(o ClientOptions) (*Client, error) {
 		return nil, e
 	}
 	batch := time.Now().In(time.FixedZone("UTC+8", 8*3600)).Format("2006-01-02_15-04-05") + "-ssh-" + hex.EncodeToString(random[:])
-	return &Client{root: o.Root, directory: directory, batch: batch, launch: o.Launcher, timeout: o.Timeout, slots: make(chan struct{}, 4)}, nil
+	return &Client{root: o.Root, directory: directory, batch: batch, launch: o.Launcher, timeout: o.Timeout, slots: make(chan struct{}, 4), prepareGate: make(chan struct{}, 1)}, nil
 }
 func (c *Client) channel(ctx context.Context, run func(*Protocol) error) (err error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	c.cleanupMu.Lock()
 	if c.closed {
 		c.cleanupMu.Unlock()
@@ -62,6 +66,9 @@ func (c *Client) channel(ctx context.Context, run func(*Protocol) error) (err er
 		return ctx.Err()
 	}
 	defer func() { <-c.slots }()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return runChannel(ctx, c.launch, c.timeout, run, func(close func() error) {
 		c.cleanupMu.Lock()
 		c.pending = append(c.pending, close)
@@ -70,9 +77,31 @@ func (c *Client) channel(ctx context.Context, run func(*Protocol) error) (err er
 }
 
 func (c *Client) Prepare(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case c.prepareGate <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-c.prepareGate }()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.cleanupMu.Lock()
+	if c.closed {
+		c.cleanupMu.Unlock()
+		return ErrArchive
+	}
+	// Own the whole initialization, including local directory preparation.
+	c.active++
+	c.cleanupMu.Unlock()
+	defer func() { c.cleanupMu.Lock(); c.active--; c.cleanupMu.Unlock() }()
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.prepared {
+	prepared := c.prepared
+	c.mu.Unlock()
+	if prepared {
 		return nil
 	}
 	if e := storage.PrepareDirectory(filepath.Join(c.directory, "tftp")); e != nil {
@@ -110,7 +139,12 @@ func (c *Client) Prepare(ctx context.Context) error {
 		return e
 	})
 	if e == nil {
+		e = ctx.Err()
+	}
+	if e == nil {
+		c.mu.Lock()
 		c.prepared = true
+		c.mu.Unlock()
 	}
 	return e
 }

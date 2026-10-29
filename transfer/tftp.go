@@ -51,7 +51,7 @@ func TFTP(ctx context.Context, d *connector.Device, o TFTPOptions) (result Resul
 	}
 	explicit := o.Path != ""
 	explicitSource := o.SourceFile != ""
-	err = d.WithOperation(ctx, func(op *connector.Operation) error {
+	err = d.WithOperation(ctx, func(ctx context.Context, op *connector.Operation) error {
 		if (vendor == "h3c" || vendor == "h3c_wireless") && o.SourceFile == "" {
 			r, e := op.ExecuteCommand(ctx, connector.Command{Text: "display startup"}, connector.ExecuteOptions{})
 			result.Steps = append(result.Steps, r.Steps()...)

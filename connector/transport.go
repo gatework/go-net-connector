@@ -35,10 +35,16 @@ type processTransport struct {
 
 func (p *processTransport) Read(b []byte) (int, error) {
 	n, e := p.master.Read(b)
-	if errors.Is(e, unix.EIO) {
-		e = io.EOF
+	return n, p.NormalizeReadError(e)
+}
+func (p *processTransport) SetReadDeadline(deadline time.Time) error {
+	return p.master.SetReadDeadline(deadline)
+}
+func (*processTransport) NormalizeReadError(err error) error {
+	if errors.Is(err, unix.EIO) {
+		return io.EOF
 	}
-	return n, e
+	return err
 }
 func (p *processTransport) Write(b []byte) (int, error)           { return p.master.Write(b) }
 func (p *processTransport) SyscallConn() (syscall.RawConn, error) { return p.master.SyscallConn() }

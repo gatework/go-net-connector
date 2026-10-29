@@ -9,7 +9,7 @@ import (
 func TestOperationHoldsLeaseAndExpires(t *testing.T) {
 	d, _ := fixtureDevice(t, fixtureProfile(), []string{"one\nsw#", "two\nsw#"})
 	var saved *Operation
-	e := d.WithOperation(t.Context(), func(o *Operation) error {
+	e := d.WithOperation(t.Context(), func(ctx context.Context, o *Operation) error {
 		saved = o
 		for range 2 {
 			_, e := o.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{OnReceipt: func(ctx context.Context, _ StepResult) error {

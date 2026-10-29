@@ -1,0 +1,19 @@
+File: connector-after.test
+Type: cpu
+Time: 2026-10-29 18:57:31 HKT
+Duration: 2.21s, Total samples = 1.92s (86.74%)
+Showing nodes accounting for 1.89s, 98.44% of 1.92s total
+Showing top 12 nodes out of 80
+      flat  flat%   sum%        cum   cum%
+     1.15s 59.90% 59.90%      1.15s 59.90%  runtime.pthread_cond_signal
+     0.27s 14.06% 73.96%      0.31s 16.15%  regexp.(*machine).add
+     0.13s  6.77% 80.73%      0.19s  9.90%  regexp.(*machine).step
+     0.10s  5.21% 85.94%      0.61s 31.77%  regexp.(*machine).match
+     0.10s  5.21% 91.15%      0.10s  5.21%  runtime.madvise
+     0.06s  3.12% 94.27%      0.06s  3.12%  regexp/syntax.(*Inst).MatchRunePos
+     0.02s  1.04% 95.31%      0.02s  1.04%  regexp.lazyFlag.match
+     0.02s  1.04% 96.35%      0.02s  1.04%  runtime.memmove
+     0.01s  0.52% 96.88%      0.01s  0.52%  internal/runtime/atomic.(*UnsafePointer).Load
+     0.01s  0.52% 97.40%      0.01s  0.52%  regexp.(*inputBytes).step
+     0.01s  0.52% 97.92%      0.01s  0.52%  regexp.(*machine).alloc (inline)
+     0.01s  0.52% 98.44%      0.01s  0.52%  runtime.(*gcBits).bytep

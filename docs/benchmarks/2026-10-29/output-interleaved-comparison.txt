@@ -1,0 +1,31 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+                         │ /tmp/connector-quality-20261029/connector-interleaved-before.txt │ /tmp/connector-quality-20261029/connector-interleaved-after.txt │
+                         │                              sec/op                              │                  sec/op                   vs base               │
+CommandOutput/64KiB-10                                                          5.239m ± 3%                                5.099m ± 2%  -2.67% (p=0.002 n=10)
+CommandOutput/1024KiB-10                                                        105.0m ± 0%                                102.4m ± 1%  -2.49% (p=0.000 n=10)
+CommandOutput/8192KiB-10                                                        845.8m ± 1%                                827.3m ± 1%  -2.18% (p=0.000 n=10)
+geomean                                                                         77.49m                                     75.60m       -2.45%
+
+                         │ /tmp/connector-quality-20261029/connector-interleaved-before.txt │ /tmp/connector-quality-20261029/connector-interleaved-after.txt │
+                         │                               B/s                                │                   B/s                     vs base               │
+CommandOutput/64KiB-10                                                         11.93Mi ± 3%                               12.26Mi ± 2%  +2.76% (p=0.001 n=10)
+CommandOutput/1024KiB-10                                                       9.527Mi ± 0%                               9.766Mi ± 1%  +2.50% (p=0.000 n=10)
+CommandOutput/8192KiB-10                                                       9.460Mi ± 1%                               9.670Mi ± 1%  +2.22% (p=0.000 n=10)
+geomean                                                                        10.24Mi                                    10.50Mi       +2.49%
+
+                         │ /tmp/connector-quality-20261029/connector-interleaved-before.txt │ /tmp/connector-quality-20261029/connector-interleaved-after.txt │
+                         │                               B/op                               │                  B/op                    vs base                │
+CommandOutput/64KiB-10                                                        1339.5Ki ± 0%                              640.3Ki ± 1%  -52.20% (p=0.000 n=10)
+CommandOutput/1024KiB-10                                                       26.28Mi ± 0%                              11.83Mi ± 0%  -54.97% (p=0.000 n=10)
+CommandOutput/8192KiB-10                                                      210.55Mi ± 0%                              94.46Mi ± 0%  -55.14% (p=0.000 n=10)
+geomean                                                                        19.34Mi                                   8.874Mi       -54.12%
+
+                         │ /tmp/connector-quality-20261029/connector-interleaved-before.txt │ /tmp/connector-quality-20261029/connector-interleaved-after.txt │
+                         │                            allocs/op                             │                allocs/op                 vs base                │
+CommandOutput/64KiB-10                                                           679.5 ± 1%                                590.5 ± 0%  -13.10% (p=0.000 n=10)
+CommandOutput/1024KiB-10                                                         868.0 ± 1%                                748.5 ± 1%  -13.77% (p=0.000 n=10)
+CommandOutput/8192KiB-10                                                        1.823k ± 1%                               1.662k ± 1%   -8.81% (p=0.000 n=10)
+geomean                                                                         1.024k                                     902.3       -11.92%

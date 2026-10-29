@@ -1,0 +1,5 @@
+--- FAIL: TestAfterLoginReceivesVerifiedResponse (0.00s)
+    refinement_test.go:57: connector: after_login_failed (login)
+FAIL
+FAIL	github.com/gatework/go-net-connector/connector	0.438s
+FAIL

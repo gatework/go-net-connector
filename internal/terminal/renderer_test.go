@@ -62,3 +62,41 @@ func TestRenderLimitsAndEncoding(t *testing.T) {
 		t.Fatal("limit ignored")
 	}
 }
+
+func TestRenderStringLineLimit(t *testing.T) {
+	line := strings.Repeat("x", 32<<20)
+	for _, suffix := range []string{"", "\r\n", " "} {
+		got, err := RenderString(line+suffix, true)
+		if suffix == " " {
+			if !errors.Is(err, ErrLimit) {
+				t.Fatalf("oversized line accepted: %v", err)
+			}
+			continue
+		}
+		wantLen := len(line)
+		if suffix != "" {
+			wantLen++
+		}
+		if err != nil || len(got) != wantLen {
+			t.Fatalf("line at boundary: bytes=%d err=%v", len(got), err)
+		}
+	}
+}
+
+func FuzzRenderString(f *testing.F) {
+	for _, s := range []string{"", "plain", "a \r\nb\t\n", "abc\rXY\x1b[K", "中文\n", "\xff", " \t"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		if len(s) > 1<<16 {
+			t.Skip()
+		}
+		for _, strict := range []bool{false, true} {
+			want, we := Render([]byte(s), strict)
+			got, ge := RenderString(s, strict)
+			if want != got || !errors.Is(we, ge) || !errors.Is(ge, we) {
+				t.Fatalf("input=%q strict=%v got=%q,%v want=%q,%v", s, strict, got, ge, want, we)
+			}
+		}
+	})
+}

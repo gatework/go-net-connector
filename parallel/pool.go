@@ -5,7 +5,11 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 )
+
+// ErrWorkerExit reports a callback that terminated its worker without returning.
+var ErrWorkerExit = errors.New("parallel: worker exited without returning")
 
 type Result[T any] struct {
 	Value   T
@@ -20,16 +24,19 @@ func Map[T, R any](ctx context.Context, workers int, input []T, run func(context
 	if workers < 1 || workers > 500 || run == nil {
 		return nil, errors.New("parallel: invalid pool")
 	}
+	workerCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	values := append([]T(nil), input...)
 	results := make([]Result[R], len(values))
 	next := 0
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+	var exited atomic.Bool
 	for range min(workers, len(values)) {
 		wg.Go(func() {
 			for {
 				mu.Lock()
-				if ctx.Err() != nil || next >= len(values) {
+				if workerCtx.Err() != nil || next >= len(values) {
 					mu.Unlock()
 					return
 				}
@@ -37,10 +44,24 @@ func Map[T, R any](ctx context.Context, workers int, input []T, run func(context
 				next++
 				results[index].Started = true
 				mu.Unlock()
-				results[index].Value, results[index].Err = run(ctx, values[index])
+				func() {
+					returned := false
+					defer func() {
+						if !returned {
+							exited.Store(true)
+							results[index].Err = ErrWorkerExit
+							cancel(ErrWorkerExit)
+						}
+					}()
+					results[index].Value, results[index].Err = run(workerCtx, values[index])
+					returned = true
+				}()
 			}
 		})
 	}
 	wg.Wait()
+	if exited.Load() {
+		return results, errors.Join(ctx.Err(), ErrWorkerExit)
+	}
 	return results, ctx.Err()
 }

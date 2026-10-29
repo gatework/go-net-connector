@@ -2,6 +2,7 @@ package textfsm
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -105,5 +106,36 @@ func TestEmbeddedTemplateAndIncompleteRows(t *testing.T) {
 	}
 	if _, e = Parse("fortinet", "show full-configuration", "config system interface\n    edit wan1\n        set description\n    next\nend\n"); !errors.Is(e, ErrParse) {
 		t.Fatalf("invalid description: %v", e)
+	}
+}
+
+func TestEmbeddedTemplateDoesNotRecompileEachCall(t *testing.T) {
+	parse := func() {
+		rows, err := ParseTemplate("cisco/show_running_config.textfsm", "interface Ethernet1\n description uplink\n!\n")
+		if err != nil || len(rows) != 1 {
+			t.Fatal(err)
+		}
+	}
+	parse()
+	if n := testing.AllocsPerRun(10, parse); n > 100 {
+		t.Fatalf("steady parse allocations=%v, want <=100", n)
+	}
+}
+func TestEmbeddedTemplateResultsAreIndependent(t *testing.T) {
+	for i := range 16 {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			t.Parallel()
+			for range 10 {
+				rows, err := ParseTemplate("cisco_nxos/show_ip_interface_brief.textfsm", "IP Interface Status for VRF \"management\"(2)\nmgmt0 192.0.2.1 protocol-up/link-up/admin-up\n")
+				if err != nil || len(rows) != 1 || rows[0]["VRF"] != "management" {
+					t.Fatalf("filldown %v %v", rows, err)
+				}
+				rows[0]["VRF"] = "caller mutation"
+				rows, err = ParseTemplate("cisco_nxos/show_ip_interface_brief.textfsm", "mgmt0 192.0.2.1 protocol-up/link-up/admin-up\n")
+				if err != nil || len(rows) != 1 || rows[0]["VRF"] != "" {
+					t.Fatalf("state leaked: %v %v", rows, err)
+				}
+			}
+		})
 	}
 }

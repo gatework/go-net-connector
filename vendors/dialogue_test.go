@@ -135,6 +135,40 @@ func TestCollectionDialectOutputsAndEchoOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectionRejectsEchoOnlyWithRenderedPrompt(t *testing.T) {
+	for _, fixture := range []struct {
+		name, prompt string
+	}{
+		{"cisco_ios", "router# "},
+		{"cisco_ios", "router#\t"},
+		{"cisco_ios", "router#\r\n"},
+		{"centec", "Switch# "},
+		{"hillstone", "stone(M) "},
+		{"h3c", "<core>\x00"},
+	} {
+		t.Run(fmt.Sprintf("%s/%q", fixture.name, fixture.prompt), func(t *testing.T) {
+			p, err := Profile(fixture.name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var events []exchange
+			for _, command := range p.ConfigCommands {
+				events = append(events, exchange{command + "\n", command + "\r\n" + fixture.prompt})
+			}
+			d, check := dialogue(t, fixture.name, fixture.prompt, events)
+			result, err := d.RunningConfig(t.Context())
+			if !errors.Is(err, connector.ErrIncomplete) {
+				t.Fatalf("echo-only configuration accepted: %v", err)
+			}
+			if _, ok := result.Config(); ok || len(result.Steps()) != len(p.ConfigCommands) {
+				t.Fatal("configuration evidence or completed steps lost")
+			}
+			check()
+		})
+	}
+}
+
 func panEvents(show, before, after string) []exchange {
 	return []exchange{{"set cli pager off\n", "admin@fw>"}, {"set cli config-output-format set\n", "admin@fw>"}, {"show config diff\n", "show config diff\n" + before + "admin@fw>"}, {"configure\n", "Entering configuration mode\nadmin@fw#"}, {"show\n", "show\n" + show + "\n[edit]\nadmin@fw#"}, {"exit\n", "Exiting configuration mode\nadmin@fw>"}, {"show config diff\n", "show config diff\n" + after + "admin@fw>"}}
 }
@@ -208,16 +242,28 @@ func TestRadwareMenuIdentityPrivateKeysAndHA(t *testing.T) {
 		t.Fatal("HA survived disconnect")
 	}
 }
-func TestOpenConnectsAndUnknownDoesNotOpen(t *testing.T) {
+func TestExplicitLifecycleValidatesBeforeConnect(t *testing.T) {
 	calls := 0
 	factory := func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
 		calls++
 		return nil, errors.New("fixture")
 	}
-	if _, e := Open(t.Context(), "unknown", connector.ConnectionConfig{Host: "fixture"}, connector.WithTransportFactory(factory)); !errors.Is(e, connector.ErrUnsupported) || calls != 0 {
-		t.Fatalf("unknown opened: %d %v", calls, e)
+	if _, e := Profile("unknown"); !errors.Is(e, connector.ErrUnsupported) || calls != 0 {
+		t.Fatalf("unknown profile: %v", e)
 	}
-	if _, e := Open(t.Context(), "h3c", connector.ConnectionConfig{Host: "fixture"}, connector.WithTransportFactory(factory)); e == nil || calls != 1 {
-		t.Fatalf("open did not connect: %d %v", calls, e)
+	p, e := Profile("h3c")
+	if e != nil {
+		t.Fatal(e)
+	}
+	d, e := connector.New(p, connector.ConnectionConfig{Host: "fixture"}, connector.WithTransportFactory(factory))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer d.Close()
+	if calls != 0 {
+		t.Fatal("construction connected")
+	}
+	if e = d.Connect(t.Context()); e == nil || calls != 1 {
+		t.Fatalf("connect calls=%d err=%v", calls, e)
 	}
 }

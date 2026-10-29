@@ -18,11 +18,11 @@ type renderedConfig struct{}
 
 func (renderedConfig) Prompt(_ string, current string) string                        { return current }
 func (renderedConfig) Validate(context.Context, Command, StepResult, Executor) error { return nil }
-func (renderedConfig) Finish(r Result) (string, error) {
+func (renderedConfig) Finish(_ context.Context, r Result) (string, error) {
 	if len(r.steps) == 0 {
 		return "", ErrIncomplete
 	}
-	return terminal.Render([]byte(r.steps[len(r.steps)-1].output), true)
+	return r.steps[len(r.steps)-1].Rendered()
 }
 func (d *Device) RunningConfig(ctx context.Context) (Result, error) {
 	if e := d.acquire(); e != nil {
@@ -68,7 +68,7 @@ func (d *Device) collectConfig(ctx context.Context) (result Result, err error) {
 	if e != nil {
 		return result, e
 	}
-	config, e := strategy.Finish(result)
+	config, e := strategy.Finish(ctx, result)
 	if e != nil {
 		return result, configurationFailure(Command{}, e)
 	}
@@ -77,11 +77,11 @@ func (d *Device) collectConfig(ctx context.Context) (result Result, err error) {
 	}
 	hasBody := d.profile.ConfigStrategy != nil
 	for _, step := range result.steps[len(result.steps)-1:] {
-		body, e := terminal.Render([]byte(step.output), true)
+		body, e := step.Rendered()
 		if e != nil {
 			return result, e
 		}
-		prompt, _ := terminal.Render([]byte(step.prompt), true)
+		prompt, _ := terminal.Render([]byte(step.Prompt()), true)
 		body = strings.TrimSuffix(strings.TrimSpace(body), strings.TrimSpace(prompt))
 		body = strings.TrimSpace(body)
 		if strings.HasPrefix(body, step.command.Text) {
@@ -95,7 +95,7 @@ func (d *Device) collectConfig(ctx context.Context) (result Result, err error) {
 		return result, fail("incomplete_configuration", "collect", Command{}, ErrIncomplete)
 	}
 	result.config = &config
-	return result, nil
+	return result, ctx.Err()
 }
 
 // SaveConfig distinguishes command completion from profile-confirmed persistence.
@@ -180,8 +180,8 @@ func (d *Device) Backup(ctx context.Context, opts BackupOptions) (receipt Backup
 		return receipt, e
 	}
 	defer func() {
-		if e := lock.Close(); err == nil && e != nil {
-			err = fail("backup_finalize_failed", "backup", Command{}, e)
+		if e := lock.Close(); e != nil {
+			err = joinFailures(err, fail("backup_finalize_failed", "backup", Command{}, e))
 		}
 	}()
 	result, e := d.runningConfig(ctx)

@@ -17,6 +17,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/netdisco"
 	"github.com/gatework/go-net-connector/topology"
@@ -280,7 +281,7 @@ func TestTopologyTextStdoutExplainsPendingPlan(t *testing.T) {
 func TestTopologyTextAndJSONRepair(t *testing.T) {
 	dir := t.TempDir()
 	current, expected := "old", "To_peer_Gi1/0/1"
-	out := topologyOutcome{device: netdisco.Record{Host: "192.0.2.1", Name: "edge", Vendor: "cisco_ios"}, row: map[string]any{
+	out := topologyOutcome{device: fleet.Record{Host: "192.0.2.1", Name: "edge", Vendor: "cisco_ios"}, row: map[string]any{
 		"status": "applied", "changes": 1, "steps": 3, "script_file": filepath.Join(dir, "scripts", "edge.cfg"), "script_sha256": strings.Repeat("a", 64),
 		"neighbors": []topology.Comparison{{Interface: "Gi1/0/1", Current: &current, Expected: &expected, Status: "content_mismatch"}},
 		"issues":    []topology.Issue{{Interface: "Gi1/0/2", Code: "unknown_neighbor_name"}},

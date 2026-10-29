@@ -23,7 +23,7 @@ func (s *configStrategy) Prompt(command, current string) string {
 	parts := strings.Split(strings.TrimSpace(text), "\n")
 	prompt := strings.TrimSpace(parts[len(parts)-1])
 	if s.vendor == "radware" && command == "/cfg/dump" {
-		return re(`\A(>>[ \t]+(?:.* - )?)[^\r\n#]+#\z`).ReplaceAllString(prompt, "${1}Configuration#")
+		return radwareConfigPrompt.ReplaceAllString(prompt, "${1}Configuration#")
 	}
 	if s.vendor == "palo_alto" && (command == "configure" || command == "exit") {
 		if strings.HasSuffix(prompt, ">") || strings.HasSuffix(prompt, "#") {
@@ -45,7 +45,10 @@ func (s *configStrategy) Validate(_ context.Context, c connector.Command, r conn
 	}
 	return nil
 }
-func (s *configStrategy) Finish(result connector.Result) (string, error) {
+func (s *configStrategy) Finish(ctx context.Context, result connector.Result) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	steps := result.Steps()
 	if len(steps) == 0 {
 		return "", connector.ErrIncomplete
@@ -67,22 +70,28 @@ func (s *configStrategy) Finish(result connector.Result) (string, error) {
 			return "", connector.ErrIncomplete
 		}
 	}
-	if strings.TrimSpace(step.Prompt()) == "" || configBody(step.Output(), step.Command().Text, step.Prompt()) == "" {
+	visible, err := step.Rendered()
+	if err != nil {
 		return "", connector.ErrIncomplete
 	}
-	return s.clean(step.Output(), strings.TrimSpace(step.Prompt()))
+	prompt, err := terminal.RenderString(step.Prompt(), true)
+	if err != nil {
+		return "", connector.ErrIncomplete
+	}
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" || renderedBody(visible, step.Command().Text, prompt) == "" {
+		return "", connector.ErrIncomplete
+	}
+	if s.vendor == "hillstone" || s.vendor == "palo_alto" {
+		return s.clean(step.Output(), strings.TrimSpace(step.Prompt()))
+	}
+	return s.cleanRendered(visible, prompt)
 }
 
 // Remove only response boundaries when checking evidence; this does not rewrite
 // the configuration returned by dialects which preserve CLI echoes and prompts.
-func configBody(text, command, prompt string) string {
-	text = strings.TrimSuffix(text, prompt)
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	rendered, e := terminal.Render([]byte(text), false)
-	if e != nil {
-		return ""
-	}
-	text = strings.TrimSpace(rendered)
+func renderedBody(text, command, prompt string) string {
+	text = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(text), prompt))
 	first, rest, ok := strings.Cut(text, "\n")
 	if first == command || first == strings.TrimSpace(prompt)+command {
 		if !ok {
@@ -94,6 +103,8 @@ func configBody(text, command, prompt string) string {
 }
 
 var hillstonePaging = re(`\x00?\x08+[ \t]+\x08+`)
+var radwareConfigPrompt = re(`\A(>>[ \t]+(?:.* - )?)[^\r\n#]+#\z`)
+
 var ciscoHeader = re(`(?i)\A(?:[ \t]*\n|![^\n]*\n|(?:\S+[#])?show[ \t]+running-config[^\n]*\n|Building[ \t]+configuration[^\n]*\n|Current[ \t]+configuration[^\n]*\n)*`)
 var ciscoVolatile = re(`(?im)^!.*(?:Last\s+configuration\s+change|NVRAM\s+config).*\n`)
 
@@ -112,14 +123,21 @@ func (s *configStrategy) clean(text, prompt string) (string, error) {
 		}
 		return text, nil
 	}
-	rendered, e := terminal.Render([]byte(text), false)
+	rendered, e := terminal.RenderString(text, false)
 	if e != nil {
 		return "", connector.ErrIncomplete
 	}
+	return s.cleanRendered(rendered, prompt)
+}
+func (s *configStrategy) cleanRendered(rendered, prompt string) (string, error) {
 	switch s.vendor {
 	case "cisco_ios", "cisco_nxos":
 		header := ciscoHeader.FindString(rendered)
-		return ciscoVolatile.ReplaceAllString(header, "") + rendered[len(header):], nil
+		cleaned := ciscoVolatile.ReplaceAllString(header, "")
+		if cleaned == header {
+			return rendered, nil
+		}
+		return cleaned + rendered[len(header):], nil
 	case "centec":
 		rendered = re(`\A(?:`+regexp.QuoteMeta(prompt)+`)?show\s+running-config[ \t]*\n`).ReplaceAllString(rendered, "")
 		rendered = re(`(?:\A|\n)`+regexp.QuoteMeta(prompt)+`[ \t]*\z`).ReplaceAllString(rendered, "\n")

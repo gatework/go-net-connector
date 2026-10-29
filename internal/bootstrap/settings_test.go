@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/gatework/go-net-connector/config"
-	"github.com/gatework/go-net-connector/netdisco"
+	"github.com/gatework/go-net-connector/fleet"
 )
 
 func TestPolicyDoesNotResolveCredentials(t *testing.T) {
@@ -19,7 +19,7 @@ func TestPolicyDoesNotResolveCredentials(t *testing.T) {
 	if e != nil || calls != 0 {
 		t.Fatal(e, calls)
 	}
-	_, e = p.Device(context.Background(), netdisco.Record{Host: "192.0.2.1", Vendor: "h3c"})
+	_, e = p.Device(context.Background(), fleet.Record{Host: "192.0.2.1", Vendor: "h3c"})
 	if e != ErrCredentials || calls == 0 {
 		t.Fatal(e, calls)
 	}

@@ -1,0 +1,22 @@
+ok  	github.com/gatework/go-net-connector/archive	4.328s
+?   	github.com/gatework/go-net-connector/cmd/net-backup	[no test files]
+?   	github.com/gatework/go-net-connector/cmd/net-backup-batch	[no test files]
+?   	github.com/gatework/go-net-connector/cmd/net-backup-tftp	[no test files]
+?   	github.com/gatework/go-net-connector/cmd/net-connector-archive	[no test files]
+?   	github.com/gatework/go-net-connector/cmd/net-topology	[no test files]
+ok  	github.com/gatework/go-net-connector/config	2.538s
+ok  	github.com/gatework/go-net-connector/connector	2.175s
+ok  	github.com/gatework/go-net-connector/fleet	1.828s
+ok  	github.com/gatework/go-net-connector/internal/bootstrap	2.936s
+?   	github.com/gatework/go-net-connector/internal/buildinfo	[no test files]
+ok  	github.com/gatework/go-net-connector/internal/cli	6.966s
+ok  	github.com/gatework/go-net-connector/internal/terminal	3.846s
+ok  	github.com/gatework/go-net-connector/internal/textcodec	4.124s
+ok  	github.com/gatework/go-net-connector/inventory	4.983s
+ok  	github.com/gatework/go-net-connector/netdisco	4.642s
+ok  	github.com/gatework/go-net-connector/parallel	4.962s
+ok  	github.com/gatework/go-net-connector/storage	4.516s
+ok  	github.com/gatework/go-net-connector/textfsm	4.667s
+ok  	github.com/gatework/go-net-connector/topology	5.406s
+ok  	github.com/gatework/go-net-connector/transfer	6.370s
+ok  	github.com/gatework/go-net-connector/vendors	8.189s

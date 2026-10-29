@@ -6,10 +6,10 @@ import (
 	"io"
 	"strings"
 
-	"github.com/gatework/go-net-connector/netdisco"
+	"github.com/gatework/go-net-connector/fleet"
 )
 
-func (r Runtime) preview(plan netdisco.Plan, view map[string]any, o options, program string) int {
+func (r Runtime) preview(plan fleet.Plan, view map[string]any, o options, program string) int {
 	if program == "net-backup" {
 		return r.print(view)
 	}
@@ -35,7 +35,7 @@ func (r Runtime) preview(plan netdisco.Plan, view map[string]any, o options, pro
 	}
 	return 0
 }
-func (r Runtime) finishReport(report netdisco.Report, directory string, o options, program string, interrupted bool) error {
+func (r Runtime) finishReport(report fleet.Report, directory string, o options, program string, interrupted bool) error {
 	if program == "net-backup" {
 		return writeReportOutput(r.Output, report)
 	}
@@ -57,7 +57,7 @@ func writeReportOutput(output io.Writer, value any) error {
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(value)
 }
-func artifactView(a netdisco.Artifact) any {
+func artifactView(a fleet.Artifact) any {
 	if b := a.Backup; b != nil {
 		return map[string]any{"path": b.Path, "bytes": b.Bytes, "sha256": b.SHA256, "collected_at": b.CollectedAt, "change": b.Change, "previous_sha256": nullable(b.PreviousSHA256)}
 	}
