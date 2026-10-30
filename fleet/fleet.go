@@ -125,15 +125,16 @@ func Run(ctx context.Context, p Plan, o RunOptions) (Batch, error) {
 			return b, e
 		}
 	}
-	for _, entry := range p.entries {
+	b.outcomes = make([]Outcome, len(p.entries))
+	for i, entry := range p.entries {
 		status := entry.Status
 		if status == "ready" {
 			status = "not_started"
 		}
-		b.outcomes = append(b.outcomes, Outcome{Device: entry.Device, Status: status})
+		b.outcomes[i] = Outcome{Device: entry.Device, Status: status}
 	}
 	var callbacks sync.Mutex
-	_, err := parallel.Map(ctx, o.Workers, p.tasks, func(ctx context.Context, task Task) (Outcome, error) {
+	_, err := parallel.Map(ctx, o.Workers, p.tasks, func(ctx context.Context, task Task) (struct{}, error) {
 		start := time.Now()
 		out := Outcome{Device: task.Device, StartedAt: start.UTC()}
 		runReturned := false
@@ -195,7 +196,7 @@ func Run(ctx context.Context, p Plan, o RunOptions) (Batch, error) {
 				}
 			}()
 		}
-		return out, nil
+		return struct{}{}, nil
 	})
 	b.finishedAt = time.Now().UTC()
 	b.interrupted = ctx.Err() != nil || errors.Is(err, parallel.ErrWorkerExit)

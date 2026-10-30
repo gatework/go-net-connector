@@ -161,52 +161,7 @@ func (h *HTTP) Devices(parent context.Context) ([]inventory.Device, error) {
 		}
 		key = data.APIKey
 	}
-	decode := func(b []byte) ([]inventory.Device, error) {
-		if len(strings.TrimSpace(string(b))) == 0 {
-			return []inventory.Device{}, nil
-		}
-		if !utf8.Valid(b) {
-			return nil, invError("invalid_json", nil)
-		}
-		var data []map[string]json.RawMessage
-		if e := json.Unmarshal(b, &data); e != nil || data == nil {
-			return nil, invError("invalid_inventory", e)
-		}
-		count += len(data)
-		if count > h.limits.MaxDevices {
-			return nil, invError("max_devices", nil)
-		}
-		rows := make([]inventory.Device, len(data))
-		for i, row := range data {
-			if row == nil {
-				return nil, invError("invalid_inventory", nil)
-			}
-			for _, field := range []string{"ip", "name", "dns", "vendor", "os", "model", "os_ver", "serial"} {
-				value, ok := row[field]
-				if !ok {
-					if field == "ip" {
-						return nil, invError("invalid_inventory", nil)
-					}
-					continue
-				}
-				var str *string
-				if e := json.Unmarshal(value, &str); e != nil || (field == "ip" && (str == nil || strings.TrimSpace(*str) == "")) {
-					return nil, invError("invalid_inventory", nil)
-				}
-			}
-			normalized := make(map[string]json.RawMessage)
-			for _, f := range []string{"ip", "name", "dns", "vendor", "os", "model", "os_ver", "serial"} {
-				if v, ok := row[f]; ok {
-					normalized[f] = v
-				}
-			}
-			body, _ := json.Marshal(normalized)
-			if e := json.Unmarshal(body, &rows[i]); e != nil {
-				return nil, invError("invalid_inventory", nil)
-			}
-		}
-		return rows, nil
-	}
+
 	seen := make(map[string]bool)
 	unique := make(map[inventory.Device]bool)
 	rows := make([]inventory.Device, 0)
@@ -228,25 +183,31 @@ func (h *HTTP) Devices(parent context.Context) ([]inventory.Device, error) {
 				if status < 200 || status >= 300 {
 					return nil, invError("request_failed", nil)
 				}
-				data, e := decode(body)
+				data, e := decodeHTTPInventory(ctx, body, h.limits.MaxDevices, &count)
 				if e != nil {
 					return nil, e
 				}
-				return dedup(data), nil
+				return dedupContext(ctx, data)
 			}
 		}
 		if status < 200 || status >= 300 {
 			return nil, invError("request_failed", fmt.Errorf("HTTP %d", status))
 		}
-		data, e := decode(body)
+		data, e := decodeHTTPInventory(ctx, body, h.limits.MaxDevices, &count)
 		if e != nil {
 			return nil, e
 		}
 		if len(data) == 0 {
+			if e := ctx.Err(); e != nil {
+				return nil, invError("inventory_timeout", e)
+			}
 			return rows, nil
 		}
 		advances := false
 		for _, row := range data {
+			if e := ctx.Err(); e != nil {
+				return nil, invError("inventory_timeout", e)
+			}
 			if !seen[row.IP] {
 				advances = true
 			}
@@ -262,17 +223,81 @@ func (h *HTTP) Devices(parent context.Context) ([]inventory.Device, error) {
 	}
 	return nil, invError("max_pages", nil)
 }
-func dedup(rows []inventory.Device) []inventory.Device {
+func dedupContext(ctx context.Context, rows []inventory.Device) ([]inventory.Device, error) {
 	seen := make(map[inventory.Device]bool)
 	out := make([]inventory.Device, 0, len(rows))
 	for _, r := range rows {
+		if e := ctx.Err(); e != nil {
+			return nil, invError("inventory_timeout", e)
+		}
 		if !seen[r] {
 			out = append(out, r)
 			seen[r] = true
 		}
 	}
-	return out
+	if e := ctx.Err(); e != nil {
+		return nil, invError("inventory_timeout", e)
+	}
+	return out, nil
 }
+
+var inventoryFieldNames = [...]string{"ip", "name", "dns", "vendor", "os", "model", "os_ver", "serial"}
+
+func inventoryFields(d *inventory.Device) [8]*string {
+	return [8]*string{&d.IP, &d.Name, &d.DNS, &d.Vendor, &d.OS, &d.Model, &d.OSVersion, &d.Serial}
+}
+
+func decodeHTTPInventory(ctx context.Context, b []byte, maxDevices int, count *int) ([]inventory.Device, error) {
+	if e := ctx.Err(); e != nil {
+		return nil, invError("inventory_timeout", e)
+	}
+	if len(strings.TrimSpace(string(b))) == 0 {
+		return []inventory.Device{}, nil
+	}
+	if !utf8.Valid(b) {
+		return nil, invError("invalid_json", nil)
+	}
+	// Raw-message maps keep acceptance case-sensitive and retain JSON's last-key-wins behavior.
+	var data []map[string]json.RawMessage
+	if e := json.Unmarshal(b, &data); e != nil || data == nil {
+		return nil, invError("invalid_inventory", e)
+	}
+	*count += len(data)
+	if *count > maxDevices {
+		return nil, invError("max_devices", nil)
+	}
+	rows := make([]inventory.Device, len(data))
+	for i, row := range data {
+		if e := ctx.Err(); e != nil {
+			return nil, invError("inventory_timeout", e)
+		}
+		if row == nil {
+			return nil, invError("invalid_inventory", nil)
+		}
+		fields := inventoryFields(&rows[i])
+		for j, name := range inventoryFieldNames {
+			if e := ctx.Err(); e != nil {
+				return nil, invError("inventory_timeout", e)
+			}
+			value, ok := row[name]
+			if !ok {
+				continue
+			}
+			// Unmarshaling null into an empty string preserves optional null-as-empty fields.
+			if e := json.Unmarshal(value, fields[j]); e != nil {
+				return nil, invError("invalid_inventory", nil)
+			}
+		}
+		if strings.TrimSpace(rows[i].IP) == "" {
+			return nil, invError("invalid_inventory", nil)
+		}
+	}
+	if e := ctx.Err(); e != nil {
+		return nil, invError("inventory_timeout", e)
+	}
+	return rows, nil
+}
+
 func errorCode(e error) string {
 	var ie *InventoryError
 	if errors.As(e, &ie) {

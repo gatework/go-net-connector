@@ -417,6 +417,11 @@ func (c ConnectionConfig) MarshalJSON() ([]byte, error) {
 	}{c.Host, c.Protocol, c.Port})
 }
 
+// TransportFactory transfers every non-nil transport to Device, even on error.
+// Close must interrupt concurrent I/O; failed cleanup may be retried. A transport
+// may implement Authenticated(context.Context) error to persist authentication
+// evidence after login. That hook receives the admitted login context and must
+// synchronize with Close. The legacy Authenticated() error hook is rejected.
 type TransportFactory func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error)
 type Option func(*options) error
 type options struct{ factory TransportFactory }

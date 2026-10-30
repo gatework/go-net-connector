@@ -1,0 +1,49 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/netdisco
+cpu: Apple M5
+                             │ /private/tmp/connector-round3-20261030/inventory-before.txt │ /private/tmp/connector-round3-20261030/inventory-after.txt │
+                             │                           sec/op                            │               sec/op                vs base                │
+HTTPInventoryDecode/500-4                                                     1437.3µ ± 2%                          632.9µ ± 2%  -55.97% (p=0.000 n=10)
+HTTPInventoryDecode/10000-4                                                    30.04m ± 1%                          13.02m ± 4%  -56.65% (p=0.000 n=10)
+HTTPInventoryDecode/100000-4                                                   312.7m ± 1%                          136.1m ± 2%  -56.46% (p=0.000 n=10)
+HTTPInventoryLocal/500-4                                                       1.920m ± 1%                          1.048m ± 1%  -45.42% (p=0.000 n=10)
+HTTPInventoryLocal/10000-4                                                     35.85m ± 1%                          18.20m ± 1%  -49.22% (p=0.000 n=10)
+HTTPInventoryLocal/100000-4                                                    354.1m ± 1%                          181.0m ± 1%  -48.88% (p=0.000 n=10)
+PostgresMapping/500-4                                                         672.63µ ± 1%                          59.96µ ± 2%  -91.09% (p=0.000 n=10)
+PostgresMapping/10000-4                                                       13.270m ± 2%                          1.174m ± 1%  -91.15% (p=0.000 n=10)
+PostgresMapping/100000-4                                                      126.14m ± 2%                          11.20m ± 3%  -91.12% (p=0.000 n=10)
+geomean                                                                        19.29m                               5.255m       -72.76%
+
+                             │ /private/tmp/connector-round3-20261030/inventory-before.txt │ /private/tmp/connector-round3-20261030/inventory-after.txt │
+                             │                             B/s                             │                B/s                 vs base                 │
+HTTPInventoryDecode/500-4                                                     47.63Mi ± 2%                       108.17Mi ± 2%  +127.09% (p=0.000 n=10)
+HTTPInventoryDecode/10000-4                                                   45.81Mi ± 1%                       105.69Mi ± 4%  +130.69% (p=0.000 n=10)
+HTTPInventoryDecode/100000-4                                                  44.23Mi ± 1%                       101.58Mi ± 2%  +129.67% (p=0.000 n=10)
+geomean                                                                       45.87Mi                             105.1Mi       +129.15%
+
+                             │ /private/tmp/connector-round3-20261030/inventory-before.txt │ /private/tmp/connector-round3-20261030/inventory-after.txt │
+                             │                            B/op                             │                B/op                 vs base                │
+HTTPInventoryDecode/500-4                                                     904.5Ki ± 0%                         422.7Ki ± 0%  -53.27% (p=0.000 n=10)
+HTTPInventoryDecode/10000-4                                                  17.723Mi ± 0%                         8.327Mi ± 0%  -53.01% (p=0.000 n=10)
+HTTPInventoryDecode/100000-4                                                 178.88Mi ± 0%                         84.53Mi ± 0%  -52.74% (p=0.000 n=10)
+HTTPInventoryLocal/500-4                                                      1.538Mi ± 0%                         1.065Mi ± 0%  -30.74% (p=0.000 n=10)
+HTTPInventoryLocal/10000-4                                                    31.22Mi ± 0%                         21.81Mi ± 0%  -30.12% (p=0.000 n=10)
+HTTPInventoryLocal/100000-4                                                   314.3Mi ± 0%                         220.0Mi ± 0%  -30.01% (p=0.000 n=10)
+PostgresMapping/500-4                                                        379.58Ki ± 0%                         35.34Ki ± 0%  -90.69% (p=0.000 n=10)
+PostgresMapping/10000-4                                                      7591.3Ki ± 0%                         706.9Ki ± 0%  -90.69% (p=0.000 n=10)
+PostgresMapping/100000-4                                                     74.140Mi ± 0%                         6.903Mi ± 0%  -90.69% (p=0.000 n=10)
+geomean                                                                       12.70Mi                              3.969Mi       -68.76%
+
+                             │ /private/tmp/connector-round3-20261030/inventory-before.txt │ /private/tmp/connector-round3-20261030/inventory-after.txt │
+                             │                          allocs/op                          │             allocs/op               vs base                │
+HTTPInventoryDecode/500-4                                                     23.522k ± 0%                          7.516k ± 0%  -68.05% (p=0.000 n=10)
+HTTPInventoryDecode/10000-4                                                    470.5k ± 0%                          150.2k ± 0%  -68.08% (p=0.000 n=10)
+HTTPInventoryDecode/100000-4                                                   4.705M ± 0%                          1.502M ± 0%  -68.08% (p=0.000 n=10)
+HTTPInventoryLocal/500-4                                                      23.839k ± 0%                          7.824k ± 0%  -67.18% (p=0.000 n=10)
+HTTPInventoryLocal/10000-4                                                     471.6k ± 0%                          151.3k ± 0%  -67.91% (p=0.000 n=10)
+HTTPInventoryLocal/100000-4                                                    4.714M ± 0%                          1.510M ± 0%  -67.96% (p=0.000 n=10)
+PostgresMapping/500-4                                                         12.502k ± 0%                          4.001k ± 0%  -68.00% (p=0.000 n=10)
+PostgresMapping/10000-4                                                       250.04k ± 0%                          80.02k ± 0%  -68.00% (p=0.000 n=10)
+PostgresMapping/100000-4                                                      2500.4k ± 0%                          800.2k ± 0%  -68.00% (p=0.000 n=10)
+geomean                                                                        303.1k                               97.23k       -67.92%

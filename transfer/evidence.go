@@ -73,31 +73,36 @@ func evidence(steps []connector.StepResult) (lines, outputs []string, err error)
 
 var copied = regexp.MustCompile(`(?i)^[1-9]\d*\s+bytes?\s+copied(?:\s+in\s+[\d.]+\s+(?:secs?|seconds?)(?:\s+\([\d.]+\s+bytes/sec\))?)?[.!]?$`)
 
+var completionPatterns = map[string][]*regexp.Regexp{
+	"cisco_ios":  {regexp.MustCompile(`(?i)^\[OK(?:\s*-\s*[1-9]\d*\s+bytes)?\]$`)},
+	"cisco_nxos": {regexp.MustCompile(`(?i)^(?:transfer|copy)(?:\s+operation)?\s+(?:success(?:ful(?:ly)?)?|succeeded|complete(?:d)?(?:\s+successfully)?)[.!]?$`)},
+	"fortinet":   {regexp.MustCompile(`(?i)^Send config file to tftp server OK\.?$`)},
+	"centec":     {regexp.MustCompile(`(?i)^Sent\s+[1-9]\d*\s+bytes\s+in\s+[\d.]+\s+seconds?[.!]?$`)},
+	"hillstone":  {regexp.MustCompile(`(?i)^Export\s+ok\s*,\s*target\s+file\s+name\s+\S+$`)},
+	"palo_alto":  {regexp.MustCompile(`(?i)^Sent\s+[1-9]\d*\s+bytes(?:\s+in\s+[\d.]+\s+(?:secs?|seconds?))?(?:\s+\[\d+(?:\.\d+)?\s+bit/s\])?[.!]?$`)},
+	"radware":    {regexp.MustCompile(`(?i)^Current\s+config\s+successfully\s+transferred\s+to\s+[^\s:]+:\S+$`), regexp.MustCompile(`(?i)^(?:Current\s+)?(?:configuration|config)\s+(?:successfully\s+(?:uploaded|tftp'd)|(?:uploaded|tftp'd)(?:\s+successfully)?|complete(?:d)?(?:\s+successfully)?)[.!]?$`)},
+}
+
+var fileCompletionPatterns = []*regexp.Regexp{regexp.MustCompile(`(?i)^(?:File\s+)?(?:transfer(?:red)?|upload(?:ed)?)(?:\s+(?:is|was))?\s+(?:success(?:ful(?:ly)?)?|succeeded|complete(?:d)?(?:\s+successfully)?)[.!]?$`), regexp.MustCompile(`(?i)^(?:TFTP:\s*)?[1-9]\d*\s+bytes?\s+sent(?:\s+in\s+[\d.]+\s+(?:secs?|seconds?|second\(s\)))?[.!]?$`)}
+var fileCompletionProgress = regexp.MustCompile(`(?i)^100\s+([1-9]\d*(?:\.\d+)?[kMGT]?)\s+0\s+0\s+100\s+([1-9]\d*(?:\.\d+)?[kMGT]?)(?:\s+[\d.:kMGT-]+)*$`)
+
 func completed(vendor string, lines []string) bool {
-	patterns := map[string][]string{
-		"cisco_ios":  {`(?i)^\[OK(?:\s*-\s*[1-9]\d*\s+bytes)?\]$`},
-		"cisco_nxos": {`(?i)^(?:transfer|copy)(?:\s+operation)?\s+(?:success(?:ful(?:ly)?)?|succeeded|complete(?:d)?(?:\s+successfully)?)[.!]?$`},
-		"fortinet":   {`(?i)^Send config file to tftp server OK\.?$`},
-		"centec":     {`(?i)^Sent\s+[1-9]\d*\s+bytes\s+in\s+[\d.]+\s+seconds?[.!]?$`},
-		"hillstone":  {`(?i)^Export\s+ok\s*,\s*target\s+file\s+name\s+\S+$`},
-		"palo_alto":  {`(?i)^Sent\s+[1-9]\d*\s+bytes(?:\s+in\s+[\d.]+\s+(?:secs?|seconds?))?(?:\s+\[\d+(?:\.\d+)?\s+bit/s\])?[.!]?$`},
-		"radware":    {`(?i)^Current\s+config\s+successfully\s+transferred\s+to\s+[^\s:]+:\S+$`, `(?i)^(?:Current\s+)?(?:configuration|config)\s+(?:successfully\s+(?:uploaded|tftp'd)|(?:uploaded|tftp'd)(?:\s+successfully)?|complete(?:d)?(?:\s+successfully)?)[.!]?$`},
-	}
 	file := vendor == "h3c" || vendor == "h3c_wireless" || vendor == "huawei"
+	patterns := completionPatterns[vendor]
 	if file {
-		patterns[vendor] = []string{`(?i)^(?:File\s+)?(?:transfer(?:red)?|upload(?:ed)?)(?:\s+(?:is|was))?\s+(?:success(?:ful(?:ly)?)?|succeeded|complete(?:d)?(?:\s+successfully)?)[.!]?$`, `(?i)^(?:TFTP:\s*)?[1-9]\d*\s+bytes?\s+sent(?:\s+in\s+[\d.]+\s+(?:secs?|seconds?|second\(s\)))?[.!]?$`}
+		patterns = fileCompletionPatterns
 	}
 	for _, line := range lines {
 		if (vendor == "cisco_ios" || vendor == "cisco_nxos") && copied.MatchString(line) {
 			return true
 		}
-		for _, pattern := range patterns[vendor] {
-			if regexp.MustCompile(pattern).MatchString(line) {
+		for _, pattern := range patterns {
+			if pattern.MatchString(line) {
 				return true
 			}
 		}
 		if file {
-			m := regexp.MustCompile(`(?i)^100\s+([1-9]\d*(?:\.\d+)?[kMGT]?)\s+0\s+0\s+100\s+([1-9]\d*(?:\.\d+)?[kMGT]?)(?:\s+[\d.:kMGT-]+)*$`).FindStringSubmatch(line)
+			m := fileCompletionProgress.FindStringSubmatch(line)
 			if m != nil && m[1] == m[2] {
 				return true
 			}

@@ -1,0 +1,100 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/fleet
+cpu: Apple M5
+BenchmarkMockFleet/1000-4         	     314	    354960 ns/op	  943804 B/op	    2019 allocs/op
+BenchmarkMockFleet/10000-4        	      40	   2654721 ns/op	 9378253 B/op	   20020 allocs/op
+BenchmarkMockFleet/100000-4       	       4	  27281052 ns/op	93613260 B/op	  200020 allocs/op
+BenchmarkNewPlan/1000-4           	     166	    715392 ns/op	 1670324 B/op	   11118 allocs/op
+BenchmarkNewPlan/10000-4          	      14	   7954440 ns/op	23136277 B/op	  110227 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/fleet
+cpu: Apple M5
+BenchmarkMockFleet/1000-4         	     441	    266631 ns/op	  943799 B/op	    2019 allocs/op
+BenchmarkMockFleet/10000-4        	      39	   2702082 ns/op	 9378084 B/op	   20019 allocs/op
+BenchmarkMockFleet/100000-4       	       4	  26558344 ns/op	93613256 B/op	  200020 allocs/op
+BenchmarkNewPlan/1000-4           	     169	    708713 ns/op	 1674024 B/op	   11118 allocs/op
+BenchmarkNewPlan/10000-4          	      14	   8012783 ns/op	23166221 B/op	  110234 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/fleet
+cpu: Apple M5
+BenchmarkMockFleet/1000-4         	     435	    269216 ns/op	  943792 B/op	    2019 allocs/op
+BenchmarkMockFleet/10000-4        	      39	   2604757 ns/op	 9378523 B/op	   20020 allocs/op
+BenchmarkMockFleet/100000-4       	       4	  26417344 ns/op	93613176 B/op	  200019 allocs/op
+BenchmarkNewPlan/1000-4           	     164	    719773 ns/op	 1676556 B/op	   11119 allocs/op
+BenchmarkNewPlan/10000-4          	      14	   7972625 ns/op	23130847 B/op	  110226 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/fleet
+cpu: Apple M5
+BenchmarkMockFleet/1000-4         	     442	    275018 ns/op	  943771 B/op	    2019 allocs/op
+BenchmarkMockFleet/10000-4        	      42	   2676182 ns/op	 9378152 B/op	   20020 allocs/op
+BenchmarkMockFleet/100000-4       	       4	  26588854 ns/op	93613284 B/op	  200020 allocs/op
+BenchmarkNewPlan/1000-4           	     169	    706570 ns/op	 1671856 B/op	   11118 allocs/op
+BenchmarkNewPlan/10000-4          	      14	   7986774 ns/op	23189570 B/op	  110236 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/fleet
+cpu: Apple M5
+BenchmarkMockFleet/1000-4         	     439	    267668 ns/op	  943791 B/op	    2019 allocs/op
+BenchmarkMockFleet/10000-4        	      39	   2670710 ns/op	 9377986 B/op	   20019 allocs/op
+BenchmarkMockFleet/100000-4       	       4	  27457823 ns/op	93613776 B/op	  200021 allocs/op
+BenchmarkNewPlan/1000-4           	     166	    717337 ns/op	 1673245 B/op	   11118 allocs/op
+BenchmarkNewPlan/10000-4          	      14	   8024137 ns/op	23173857 B/op	  110234 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/fleet
+cpu: Apple M5
+BenchmarkMockFleet/1000-4         	     444	    270497 ns/op	  943780 B/op	    2019 allocs/op
+BenchmarkMockFleet/10000-4        	      42	   2623128 ns/op	 9378179 B/op	   20020 allocs/op
+BenchmarkMockFleet/100000-4       	       4	  25818114 ns/op	93615328 B/op	  200024 allocs/op
+BenchmarkNewPlan/1000-4           	     168	    710519 ns/op	 1671767 B/op	   11118 allocs/op
+BenchmarkNewPlan/10000-4          	      14	   8085940 ns/op	23200662 B/op	  110239 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/fleet
+cpu: Apple M5
+BenchmarkMockFleet/1000-4         	     444	    268398 ns/op	  943789 B/op	    2019 allocs/op
+BenchmarkMockFleet/10000-4        	      39	   2661622 ns/op	 9378148 B/op	   20019 allocs/op
+BenchmarkMockFleet/100000-4       	       4	  26468334 ns/op	93613172 B/op	  200019 allocs/op
+BenchmarkNewPlan/1000-4           	     162	    735198 ns/op	 1671920 B/op	   11118 allocs/op
+BenchmarkNewPlan/10000-4          	      14	   8039158 ns/op	23146745 B/op	  110228 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/fleet
+cpu: Apple M5
+BenchmarkMockFleet/1000-4         	     444	    270594 ns/op	  943758 B/op	    2019 allocs/op
+BenchmarkMockFleet/10000-4        	      45	   2615633 ns/op	 9378167 B/op	   20020 allocs/op
+BenchmarkMockFleet/100000-4       	       4	  25779448 ns/op	93613172 B/op	  200019 allocs/op
+BenchmarkNewPlan/1000-4           	     165	    719423 ns/op	 1671163 B/op	   11118 allocs/op
+BenchmarkNewPlan/10000-4          	      14	   8110801 ns/op	23163086 B/op	  110232 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/fleet
+cpu: Apple M5
+BenchmarkMockFleet/1000-4         	     435	    270242 ns/op	  943757 B/op	    2019 allocs/op
+BenchmarkMockFleet/10000-4        	      38	   2721639 ns/op	 9378634 B/op	   20021 allocs/op
+BenchmarkMockFleet/100000-4       	       4	  26204312 ns/op	93613168 B/op	  200019 allocs/op
+BenchmarkNewPlan/1000-4           	     165	    713223 ns/op	 1670261 B/op	   11118 allocs/op
+BenchmarkNewPlan/10000-4          	      14	   8090122 ns/op	23189788 B/op	  110237 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/fleet
+cpu: Apple M5
+BenchmarkMockFleet/1000-4         	     435	    270592 ns/op	  943785 B/op	    2019 allocs/op
+BenchmarkMockFleet/10000-4        	      45	   2641619 ns/op	 9378319 B/op	   20020 allocs/op
+BenchmarkMockFleet/100000-4       	       5	  22907875 ns/op	93613171 B/op	  200019 allocs/op
+BenchmarkNewPlan/1000-4           	     165	    720098 ns/op	 1676123 B/op	   11119 allocs/op
+BenchmarkNewPlan/10000-4          	      14	   8019836 ns/op	23171346 B/op	  110234 allocs/op
+PASS
