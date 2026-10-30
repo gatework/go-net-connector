@@ -52,3 +52,10 @@ passed on Darwin and Linux arm64 with Go 1.26.0 and 1.27.3. Linux uses offline
 containers and a read-only module cache; PG integration is proven on Darwin.
 Lint reports zero issues; govulncheck finds no vulnerabilities. Release fixture
 tests, paired expect sources and the disposable Firemon adapter pass.
+
+Release dependency: connector now pins the published go-expect v0.1.2, whose
+tag resolves to `217c13376b457a8796c745cc3470f33dc7dd1d7d`. Its successful
+workflow run is `41051641645`; artifact `12975311098` has GitHub digest
+`sha256:6f4df24740fe9c3bca81f49d24d89103d06f4ac380567e5979306f6ef2d01a52`.
+Downloaded release assets match those exact CI files byte-for-byte. Connector's
+release commit receives its own pinned-dependency CI and package validation.
