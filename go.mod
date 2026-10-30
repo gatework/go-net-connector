@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/creack/pty v1.1.24
-	github.com/gatework/go-expect v0.1.1-0.20261026150421-505caf867ed3
+	github.com/gatework/go-expect v0.1.2
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/samber/do/v2 v2.1.0
 	github.com/sirikothe/gotextfsm v1.2.0
