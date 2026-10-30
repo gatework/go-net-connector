@@ -221,6 +221,9 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 	if nilValue(t) {
 		return ErrConnection
 	}
+	if _, legacy := t.(interface{ Authenticated() error }); legacy {
+		return fail("invalid_transport", "connect", Command{}, ErrInvalid)
+	}
 	var owned io.ReadWriteCloser = d.owner
 	if conn, ok := t.(syscall.Conn); ok {
 		owned = &osCloseOwner{closeOwner: d.owner, Conn: conn}
@@ -280,8 +283,11 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 		}
 		d.haState.Store(state.HAState)
 	}
-	if c, ok := t.(interface{ Authenticated() error }); ok {
-		if e = c.Authenticated(); e != nil {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if c, ok := t.(interface{ Authenticated(context.Context) error }); ok {
+		if e = c.Authenticated(ctx); e != nil {
 			return fail("host_key_commit_failed", "login", Command{}, e)
 		}
 	}
@@ -1035,7 +1041,9 @@ func (d *Device) HAState() string {
 func writeFailure(phase string, c Command, err error) error {
 	var classified *Error
 	if errors.As(err, &classified) {
-		return classified
+		metadata := *classified
+		metadata.cause = err
+		return &metadata
 	}
 	if errors.Is(err, expect.ErrBufferLimit) || errors.Is(err, ErrOutputLimit) {
 		return fail("output_limit_exceeded", phase, c, err)

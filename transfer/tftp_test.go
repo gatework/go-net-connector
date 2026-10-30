@@ -3,6 +3,7 @@ package transfer
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"net"
 	"regexp"
@@ -79,5 +80,36 @@ func TestH3CSourceDiscoveryAndIOSDialogue(t *testing.T) {
 	r, e = TFTP(t.Context(), d, TFTPOptions{Server: "192.0.2.9", Path: "backup.cfg"})
 	if e != nil || !r.Receipt.Reported() {
 		t.Fatal(r, e)
+	}
+}
+
+func TestTFTPFileCompletion(t *testing.T) {
+	for _, vendor := range []string{"h3c", "h3c_wireless", "huawei"} {
+		for _, test := range []struct {
+			name, body string
+			reported   bool
+		}{
+			{"message", "File transfer completed successfully.", true},
+			{"bytes", "TFTP: 123 bytes sent in 0.25 second(s)", true},
+			{"progress", "99 123k 0 0 99 123k 0 0 0\r\n100 123k 0 0 100 123k 0 0 0", true},
+			{"incomplete_progress", "100 123k 0 0 100 12k 0 0 0", false},
+		} {
+			t.Run(vendor+"/"+test.name, func(t *testing.T) {
+				t.Parallel()
+				const command = "tftp 192.0.2.9 put flash:/startup.cfg backup.cfg"
+				d := transferDevice(t, vendor, [][2]string{{command, command + "\r\n" + test.body + "\r\nsw#"}})
+				result, err := TFTP(t.Context(), d, TFTPOptions{Server: "192.0.2.9", Path: "backup.cfg", SourceFile: "flash:/startup.cfg"})
+				if result.Receipt.Reported() != test.reported || len(result.Steps) != 1 {
+					t.Fatalf("transfer result: %v, error: %v", result, err)
+				}
+				if test.reported {
+					if err != nil || result.Receipt.ConfigurationKind != "saved_file" || result.Receipt.Path != "backup.cfg" {
+						t.Fatalf("transfer result: %v, error: %v", result, err)
+					}
+				} else if !errors.Is(err, ErrUnconfirmed) {
+					t.Fatalf("completion error = %v, want unconfirmed", err)
+				}
+			})
+		}
 	}
 }

@@ -12,7 +12,7 @@ import (
 )
 
 func BenchmarkMockFleet(b *testing.B) {
-	for _, count := range []int{1000, 10000} {
+	for _, count := range []int{1000, 10000, 100000} {
 		b.Run(fmt.Sprint(count), func(b *testing.B) {
 			rows := make([]inventory.Device, count)
 			for i := range rows {

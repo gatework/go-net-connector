@@ -7,9 +7,11 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type PostgresOptions struct {
@@ -92,64 +94,30 @@ func (p *Postgres) Devices(parent context.Context) (result []inventory.Device, e
 		if e != nil {
 			return nil, invError("query_failed", e)
 		}
-		fields := rows.FieldDescriptions()
-		seen := make(map[string]bool)
-		valid := false
-		for _, f := range fields {
-			if seen[f.Name] {
-				rows.Close()
-				return nil, invError("invalid_inventory", nil)
-			}
-			seen[f.Name] = true
-			if f.Name == "ip" {
-				valid = true
-			}
-		}
-		if !valid {
+		columns, e := postgresColumns(ctx, rows.FieldDescriptions())
+		if e != nil {
 			rows.Close()
-			return nil, invError("invalid_inventory", nil)
+			return nil, e
 		}
+
 		count := 0
 		var response int64
 		for rows.Next() {
+			if e := ctx.Err(); e != nil {
+				rows.Close()
+				return nil, invError("query_failed", e)
+			}
 			count++
 			if len(output) >= p.limits.MaxDevices {
 				rows.Close()
 				return nil, invError("max_devices", nil)
 			}
-			values := rows.RawValues()
-			selected := make(map[string]*string)
-			for i, v := range values {
-				response += int64(len(fields[i].Name) + len(v))
-				total += int64(len(fields[i].Name) + len(v))
-				if response > p.limits.MaxResponseBytes {
-					rows.Close()
-					return nil, invError("max_response_bytes", nil)
-				}
-				if total > p.limits.MaxInventoryBytes {
-					rows.Close()
-					return nil, invError("max_inventory_bytes", nil)
-				}
-				switch fields[i].Name {
-				case "ip", "name", "dns", "vendor", "os", "model", "os_ver", "serial":
-					if v == nil {
-						selected[fields[i].Name] = nil
-					} else {
-						text := string(v)
-						selected[fields[i].Name] = &text
-					}
-				}
-			}
-			if selected["ip"] == nil || strings.TrimSpace(*selected["ip"]) == "" {
+			device, e := decodePostgresRow(ctx, columns, rows.RawValues(), p.limits, &response, &total)
+			if e != nil {
 				rows.Close()
-				return nil, invError("invalid_inventory", nil)
+				return nil, e
 			}
-			b, _ := json.Marshal(selected)
-			var device inventory.Device
-			if e = json.Unmarshal(b, &device); e != nil {
-				rows.Close()
-				return nil, invError("invalid_inventory", e)
-			}
+
 			output = append(output, device)
 		}
 		e = rows.Err()
@@ -161,10 +129,83 @@ func (p *Postgres) Devices(parent context.Context) (result []inventory.Device, e
 			if e = tx.Commit(ctx); e != nil {
 				return nil, invError("query_failed", e)
 			}
+			if e := ctx.Err(); e != nil {
+				return nil, invError("query_failed", e)
+			}
 			return output, nil
 		}
 	}
 	return nil, invError("max_pages", nil)
+}
+
+// Column selection is fixed for one fetched page; raw buffers belong to pgx.
+type postgresColumn struct {
+	name  string
+	field int
+}
+
+func postgresColumns(ctx context.Context, fields []pgconn.FieldDescription) ([]postgresColumn, error) {
+	columns := make([]postgresColumn, len(fields))
+	seen := make(map[string]bool, len(fields))
+	valid := false
+	for i, f := range fields {
+		if e := ctx.Err(); e != nil {
+			return nil, invError("query_failed", e)
+		}
+		if seen[f.Name] {
+			return nil, invError("invalid_inventory", nil)
+		}
+		seen[f.Name] = true
+		columns[i] = postgresColumn{name: f.Name, field: -1}
+		for j, name := range inventoryFieldNames {
+			if f.Name == name {
+				columns[i].field = j
+				break
+			}
+		}
+		if f.Name == "ip" {
+			valid = true
+		}
+	}
+	if !valid {
+		return nil, invError("invalid_inventory", nil)
+	}
+	return columns, nil
+}
+
+func decodePostgresRow(ctx context.Context, columns []postgresColumn, values [][]byte, limits Limits, response, total *int64) (inventory.Device, error) {
+	var device inventory.Device
+	fields := inventoryFields(&device)
+	for i, v := range values {
+		if e := ctx.Err(); e != nil {
+			return inventory.Device{}, invError("query_failed", e)
+		}
+		column := columns[i]
+		// Budget every column, including ignored fields and null values' names.
+		*response += int64(len(column.name) + len(v))
+		*total += int64(len(column.name) + len(v))
+		if *response > limits.MaxResponseBytes {
+			return inventory.Device{}, invError("max_response_bytes", nil)
+		}
+		if *total > limits.MaxInventoryBytes {
+			return inventory.Device{}, invError("max_inventory_bytes", nil)
+		}
+		if column.field >= 0 {
+			text := string(v) // Own the bytes before rows.Next reuses the driver's buffer.
+			if !utf8.ValidString(text) {
+				// encoding/json replaces each malformed byte, including adjacent malformed bytes.
+				text = string([]rune(text))
+			}
+			*fields[column.field] = text
+		}
+	}
+	if strings.TrimSpace(device.IP) == "" {
+		return inventory.Device{}, invError("invalid_inventory", nil)
+	}
+	if e := ctx.Err(); e != nil {
+		return inventory.Device{}, invError("query_failed", e)
+	}
+	return device, nil
 }
 
 // MarshalJSON exposes operational metadata only; credentials remain available explicitly on the options.

@@ -81,3 +81,18 @@ The full ten-thousand-device plan is about 97% faster; generic command timing is
 unchanged, configuration allocation drops about one full normalized output copy.
 Expect's idle resource, PTY, redaction and receive-storage results are reported
 separately. Original WIP is preserved; changes remain local and uncommitted.
+
+## 2026-10-30 third refinement and release authorization
+
+Implemented the [third-round plan](2026-10-30-refinement-plan.md): contextual
+transport authentication, partial process cleanup ownership, complete write-error
+trees, fleet outcome allocation, direct inventory mapping and compiled TFTP
+evidence. Paired expect sources add incremental private filtering, bounded
+retention/no-sink handling and deferred captures. Independent review identified
+and verified a sink-failure storage-release fix. Serial ten-sample benchmarks
+passed the performance gate; detailed raw results accompany each module.
+
+The user authorized commits, GitHub pushes and releases for both modules, plus
+temporary public connector visibility if billing prevents private Actions, with
+private restoration after verification. Remote publication evidence will be
+recorded separately from the local [verification](2026-10-30-refinement-verification.md).

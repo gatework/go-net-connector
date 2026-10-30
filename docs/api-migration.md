@@ -148,3 +148,44 @@ and joining. Prepare waiters can cancel without waiting for another network
 preflight. Canceled/closed calls do not take the prepared fast path or begin
 local setup. Channel endpoints must be non-nil, own a Close function and support
 working deadlines; deadline failures preserve the original cause.
+
+## 2026-10-30 transport authentication and cleanup
+
+Custom transports may implement the optional authentication hook with this
+signature:
+
+```go
+func (t *Transport) Authenticated(ctx context.Context) error {
+    return t.persistTrust(ctx)
+}
+```
+
+`Connect` invokes it after login using the admitted operation context. Propagate
+that context to subprocesses, locks and persistence. A transport implementing
+the old `Authenticated() error` hook is rejected before login I/O with
+`invalid_transport` wrapping `ErrInvalid`; its acquired resources still receive
+cleanup. Transports without either hook continue to work.
+
+A `TransportFactory` must return a non-nil owner together with an initialization
+error whenever resources still require cleanup. This includes cancellation just
+after starting a process. `Device` retains that owner until `Close` succeeds;
+failed cleanup remains retryable. Preserve primary and cleanup errors with
+`errors.Join` instead of dropping ownership when returning an error.
+
+The built-in process transport closes trust-commit admission, cancels an active
+commit and interrupts I/O before joining its internal commit. Temporary trust
+files are removed only after that commit exits. `Device.Close` still does not
+join application callbacks. Cancellation is cooperative: a cancellation racing
+with storage's final check and rename can accompany a committed file. Committed
+storage is never rolled back, and a later `storage.WriteError` keeps its receipt.
+
+Command and interaction failures preserve their complete original error tree
+under safe connector metadata. Use `errors.As` for `expect.WriteError` and its
+actual write progress, and `errors.Is` for secondary causes. An interaction's
+reply progress remains distinct from the main command's `Attempt.Written`.
+
+Inventory field mapping, fleet scheduling and TFTP success vocabulary have no
+API changes. HTTP keys and PG column names remain case-sensitive; optional nulls
+become empty strings and IP is required. PG byte budgets include ignored columns.
+Cancellation or validation failure returns no partial inventory. PG output owns
+its strings before the next driver row can reuse buffers.

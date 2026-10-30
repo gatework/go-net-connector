@@ -1,0 +1,11 @@
+--- FAIL: TestProcessCancellationReturnsCleanupOwner (0.00s)
+    transport_round3_test.go:40: canceled startup lost owner: owner=false err=context canceled
+--- FAIL: TestAuthenticationReceivesOperationContext (0.00s)
+    transport_round3_test.go:83: authentication hook was skipped: <nil>
+--- FAIL: TestLegacyAuthenticationRejectedBeforeLogin (0.00s)
+    transport_round3_test.go:100: legacy hook not rejected: called=true err=<nil>
+--- FAIL: TestWriteFailureKeepsCompleteTree (0.00s)
+    transport_round3_test.go:113: write error tree was truncated: connector: device_write_failed (command)
+FAIL
+FAIL	github.com/gatework/go-net-connector/connector	0.430s
+FAIL

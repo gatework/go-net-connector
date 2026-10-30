@@ -1,0 +1,140 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/netdisco
+cpu: Apple M5
+BenchmarkHTTPInventoryDecode/500-4         	     134	    843503 ns/op	  85.10 MB/s	  432789 B/op	    7516 allocs/op
+BenchmarkHTTPInventoryDecode/10000-4       	       8	  12562370 ns/op	 114.88 MB/s	 8734783 B/op	  150182 allocs/op
+BenchmarkHTTPInventoryDecode/100000-4      	       1	 135272084 ns/op	 107.20 MB/s	88637112 B/op	 1501788 allocs/op
+BenchmarkHTTPInventoryLocal/500-4          	     114	   1048164 ns/op	 1117082 B/op	    7826 allocs/op
+BenchmarkHTTPInventoryLocal/10000-4        	       6	  18285090 ns/op	22873110 B/op	  151325 allocs/op
+BenchmarkHTTPInventoryLocal/100000-4       	       1	 184585042 ns/op	230686784 B/op	 1510324 allocs/op
+BenchmarkPostgresMapping/500-4             	    1935	     60736 ns/op	   36192 B/op	    4001 allocs/op
+BenchmarkPostgresMapping/10000-4           	     100	   1179239 ns/op	  723842 B/op	   80020 allocs/op
+BenchmarkPostgresMapping/100000-4          	       9	  11531324 ns/op	 7238428 B/op	  800200 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/netdisco
+cpu: Apple M5
+BenchmarkHTTPInventoryDecode/500-4         	     188	    631823 ns/op	 113.61 MB/s	  432827 B/op	    7516 allocs/op
+BenchmarkHTTPInventoryDecode/10000-4       	       8	  13188552 ns/op	 109.42 MB/s	 8731948 B/op	  150177 allocs/op
+BenchmarkHTTPInventoryDecode/100000-4      	       1	 137513167 ns/op	 105.45 MB/s	88637112 B/op	 1501788 allocs/op
+BenchmarkHTTPInventoryLocal/500-4          	     114	   1046656 ns/op	 1116580 B/op	    7824 allocs/op
+BenchmarkHTTPInventoryLocal/10000-4        	       6	  18080882 ns/op	22874668 B/op	  151330 allocs/op
+BenchmarkHTTPInventoryLocal/100000-4       	       1	 182312542 ns/op	230685352 B/op	 1510320 allocs/op
+BenchmarkPostgresMapping/500-4             	    1951	     59823 ns/op	   36192 B/op	    4001 allocs/op
+BenchmarkPostgresMapping/10000-4           	     100	   1169397 ns/op	  723842 B/op	   80020 allocs/op
+BenchmarkPostgresMapping/100000-4          	      10	  11072042 ns/op	 7238428 B/op	  800200 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/netdisco
+cpu: Apple M5
+BenchmarkHTTPInventoryDecode/500-4         	     189	    630510 ns/op	 113.85 MB/s	  432799 B/op	    7516 allocs/op
+BenchmarkHTTPInventoryDecode/10000-4       	       9	  12450014 ns/op	 115.91 MB/s	 8734197 B/op	  150181 allocs/op
+BenchmarkHTTPInventoryDecode/100000-4      	       1	 135199375 ns/op	 107.25 MB/s	88637112 B/op	 1501788 allocs/op
+BenchmarkHTTPInventoryLocal/500-4          	     112	   1052958 ns/op	 1116751 B/op	    7826 allocs/op
+BenchmarkHTTPInventoryLocal/10000-4        	       6	  18049694 ns/op	22874360 B/op	  151331 allocs/op
+BenchmarkHTTPInventoryLocal/100000-4       	       1	 180478375 ns/op	230685400 B/op	 1510321 allocs/op
+BenchmarkPostgresMapping/500-4             	    1887	     60275 ns/op	   36192 B/op	    4001 allocs/op
+BenchmarkPostgresMapping/10000-4           	     100	   1184772 ns/op	  723842 B/op	   80020 allocs/op
+BenchmarkPostgresMapping/100000-4          	       9	  11184389 ns/op	 7238423 B/op	  800200 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/netdisco
+cpu: Apple M5
+BenchmarkHTTPInventoryDecode/500-4         	     186	    640780 ns/op	 112.02 MB/s	  432770 B/op	    7516 allocs/op
+BenchmarkHTTPInventoryDecode/10000-4       	       8	  13143917 ns/op	 109.79 MB/s	 8731974 B/op	  150177 allocs/op
+BenchmarkHTTPInventoryDecode/100000-4      	       1	 138514833 ns/op	 104.69 MB/s	88637112 B/op	 1501788 allocs/op
+BenchmarkHTTPInventoryLocal/500-4          	     110	   1083544 ns/op	 1116704 B/op	    7825 allocs/op
+BenchmarkHTTPInventoryLocal/10000-4        	       6	  18472868 ns/op	22874522 B/op	  151331 allocs/op
+BenchmarkHTTPInventoryLocal/100000-4       	       1	 180038750 ns/op	230685096 B/op	 1510318 allocs/op
+BenchmarkPostgresMapping/500-4             	    1966	     60093 ns/op	   36192 B/op	    4001 allocs/op
+BenchmarkPostgresMapping/10000-4           	     100	   1176450 ns/op	  723842 B/op	   80020 allocs/op
+BenchmarkPostgresMapping/100000-4          	       9	  11294009 ns/op	 7238426 B/op	  800200 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/netdisco
+cpu: Apple M5
+BenchmarkHTTPInventoryDecode/500-4         	     188	    642877 ns/op	 111.66 MB/s	  432769 B/op	    7516 allocs/op
+BenchmarkHTTPInventoryDecode/10000-4       	       8	  13065547 ns/op	 110.45 MB/s	 8730569 B/op	  150175 allocs/op
+BenchmarkHTTPInventoryDecode/100000-4      	       1	 135433542 ns/op	 107.07 MB/s	88637112 B/op	 1501788 allocs/op
+BenchmarkHTTPInventoryLocal/500-4          	     115	   1033249 ns/op	 1116940 B/op	    7826 allocs/op
+BenchmarkHTTPInventoryLocal/10000-4        	       6	  18189583 ns/op	22873978 B/op	  151327 allocs/op
+BenchmarkHTTPInventoryLocal/100000-4       	       1	 181910500 ns/op	230686160 B/op	 1510321 allocs/op
+BenchmarkPostgresMapping/500-4             	    2001	     58853 ns/op	   36192 B/op	    4001 allocs/op
+BenchmarkPostgresMapping/10000-4           	     100	   1157923 ns/op	  723842 B/op	   80020 allocs/op
+BenchmarkPostgresMapping/100000-4          	      10	  10908846 ns/op	 7238427 B/op	  800200 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/netdisco
+cpu: Apple M5
+BenchmarkHTTPInventoryDecode/500-4         	     187	    630394 ns/op	 113.87 MB/s	  432942 B/op	    7517 allocs/op
+BenchmarkHTTPInventoryDecode/10000-4       	       9	  13056032 ns/op	 110.53 MB/s	 8730919 B/op	  150175 allocs/op
+BenchmarkHTTPInventoryDecode/100000-4      	       1	 136901500 ns/op	 105.92 MB/s	88637224 B/op	 1501789 allocs/op
+BenchmarkHTTPInventoryLocal/500-4          	     114	   1047843 ns/op	 1116238 B/op	    7824 allocs/op
+BenchmarkHTTPInventoryLocal/10000-4        	       6	  18220153 ns/op	22874461 B/op	  151331 allocs/op
+BenchmarkHTTPInventoryLocal/100000-4       	       1	 180236500 ns/op	230686664 B/op	 1510323 allocs/op
+BenchmarkPostgresMapping/500-4             	    1974	     58936 ns/op	   36192 B/op	    4001 allocs/op
+BenchmarkPostgresMapping/10000-4           	     100	   1163268 ns/op	  723842 B/op	   80020 allocs/op
+BenchmarkPostgresMapping/100000-4          	      10	  11027279 ns/op	 7238425 B/op	  800200 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/netdisco
+cpu: Apple M5
+BenchmarkHTTPInventoryDecode/500-4         	     190	    621796 ns/op	 115.44 MB/s	  432825 B/op	    7516 allocs/op
+BenchmarkHTTPInventoryDecode/10000-4       	       8	  12986693 ns/op	 111.12 MB/s	 8732592 B/op	  150178 allocs/op
+BenchmarkHTTPInventoryDecode/100000-4      	       1	 134444625 ns/op	 107.86 MB/s	88637112 B/op	 1501788 allocs/op
+BenchmarkHTTPInventoryLocal/500-4          	     115	   1039972 ns/op	 1116519 B/op	    7824 allocs/op
+BenchmarkHTTPInventoryLocal/10000-4        	       6	  17956118 ns/op	22874060 B/op	  151329 allocs/op
+BenchmarkHTTPInventoryLocal/100000-4       	       1	 180838959 ns/op	230685112 B/op	 1510318 allocs/op
+BenchmarkPostgresMapping/500-4             	    1897	     60864 ns/op	   36192 B/op	    4001 allocs/op
+BenchmarkPostgresMapping/10000-4           	     100	   1189894 ns/op	  723842 B/op	   80020 allocs/op
+BenchmarkPostgresMapping/100000-4          	       9	  11571745 ns/op	 7238428 B/op	  800200 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/netdisco
+cpu: Apple M5
+BenchmarkHTTPInventoryDecode/500-4         	     188	    630279 ns/op	 113.89 MB/s	  432826 B/op	    7516 allocs/op
+BenchmarkHTTPInventoryDecode/10000-4       	       8	  13092047 ns/op	 110.23 MB/s	 8731357 B/op	  150176 allocs/op
+BenchmarkHTTPInventoryDecode/100000-4      	       1	 134066458 ns/op	 108.16 MB/s	88637096 B/op	 1501788 allocs/op
+BenchmarkHTTPInventoryLocal/500-4          	     112	   1051093 ns/op	 1116787 B/op	    7825 allocs/op
+BenchmarkHTTPInventoryLocal/10000-4        	       6	  18082202 ns/op	22873256 B/op	  151329 allocs/op
+BenchmarkHTTPInventoryLocal/100000-4       	       1	 181207917 ns/op	230685704 B/op	 1510321 allocs/op
+BenchmarkPostgresMapping/500-4             	    1960	     60750 ns/op	   36192 B/op	    4001 allocs/op
+BenchmarkPostgresMapping/10000-4           	      98	   1171479 ns/op	  723842 B/op	   80020 allocs/op
+BenchmarkPostgresMapping/100000-4          	       9	  11679273 ns/op	 7238421 B/op	  800200 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/netdisco
+cpu: Apple M5
+BenchmarkHTTPInventoryDecode/500-4         	     188	    633922 ns/op	 113.23 MB/s	  432826 B/op	    7516 allocs/op
+BenchmarkHTTPInventoryDecode/10000-4       	       8	  12538885 ns/op	 115.09 MB/s	 8734757 B/op	  150182 allocs/op
+BenchmarkHTTPInventoryDecode/100000-4      	       1	 136863708 ns/op	 105.95 MB/s	88637112 B/op	 1501788 allocs/op
+BenchmarkHTTPInventoryLocal/500-4          	     114	   1041839 ns/op	 1116098 B/op	    7823 allocs/op
+BenchmarkHTTPInventoryLocal/10000-4        	       6	  18229451 ns/op	22873040 B/op	  151325 allocs/op
+BenchmarkHTTPInventoryLocal/100000-4       	       1	 179133541 ns/op	230683824 B/op	 1510305 allocs/op
+BenchmarkPostgresMapping/500-4             	    1899	     59706 ns/op	   36192 B/op	    4001 allocs/op
+BenchmarkPostgresMapping/10000-4           	     100	   1168245 ns/op	  723841 B/op	   80020 allocs/op
+BenchmarkPostgresMapping/100000-4          	       9	  11129727 ns/op	 7238424 B/op	  800200 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/netdisco
+cpu: Apple M5
+BenchmarkHTTPInventoryDecode/500-4         	     187	    635934 ns/op	 112.87 MB/s	  432798 B/op	    7516 allocs/op
+BenchmarkHTTPInventoryDecode/10000-4       	       8	  12741677 ns/op	 113.26 MB/s	 8732001 B/op	  150177 allocs/op
+BenchmarkHTTPInventoryDecode/100000-4      	       1	 138781917 ns/op	 104.49 MB/s	88637112 B/op	 1501788 allocs/op
+BenchmarkHTTPInventoryLocal/500-4          	     114	   1050303 ns/op	 1115989 B/op	    7823 allocs/op
+BenchmarkHTTPInventoryLocal/10000-4        	       6	  18279660 ns/op	22872442 B/op	  151322 allocs/op
+BenchmarkHTTPInventoryLocal/100000-4       	       1	 183328833 ns/op	230684912 B/op	 1510315 allocs/op
+BenchmarkPostgresMapping/500-4             	    1921	     59709 ns/op	   36192 B/op	    4001 allocs/op
+BenchmarkPostgresMapping/10000-4           	     100	   1183287 ns/op	  723842 B/op	   80020 allocs/op
+BenchmarkPostgresMapping/100000-4          	       9	  11221139 ns/op	 7238426 B/op	  800200 allocs/op
+PASS

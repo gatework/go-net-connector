@@ -51,6 +51,12 @@ func TestPostgresTemporaryReadOnlyCursor(t *testing.T) {
 		{name: "full_final_page_unproven", query: "SELECT '192.0.2.1'::text AS ip", limits: Limits{PageSize: 1, MaxPages: 1}, code: "max_pages"},
 		{name: "response_budget", query: "SELECT '192.0.2.1'::text AS ip", limits: Limits{MaxResponseBytes: 2}, code: "max_response_bytes"},
 		{name: "inventory_budget", query: "SELECT '192.0.2.1'::text AS ip", limits: Limits{MaxInventoryBytes: 2}, code: "max_inventory_bytes"},
+		{name: "optional_null", query: "SELECT '192.0.2.1' AS ip, NULL::text AS name, NULL::text AS serial", count: 1},
+		{name: "null_ip", query: "SELECT NULL::text AS ip", code: "invalid_inventory"},
+		{name: "blank_ip", query: "SELECT '  ' AS ip", code: "invalid_inventory"},
+		{name: "case_sensitive", query: "SELECT '192.0.2.1' AS \"IP\"", code: "invalid_inventory"},
+		{name: "unknown_budget", query: "SELECT '192.0.2.1' AS ip, repeat('x', 100) AS ignored", limits: Limits{MaxResponseBytes: 50}, code: "max_response_bytes"},
+		{name: "later_invalid_row", query: "SELECT CASE WHEN x=1 THEN '192.0.2.1' END AS ip FROM generate_series(1,2) x", limits: Limits{PageSize: 1}, code: "invalid_inventory"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source, e := NewPostgres(PostgresOptions{Connection: dsn, Query: tc.query, Limits: tc.limits})
