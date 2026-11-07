@@ -34,9 +34,10 @@ func TestChineseCommandReference(t *testing.T) {
 		}
 	}
 	walk(root)
+	reference := strings.TrimRight(text.String(), "\n") + "\n"
 	path := filepath.Join("..", "..", "docs", "cli-reference.md")
 	if *updateCommandReference {
-		if err := os.WriteFile(path, []byte(text.String()), 0644); err != nil {
+		if err := os.WriteFile(path, []byte(reference), 0644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -44,7 +45,7 @@ func TestChineseCommandReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(saved) != text.String() {
+	if string(saved) != reference {
 		t.Fatal("命令参考与当前帮助不一致；请通过 -update-cli-reference 更新")
 	}
 }
