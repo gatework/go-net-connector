@@ -6,7 +6,9 @@
 
 单命令 `PreserveSessionOnRejection` 仅在借用作用域写前校验通过、完整严格解码响应和提示符、预算未越界、context 未取消、所有 observer/logger 完成后只剩纯设备拒绝时保活。失败响应只进入 `Attempts`，不会变成已接受 `Steps` 或触发 receipt/step 回调。原有普通 Device、WithOperation 和终止式 Close 语义保留。
 
-初步验证：`GOWORK=off go test ./connector -run 'TestBorrowed' -count=1` 通过。真实 `net.Pipe` 回归覆盖完整拒绝后的显式恢复命令、未连接零打开、多命令零写入、无效编码/部分输出/输出预算、晚 observer/logger/取消、清理失败的独立错误树、重入/过期/取消后 retirement、活动 callback 中终止 Close，以及 scope 退出时取消并等待调用。本地 fixture 证据不代表实机或发布验证。
+真实 `net.Pipe` 回归覆盖完整拒绝后的显式恢复命令、未连接零打开、多命令零写入、无效编码/部分输出/输出预算、晚 observer/logger/取消、清理失败的独立错误树、重入/过期/取消后 retirement、活动 callback 中终止 Close、配置失败的嵌套清理，以及 scope 退出时取消并等待调用。补充回归先复现最终 observer 取消后仍报告成功，以及其 panic 被业务回调 recover 后遗留连接的问题；最终收尾检查取消，异常退出兜底清理，已接受的响应仍保留 Steps。
+
+验证环境：Go 1.27.1 / darwin arm64。`GOWORK=off go test ./... -count=1`、`go test -race -shuffle=on ./... -count=1`、`go vet ./...`、`go mod verify`、`go mod tidy -diff`、变更 Go 文件的 `goimports -l` 和 `git diff --check` 全部通过。`GOWORK=off python3 scripts/verify-consumer.py` 通过，覆盖独立源码消费者、命令构建、checkout 外 CLI 和嵌入模板，确认正式固定 `go-expect v0.4.0`、无外部 replace。未修改 VERSION 或发布脚本，未推送、发布或连接实机；源码消费者通过不代表正式版本已被消费。
 
 The latest local quality pass is complete; see [2026-10-29 verification](2026-10-29-quality-verification.md). The following delivery notes are historical and do not authorize publication of the new work.
 

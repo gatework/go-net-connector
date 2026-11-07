@@ -84,8 +84,13 @@ func (d *Device) execute(ctx context.Context, script Script, opts ExecuteOptions
 	returned := false
 	var rejection *Response
 	defer func() {
+		finalized := false
+		defer func() {
+			if !finalized {
+				_ = d.closeResources()
+			}
+		}()
 		if !returned {
-			_ = d.closeResources()
 			return
 		}
 		if e := d.log.scope(d.baseSecrets(), true); e != nil {
@@ -98,6 +103,9 @@ func (d *Device) execute(ctx context.Context, script Script, opts ExecuteOptions
 		if e := d.sessionEvent(ctx, "operation_complete", level, Command{}, status); e != nil {
 			err = joinFailures(err, e)
 		}
+		if err == nil && d.operation != nil && d.operation.borrowed {
+			err = ctx.Err()
+		}
 		if err != nil {
 			if opts.PreserveSessionOnRejection && rejection != nil && ctx.Err() == nil && d.Connected() && pureDeviceRejection(err) {
 				d.setPrompt(*rejection)
@@ -105,12 +113,14 @@ func (d *Device) execute(ctx context.Context, script Script, opts ExecuteOptions
 				err = d.retireFailure(err)
 			}
 		}
+		finalized = true
 	}()
 	result, rejection, err = d.runScript(ctx, script, opts, strategy)
 	returned = true
 	return
 }
 func pureDeviceRejection(err error) bool {
+	// A joined observer, logging or cancellation failure must never qualify.
 	e, ok := err.(*Error)
 	return ok && e.Code == "device_error" && e.cause == ErrDevice
 }

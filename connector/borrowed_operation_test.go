@@ -413,3 +413,107 @@ func TestBorrowedScopeJoinsCallAndRetainsCleanup(t *testing.T) {
 		t.Fatalf("call error=%v", err)
 	}
 }
+
+func TestBorrowedFinalObserverCancellationRetiresAcceptedResponse(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	d, _ := borrowedFixture(t, fixtureProfile(), ConnectionConfig{OnSessionEvent: func(_ context.Context, event SessionEvent) error {
+		if event.Name == "operation_complete" {
+			cancel()
+		}
+		return nil
+	}}, []borrowedExchange{{"query", "accepted\nsw#", false}}, 0, nil)
+	connectBorrowed(t, d)
+	operationErr, cleanupErr := d.WithBorrowedOperation(ctx, func(ctx context.Context, op *Operation) error {
+		result, err := op.ExecuteCommand(ctx, Command{Text: "query"}, ExecuteOptions{})
+		if !errors.Is(err, context.Canceled) || op.Connected() || len(result.Steps()) != 1 {
+			t.Fatalf("late cancellation: err=%v connected=%t steps=%d", err, op.Connected(), len(result.Steps()))
+		}
+		return err
+	})
+	if !errors.Is(operationErr, context.Canceled) || cleanupErr != nil {
+		t.Fatalf("operation=%v cleanup=%v", operationErr, cleanupErr)
+	}
+}
+
+func TestBorrowedRecoveredFinalObserverPanicStillRetires(t *testing.T) {
+	closeErr := errors.New("transport cleanup failed")
+	observerErr := errors.New("observer panic")
+	d, wire := borrowedFixture(t, fixtureProfile(), ConnectionConfig{OnSessionEvent: func(_ context.Context, event SessionEvent) error {
+		if event.Name == "operation_complete" {
+			panic(observerErr)
+		}
+		return nil
+	}}, []borrowedExchange{{"query", "% Invalid input\nsw#", false}}, 2, closeErr)
+	connectBorrowed(t, d)
+	operationErr, cleanupErr := d.WithBorrowedOperation(t.Context(), func(ctx context.Context, op *Operation) error {
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != observerErr {
+					t.Errorf("panic=%v", recovered)
+				}
+			}()
+			_, _ = op.ExecuteCommand(ctx, Command{Text: "query"}, ExecuteOptions{PreserveSessionOnRejection: true})
+		}()
+		if op.Connected() {
+			t.Error("recovered final observer panic kept session alive")
+		}
+		return nil
+	})
+	if operationErr != nil || !errors.Is(cleanupErr, closeErr) || wire.closes.Load() != 2 {
+		t.Fatalf("operation=%v cleanup=%v closes=%d", operationErr, cleanupErr, wire.closes.Load())
+	}
+}
+
+func TestBorrowedConfigurationFailureRetiresOnlyOnce(t *testing.T) {
+	for _, save := range []bool{false, true} {
+		t.Run(fmt.Sprint(save), func(t *testing.T) {
+			closeErr := errors.New("transport cleanup failed")
+			profile := fixtureProfile()
+			command, response, wantErr := "show config", "% Invalid input\nsw#", ErrDevice
+			if save {
+				profile.SaveCommands = []string{"save"}
+				command, response, wantErr = "save", "done\nsw#", ErrUnconfirmed
+			}
+			d, wire := borrowedFixture(t, profile, ConnectionConfig{}, []borrowedExchange{{command, response, false}}, 2, closeErr)
+			connectBorrowed(t, d)
+			operationErr, cleanupErr := d.WithBorrowedOperation(t.Context(), func(ctx context.Context, op *Operation) error {
+				var err error
+				if save {
+					_, err = op.SaveConfig(ctx, ExecuteOptions{})
+				} else {
+					_, err = op.RunningConfig(ctx)
+				}
+				if !errors.Is(err, wantErr) || errors.Is(err, closeErr) || op.Connected() {
+					t.Fatalf("configuration err=%v connected=%t", err, op.Connected())
+				}
+				return err
+			})
+			if !errors.Is(operationErr, wantErr) || !errors.Is(cleanupErr, closeErr) || wire.closes.Load() != 2 || wire.opens.Load() != 1 {
+				t.Fatalf("operation=%v cleanup=%v closes=%d opens=%d", operationErr, cleanupErr, wire.closes.Load(), wire.opens.Load())
+			}
+		})
+	}
+}
+
+func TestBorrowedRetirementNeedsExplicitReconnect(t *testing.T) {
+	d, wire := borrowedFixture(t, fixtureProfile(), ConnectionConfig{}, nil, 0, nil)
+	connectBorrowed(t, d)
+	operationErr, cleanupErr := d.WithBorrowedOperation(t.Context(), func(_ context.Context, op *Operation) error { return op.Retire() })
+	if operationErr != nil || cleanupErr != nil {
+		t.Fatalf("operation=%v cleanup=%v", operationErr, cleanupErr)
+	}
+	if _, err := d.ExecuteCommand(t.Context(), Command{Text: "never"}, ExecuteOptions{}); !errors.Is(err, ErrNotConnected) {
+		t.Fatalf("retired Device reconnected implicitly: %v", err)
+	}
+	if err, _ := d.WithBorrowedOperation(t.Context(), func(context.Context, *Operation) error {
+		t.Error("borrowed retired session")
+		return nil
+	}); !errors.Is(err, ErrNotConnected) || wire.opens.Load() != 1 {
+		t.Fatalf("borrowed scope reconnected implicitly: %v opens=%d", err, wire.opens.Load())
+	}
+	connectBorrowed(t, d)
+	if !d.Connected() || wire.opens.Load() != 2 {
+		t.Fatalf("explicit Connect failed: connected=%t opens=%d", d.Connected(), wire.opens.Load())
+	}
+}
