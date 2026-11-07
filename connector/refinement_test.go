@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	expect "github.com/gatework/go-expect"
 	"github.com/gatework/go-net-connector/internal/textcodec"
 	"golang.org/x/text/encoding/simplifiedchinese"
 )
@@ -49,7 +50,7 @@ func TestAfterLoginReceivesVerifiedResponse(t *testing.T) {
 	var retained Response
 	p.AfterLogin = func(_ context.Context, s StepResult) (LoginState, error) {
 		retained = s.Response()
-		text, err := s.Rendered()
+		text, err := s.Response().Rendered()
 		if err == nil && text != "sw#" {
 			return LoginState{}, errors.New("login rendering changed")
 		}
@@ -67,7 +68,9 @@ func TestAfterLoginReceivesVerifiedResponse(t *testing.T) {
 	}
 }
 
-func (cancelConfig) Prompt(_, current string) string                               { return current }
+func (cancelConfig) MatchPrompt(_, current string) (expect.Pattern, error) {
+	return expect.Line(strings.TrimSpace(current)), nil
+}
 func (cancelConfig) Validate(context.Context, Command, StepResult, Executor) error { return nil }
 func (s cancelConfig) Finish(ctx context.Context, _ Result) (string, error) {
 	close(s.entered)
@@ -194,7 +197,7 @@ func TestUnavailableResponseConversionIsExplicit(t *testing.T) {
 				t.Fatalf("expected failed attempt: %v", err)
 			}
 			a := r.Attempts()[0]
-			if a.Complete() != complete || a.Raw() != wire {
+			if a.Complete() != complete || a.Response().Raw() != wire {
 				t.Fatal("completion or raw changed")
 			}
 			for _, get := range []func() (string, error){a.Response().Output, a.Response().Rendered, a.Response().Prompt} {

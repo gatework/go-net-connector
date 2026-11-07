@@ -1,0 +1,150 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandOutput/64KiB-10 	      22	   5124970 ns/op	  12.79 MB/s	  549791 B/op	     232 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       1	 102139958 ns/op	  10.27 MB/s	 7969632 B/op	     390 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 826801792 ns/op	  10.15 MB/s	63065088 B/op	    1290 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3330055959 ns/op	  10.08 MB/s	251857952 B/op	    4361 allocs/op
+BenchmarkCommandPaged1000-10              	      21	   5401492 ns/op	  972020 B/op	   14727 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       1	 125105042 ns/op	   8.38 MB/s	 7896912 B/op	     374 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1023278166 ns/op	   8.20 MB/s	63032464 B/op	    1287 allocs/op
+BenchmarkCommandLogging/nil-10            	   13522	      8877 ns/op	    5191 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10           	   10000	     11016 ns/op	    7389 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10          	    9385	     12975 ns/op	   10840 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandOutput/64KiB-10 	      22	   5115117 ns/op	  12.81 MB/s	  558598 B/op	     236 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       1	 101728417 ns/op	  10.31 MB/s	 7932896 B/op	     387 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 822490708 ns/op	  10.20 MB/s	63064656 B/op	    1290 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3302337958 ns/op	  10.16 MB/s	251862248 B/op	    4368 allocs/op
+BenchmarkCommandPaged1000-10              	      21	   5258294 ns/op	  965876 B/op	   14699 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       1	 124924916 ns/op	   8.39 MB/s	 7971056 B/op	     384 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1011551375 ns/op	   8.29 MB/s	63031048 B/op	    1285 allocs/op
+BenchmarkCommandLogging/nil-10            	   13570	      8835 ns/op	    5214 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10           	   10000	     10968 ns/op	    7366 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10          	    9625	     12924 ns/op	   10774 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandOutput/64KiB-10 	      22	   5068621 ns/op	  12.93 MB/s	  555938 B/op	     235 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       1	 101357208 ns/op	  10.35 MB/s	 7968320 B/op	     384 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 822889083 ns/op	  10.19 MB/s	63101072 B/op	    1292 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3299313000 ns/op	  10.17 MB/s	251857904 B/op	    4361 allocs/op
+BenchmarkCommandPaged1000-10              	      21	   5313165 ns/op	  954989 B/op	   14715 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       1	 123900250 ns/op	   8.46 MB/s	 7972480 B/op	     386 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1007555166 ns/op	   8.33 MB/s	62993976 B/op	    1280 allocs/op
+BenchmarkCommandLogging/nil-10            	   13624	      8784 ns/op	    5219 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10           	   10000	     10975 ns/op	    7341 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10          	    9339	     12999 ns/op	   10780 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandOutput/64KiB-10 	      22	   5137939 ns/op	  12.76 MB/s	  548811 B/op	     233 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       1	 102482041 ns/op	  10.23 MB/s	 7973672 B/op	     387 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 825830500 ns/op	  10.16 MB/s	63026320 B/op	    1284 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3307326375 ns/op	  10.15 MB/s	251857424 B/op	    4360 allocs/op
+BenchmarkCommandPaged1000-10              	      21	   5375343 ns/op	  969848 B/op	   14730 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       1	 124301708 ns/op	   8.44 MB/s	 7978616 B/op	     403 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1011678125 ns/op	   8.29 MB/s	62993976 B/op	    1280 allocs/op
+BenchmarkCommandLogging/nil-10            	   13605	      8830 ns/op	    5171 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10           	   10000	     11026 ns/op	    7364 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10          	    9352	     12920 ns/op	   10817 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandOutput/64KiB-10 	      21	   5161936 ns/op	  12.70 MB/s	  562886 B/op	     238 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       1	 103337125 ns/op	  10.15 MB/s	 7973416 B/op	     388 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 837923208 ns/op	  10.01 MB/s	63064608 B/op	    1293 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3337825041 ns/op	  10.05 MB/s	251864200 B/op	    4379 allocs/op
+BenchmarkCommandPaged1000-10              	      21	   5387937 ns/op	  965119 B/op	   14718 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       1	 126835500 ns/op	   8.27 MB/s	 7972480 B/op	     386 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1028266333 ns/op	   8.16 MB/s	63031048 B/op	    1285 allocs/op
+BenchmarkCommandLogging/nil-10            	   13639	      8802 ns/op	    5247 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10           	   10000	     10971 ns/op	    7382 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10          	    9200	     12975 ns/op	   10776 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandOutput/64KiB-10 	      22	   5135801 ns/op	  12.76 MB/s	  554002 B/op	     235 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       1	 102557583 ns/op	  10.22 MB/s	 8012136 B/op	     397 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 826964125 ns/op	  10.14 MB/s	63025392 B/op	    1279 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3305644208 ns/op	  10.15 MB/s	251857104 B/op	    4362 allocs/op
+BenchmarkCommandPaged1000-10              	      21	   5371810 ns/op	  961296 B/op	   14721 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       1	 122683542 ns/op	   8.55 MB/s	 7933984 B/op	     379 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1009228250 ns/op	   8.31 MB/s	62993976 B/op	    1280 allocs/op
+BenchmarkCommandLogging/nil-10            	   13540	      8858 ns/op	    5219 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10           	   10000	     10956 ns/op	    7351 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10          	    9243	     13020 ns/op	   10825 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandOutput/64KiB-10 	      21	   5224714 ns/op	  12.54 MB/s	  556880 B/op	     234 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       1	 101989209 ns/op	  10.28 MB/s	 7969024 B/op	     387 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 829465750 ns/op	  10.11 MB/s	63063584 B/op	    1288 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3322525375 ns/op	  10.10 MB/s	251856704 B/op	    4360 allocs/op
+BenchmarkCommandPaged1000-10              	      22	   5326682 ns/op	  964708 B/op	   14712 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       1	 125383959 ns/op	   8.36 MB/s	 7977800 B/op	     392 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1016511542 ns/op	   8.25 MB/s	63031048 B/op	    1285 allocs/op
+BenchmarkCommandLogging/nil-10            	   13549	      8861 ns/op	    5189 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10           	   10000	     11024 ns/op	    7368 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10          	    8895	     13126 ns/op	   10801 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandOutput/64KiB-10 	      22	   5102958 ns/op	  12.84 MB/s	  554084 B/op	     235 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       1	 102210708 ns/op	  10.26 MB/s	 7930912 B/op	     376 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 825092959 ns/op	  10.17 MB/s	63065424 B/op	    1293 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3288348834 ns/op	  10.20 MB/s	251825160 B/op	    4363 allocs/op
+BenchmarkCommandPaged1000-10              	      20	   5377935 ns/op	  988624 B/op	   14725 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       1	 123563250 ns/op	   8.49 MB/s	 7934048 B/op	     380 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1004939959 ns/op	   8.35 MB/s	63031032 B/op	    1285 allocs/op
+BenchmarkCommandLogging/nil-10            	   13635	      8816 ns/op	    5172 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10           	   10000	     11021 ns/op	    7352 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10          	    9280	     13087 ns/op	   10801 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandOutput/64KiB-10 	      22	   5119902 ns/op	  12.80 MB/s	  557629 B/op	     235 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       1	 102093958 ns/op	  10.27 MB/s	 8011320 B/op	     397 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 831387083 ns/op	  10.09 MB/s	63063024 B/op	    1289 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3301927500 ns/op	  10.16 MB/s	251858416 B/op	    4362 allocs/op
+BenchmarkCommandPaged1000-10              	      22	   5368371 ns/op	  971920 B/op	   14715 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       1	 124164167 ns/op	   8.44 MB/s	 7972016 B/op	     386 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1012341750 ns/op	   8.29 MB/s	63033280 B/op	    1291 allocs/op
+BenchmarkCommandLogging/nil-10            	   13590	      8857 ns/op	    5206 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10           	   10000	     10987 ns/op	    7368 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10          	    9610	     13051 ns/op	   10800 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandOutput/64KiB-10 	      21	   5122300 ns/op	  12.79 MB/s	  555058 B/op	     236 allocs/op
+BenchmarkCommandOutput/1024KiB-10         	       1	 102336083 ns/op	  10.25 MB/s	 8007344 B/op	     390 allocs/op
+BenchmarkCommandOutput/8192KiB-10         	       1	 836552917 ns/op	  10.03 MB/s	63032040 B/op	    1286 allocs/op
+BenchmarkCommandOutput/32768KiB-10        	       1	3292321667 ns/op	  10.19 MB/s	251857984 B/op	    4365 allocs/op
+BenchmarkCommandPaged1000-10              	      22	   5317402 ns/op	  975837 B/op	   14727 allocs/op
+BenchmarkCommandMultiline/1024KiB-10      	       1	 122904167 ns/op	   8.53 MB/s	 7934768 B/op	     386 allocs/op
+BenchmarkCommandMultiline/8192KiB-10      	       1	1005967375 ns/op	   8.34 MB/s	63032056 B/op	    1294 allocs/op
+BenchmarkCommandLogging/nil-10            	   13593	      8836 ns/op	    5206 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10           	   10000	     10994 ns/op	    7347 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10          	    9008	     13063 ns/op	   10836 B/op	     210 allocs/op
+PASS

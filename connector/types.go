@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	expect "github.com/gatework/go-expect"
 )
 
 var (
@@ -41,12 +43,12 @@ type Error struct {
 func (e *Error) Error() string    { return "connector: " + e.Code + " (" + e.Phase + ")" }
 func (e *Error) GoString() string { return e.Error() }
 func (e *Error) Unwrap() error    { return e.cause }
-func fail(code, phase string, c Command, cause error) error {
-	return &Error{code, phase, c.Source, c.Line, cause}
+func newError(code, phase string, command Command, cause error) error {
+	return &Error{code, phase, command.Source, command.Line, cause}
 }
 
 type Interaction struct {
-	Pattern            *regexp.Regexp
+	Pattern            expect.Pattern
 	Reply              string
 	Respond            func(context.Context, string) (string, error)
 	Limit              int  // zero means one reply; negative values are invalid.
@@ -57,7 +59,7 @@ type Command struct {
 	Text                       string
 	Timeout                    *time.Duration // nil inherits; zero disables the relative timer.
 	Poll                       bool           // explicit immediate OS readiness; incompatible with a positive Timeout.
-	Prompt                     *regexp.Regexp
+	Prompt                     expect.Pattern
 	Interactions               []Interaction
 	Sensitive, OutputSensitive bool
 	Source                     string
@@ -74,24 +76,24 @@ func (c Command) MarshalJSON() ([]byte, error) {
 }
 func (c Command) validate() error {
 	if strings.TrimSpace(c.Text) == "" || strings.ContainsAny(c.Text, "\r\n\x00") || !utf8.ValidString(c.Text) {
-		return fail("invalid_command", "parse", c, ErrInvalid)
+		return newError("invalid_command", "parse", c, ErrInvalid)
 	}
 	if c.Timeout != nil && (*c.Timeout < 0 || c.Poll && *c.Timeout > 0) {
-		return fail("invalid_timeout", "parse", c, ErrInvalid)
+		return newError("invalid_timeout", "parse", c, ErrInvalid)
 	}
-	if c.Prompt != nil && c.Prompt.MatchString("") {
-		return fail("invalid_prompt", "parse", c, ErrInvalid)
+	if !c.Prompt.IsZero() && c.Prompt.ValidateText() != nil {
+		return newError("invalid_prompt", "parse", c, ErrInvalid)
 	}
 	for _, r := range c.Interactions {
-		if r.Pattern == nil || r.Pattern.MatchString("") || r.Limit < 0 || r.Unlimited && r.Limit > 0 {
-			return fail("invalid_interaction", "parse", c, ErrInvalid)
+		if r.Pattern.ValidateText() != nil || r.Limit < 0 || r.Unlimited && r.Limit > 0 {
+			return newError("invalid_interaction", "parse", c, ErrInvalid)
 		}
 	}
 	return nil
 }
 func validateInteractions(replies []Interaction) error {
 	for _, r := range replies {
-		if r.Pattern == nil || r.Pattern.MatchString("") || r.Limit < 0 || r.Unlimited && r.Limit > 0 {
+		if r.Pattern.ValidateText() != nil || r.Limit < 0 || r.Unlimited && r.Limit > 0 {
 			return ErrInvalid
 		}
 	}
@@ -107,13 +109,9 @@ func clonePattern(r *regexp.Regexp) *regexp.Regexp {
 }
 func cloneInteractions(in []Interaction) []Interaction {
 	out := append([]Interaction(nil), in...)
-	for i := range out {
-		out[i].Pattern = clonePattern(out[i].Pattern)
-	}
 	return out
 }
 func (c Command) clone() Command {
-	c.Prompt = clonePattern(c.Prompt)
 	c.Interactions = cloneInteractions(c.Interactions)
 	if c.Timeout != nil {
 		v := *c.Timeout
@@ -160,44 +158,18 @@ type StepResult struct {
 	duration time.Duration
 }
 
-func (s StepResult) Command() Command   { return s.command.clone() }
-func (s StepResult) Response() Response { return s.response }
-func (s StepResult) Raw() string        { return s.response.Raw() }
-
-// Output is the compatibility accessor; use Response.Output to check conversion.
-func (s StepResult) Output() string {
-	if s.response.data == nil {
-		return ""
-	}
-	return s.response.data.output
-}
-func (s StepResult) Rendered() (string, error) {
-	if s.response.data == nil {
-		return "", nil
-	}
-	return s.response.Rendered()
-}
-func (s StepResult) OutputEncoding() string { return s.response.Encoding() }
-
-// Prompt preserves the historical wire prompt for UTF-8 responses.
-// Response.Prompt returns verified terminal-visible text for every encoding.
-func (s StepResult) Prompt() string {
-	if s.OutputEncoding() == "" || s.OutputEncoding() == "utf-8" {
-		return s.response.RawPrompt()
-	}
-	prompt, _ := s.response.Prompt()
-	return prompt
-}
+func (s StepResult) Command() Command        { return s.command.clone() }
+func (s StepResult) Response() Response      { return s.response }
 func (s StepResult) Duration() time.Duration { return s.duration }
 func (s StepResult) String() string {
-	return fmt.Sprintf("connector.StepResult{bytes:%d}", len(s.Raw()))
+	return fmt.Sprintf("connector.StepResult{bytes:%d}", len(s.response.Raw()))
 }
 func (s StepResult) GoString() string { return s.String() }
 func (s StepResult) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Bytes    int     `json:"bytes"`
 		Duration float64 `json:"duration"`
-	}{len(s.Raw()), s.duration.Seconds()})
+	}{len(s.response.Raw()), s.duration.Seconds()})
 }
 
 type Result struct {
@@ -218,8 +190,6 @@ type Attempt struct {
 
 func (a Attempt) Response() Response { return a.response }
 func (a Attempt) Command() Command   { return a.command.clone() }
-func (a Attempt) Raw() string        { return a.response.Raw() }
-func (a Attempt) Prompt() string     { return a.response.RawPrompt() }
 func (a Attempt) Written() int       { return a.written }
 func (a Attempt) Complete() bool     { return a.complete }
 func (a Attempt) Err() error         { return a.err }
@@ -243,23 +213,18 @@ func (r Result) Steps() []StepResult {
 	out := append([]StepResult(nil), r.steps...)
 	return out
 }
-func (r Result) Output() string {
-	if r.config != nil {
-		return *r.config
+
+// JoinedOutput joins verified accepted command outputs, never configuration or raw bytes.
+func (r Result) JoinedOutput() (string, error) {
+	var parts []string
+	for _, step := range r.steps {
+		text, err := step.Response().Output()
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, text)
 	}
-	if len(r.steps) == 1 {
-		return r.steps[0].Output()
-	}
-	var b strings.Builder
-	size := 0
-	for _, s := range r.steps {
-		size += len(s.Output())
-	}
-	b.Grow(size)
-	for _, s := range r.steps {
-		b.WriteString(s.Output())
-	}
-	return b.String()
+	return strings.Join(parts, ""), nil
 }
 func (r Result) Config() (string, bool) {
 	if r.config == nil {
@@ -277,6 +242,7 @@ func (r Result) MarshalJSON() ([]byte, error) {
 }
 
 type ExecuteOptions struct {
+	textMode configTextMode
 	// SkipPrivilege preserves the current view for native upload operations.
 	SkipPrivilege  bool
 	OnReceipt      func(context.Context, StepResult) error
@@ -295,7 +261,7 @@ type Profile struct {
 	// Nil defaults to SSH1 (-1); an explicit empty slice disables this recovery.
 	LegacySSHArguments                                                                 []string
 	Name                                                                               string
-	LoginPrompt, CommandPrompt, UsernamePrompt, PasswordPrompt, PrivilegePrompt, Pager *regexp.Regexp
+	LoginPrompt, CommandPrompt, UsernamePrompt, PasswordPrompt, PrivilegePrompt, Pager expect.Pattern
 	PagerResponse, PrivilegeCommand                                                    string
 	AuthenticationErrors, CommandErrors                                                []*regexp.Regexp
 	LoginInteractions, Interactions                                                    []Interaction
@@ -305,31 +271,23 @@ type Profile struct {
 	AfterCommand                                                                       func(context.Context, Command, StepResult, Executor) error
 	AfterLogin                                                                         func(context.Context, StepResult) (LoginState, error)
 	ConfigStrategy                                                                     func() ConfigStrategy
-	Capabilities                                                                       Capabilities
 }
 
 // LoginState contains the device state discovered by AfterLogin.
 type LoginState struct{ HAState string }
 
 type ConfigStrategy interface {
-	Prompt(command, current string) string
+	MatchPrompt(command, rawCurrent string) (expect.Pattern, error)
 	Validate(context.Context, Command, StepResult, Executor) error
 	// Finish receives the operation's Close-linked context and must cooperate
 	// with cancellation. Each collection owns its own strategy instance.
 	Finish(context.Context, Result) (string, error)
 }
-type Capabilities struct{ Save, TFTP, RemoteBackup, Neighbors, Descriptions, TopologyWrite bool }
 
 func (p Profile) clone() (Profile, error) {
 	if e := p.Validate(); e != nil {
 		return Profile{}, e
 	}
-	p.LoginPrompt = clonePattern(p.LoginPrompt)
-	p.CommandPrompt = clonePattern(p.CommandPrompt)
-	p.UsernamePrompt = clonePattern(p.UsernamePrompt)
-	p.PasswordPrompt = clonePattern(p.PasswordPrompt)
-	p.PrivilegePrompt = clonePattern(p.PrivilegePrompt)
-	p.Pager = clonePattern(p.Pager)
 	p.LoginInteractions = cloneInteractions(p.LoginInteractions)
 	p.Interactions = cloneInteractions(p.Interactions)
 	for _, list := range []*[]*regexp.Regexp{&p.AuthenticationErrors, &p.CommandErrors} {
@@ -348,13 +306,13 @@ func (p Profile) clone() (Profile, error) {
 	if p.CommandTimeout == 0 {
 		p.CommandTimeout = 25 * time.Second
 	}
-	if p.UsernamePrompt == nil {
+	if p.UsernamePrompt.IsZero() {
 		p.UsernamePrompt = defaultUsername
 	}
-	if p.PasswordPrompt == nil {
+	if p.PasswordPrompt.IsZero() {
 		p.PasswordPrompt = defaultPassword
 	}
-	if p.Pager == nil {
+	if p.Pager.IsZero() {
 		p.Pager = defaultPager
 	}
 	if p.PagerResponse == "" {
@@ -383,7 +341,14 @@ const (
 	HostKeyReplace   HostKeyPolicy = "replace"
 )
 
+// SessionEvent contains only operation metadata; it never contains command or response text.
+type SessionEvent struct{ Host, Name, Status string }
+
 type ConnectionConfig struct {
+	// OnSessionEvent runs synchronously under the operation lease, independently
+	// of session logging. Callbacks must cooperate with context and not reenter.
+	OnSessionEvent func(context.Context, SessionEvent) error
+
 	IdentityFile, KeyPassphrase, LineEnding    string
 	Host, Username, Password, EnablePassword   string
 	Protocol                                   Protocol
@@ -436,7 +401,7 @@ func WithTransportFactory(f TransportFactory) Option {
 	}
 }
 
-func nilValue(value any) bool {
+func isNilValue(value any) bool {
 	if value == nil {
 		return true
 	}

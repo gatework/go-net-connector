@@ -1,0 +1,12 @@
+-test.shuffle 1793672470204129000
+--- FAIL: TestBackupWarningPositionsAcrossSteps (0.00s)
+    backup_encoding_test.go:129: second position: {Offset:7 Line:2 Column:4}
+FAIL
+FAIL	github.com/gatework/go-net-connector/connector	0.769s
+FAIL
+Traceback (most recent call last):
+  File "/Users/wenwu.yan/Works/go/go-net-connector/scripts/verify-expect-source.py", line 58, in <module>
+    subprocess.run(["go", "test", "-race", "-shuffle=on", "-count=1", "-timeout=180s", *args.packages], cwd=package, env=env, check=True)
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 528, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['go', 'test', '-race', '-shuffle=on', '-count=1', '-timeout=180s', './connector']' returned non-zero exit status 1.

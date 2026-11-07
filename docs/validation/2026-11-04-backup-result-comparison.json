@@ -1,0 +1,43 @@
+{
+  "reports": [
+    {
+      "path": "bin/backups/2026-11-04_14-48-10/summary.json",
+      "sha256": "a446aa0af722e86ade6acbe23970d0be3d6e8c56ab1fafea9e33e4808bbd09f3",
+      "mode": "tftp",
+      "total": 976,
+      "succeeded": 953,
+      "failed": 23
+    },
+    {
+      "path": "bin/backups/2026-11-04_14-45-27/summary.json",
+      "sha256": "ca65286cc42443faa90a2c3494431062f2ff26d52d3b13622ee555197a82d089",
+      "mode": "backup",
+      "total": 976,
+      "succeeded": 951,
+      "failed": 25
+    }
+  ],
+  "inventory_identical": true,
+  "shared_failed_devices": 23,
+  "differing_outcomes": [
+    {
+      "host": "10.156.9.4",
+      "tftp_status": "reported_uploaded",
+      "cli_status": "failed",
+      "cli_error_code": "invalid_output_encoding",
+      "native_file_verified": true,
+      "native_file_sha256": "5aa13d14fc7676bf4cf8c4e6e7fe9288f4241bc917496fc88491079a4ab4428c",
+      "cause": "device_native_truncated_utf8_description"
+    },
+    {
+      "host": "10.203.0.8",
+      "tftp_status": "reported_uploaded",
+      "cli_status": "failed",
+      "cli_error_code": "invalid_output_encoding",
+      "native_file_verified": true,
+      "native_file_sha256": "1e36550f42b799c3d8186537fb62cf06ee7e8149e70bcdbe07fad6f20abf4369",
+      "cause": "device_native_truncated_utf8_description"
+    }
+  ],
+  "content_comparison": "CLI current configuration and vendor-native startup files are different scopes; byte equality is not expected"
+}

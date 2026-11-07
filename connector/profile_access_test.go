@@ -1,12 +1,11 @@
 package connector
 
 import (
-	"regexp"
 	"testing"
 )
 
 func TestProfileCommandAccessorsReturnCopies(t *testing.T) {
-	p := Profile{Name: "test", LoginPrompt: regexp.MustCompile(`#`), CommandPrompt: regexp.MustCompile(`#`), ConfigCommands: []string{"show"}, SaveCommands: []string{"save"}}
+	p := Profile{Name: "test", LoginPrompt: testPattern(`#`), CommandPrompt: testPattern(`#`), ConfigCommands: []string{"show"}, SaveCommands: []string{"save"}}
 	d, e := New(p, ConnectionConfig{Host: "fixture"})
 	if e != nil {
 		t.Fatal(e)

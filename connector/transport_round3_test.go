@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -146,7 +145,7 @@ func TestLegacyAuthenticationRejectedBeforeLogin(t *testing.T) {
 func TestWriteFailureKeepsCompleteTree(t *testing.T) {
 	primary := errors.New("private-primary")
 	cleanup := errors.New("private-cleanup")
-	classified := fail("device_write_failed", "command", Command{Source: "fixture", Line: 7}, primary)
+	classified := newError("device_write_failed", "command", Command{Source: "fixture", Line: 7}, primary)
 	progress := &expect.WriteError{Written: 3, Cause: errors.Join(classified, context.Canceled, cleanup)}
 	err := writeFailure("command", Command{}, progress)
 	var written *expect.WriteError
@@ -182,11 +181,11 @@ func TestCommandAndInteractionKeepWriteProgress(t *testing.T) {
 		t.Run(fmt.Sprintf("interaction=%v", interaction), func(t *testing.T) {
 			primary, secondary := errors.New("private-primary"), errors.New("private-secondary")
 			a, peer := net.Pipe()
-			stream := &partialFailureStream{Conn: a, failAt: 1, failure: errors.Join(fail("fixture_write", "command", Command{}, primary), context.Canceled, secondary)}
+			stream := &partialFailureStream{Conn: a, failAt: 1, failure: errors.Join(newError("fixture_write", "command", Command{}, primary), context.Canceled, secondary)}
 			profile := fixtureProfile()
 			if interaction {
 				stream.failAt = 2
-				profile.Pager, profile.PagerResponse = regexp.MustCompile(`--More--`), "next"
+				profile.Pager, profile.PagerResponse = testPattern(`--More--`), "next"
 			}
 			d, err := New(profile, ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) { return stream, nil }))
 			if err != nil {
@@ -220,7 +219,7 @@ func TestCommandAndInteractionKeepWriteProgress(t *testing.T) {
 			if len(result.Steps()) != 0 || len(attempts) != 1 || attempts[0].Written() != wantWritten || attempts[0].Complete() {
 				t.Fatalf("wrong attempts: %v", attempts)
 			}
-			if interaction && !strings.Contains(attempts[0].Raw(), "output") {
+			if interaction && !strings.Contains(attempts[0].Response().Raw(), "output") {
 				t.Fatal("partial response lost")
 			}
 			if err := <-done; err != nil {

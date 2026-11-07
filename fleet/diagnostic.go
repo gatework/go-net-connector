@@ -13,7 +13,7 @@ import (
 	"github.com/gatework/go-net-connector/transfer"
 )
 
-var knownTypes = words(`Net::Connector::Error Net::Connector::ConnectionError Net::Connector::AuthenticationError Net::Connector::LoginTimeout
+var knownTypes = stringSet(`Net::Connector::Error Net::Connector::ConnectionError Net::Connector::AuthenticationError Net::Connector::LoginTimeout
 Net::Connector::CommandTimeout Net::Connector::WriteTimeout Net::Connector::PromptError Net::Connector::ConnectionClosed
 Net::Connector::TransportError Net::Connector::DeviceError Net::Connector::ConfigurationError Net::Connector::ScriptError
 Net::Connector::InternalError Net::Connector::OutputLimitExceeded Net::Connector::ScriptOutputLimitExceeded Net::Connector::SessionBusy
@@ -30,17 +30,20 @@ Errno::ENFILE Errno::ENOMEM Errno::EAGAIN Errno::ENOTSUP
 Errno::EOPNOTSUPP Errno::ETIMEDOUT Errno::ECONNREFUSED Errno::ECONNRESET
 Net::Connector::RemoteBackup::CompletionError Net::Connector::Storage::AtomicFile::WriteError Net::Connector::Storage::AtomicFile::PersistenceError Net::Connector::Storage::AtomicFile::DirectorySyncUnsupported
 Net::Connector::Netdisco::Tftp::Archive::Unavailable Net::Connector::Netdisco::Tftp::Archive::Failure`)
-var knownCodes = words(`error connection_error authentication_error login_timeout command_timeout write_timeout prompt_error connection_closed transport_error device_error configuration_error script_error internal_error output_limit_exceeded script_output_limit_exceeded session_busy unsupported_operation log_error parsing_error backup_busy backup_persistence_error backup_finalize_error tftp_completion_error authentication_failed connection_failed connection_refused no_route connection_reset connection_timeout host_key_changed host_key_untrusted known_hosts_busy known_hosts_unsafe known_hosts_inherited rsa_too_small unsupported_cipher ambiguous_description ambiguous_neighbor confirmation_required description_stages_unsupported description_unconfirmed description_unsupported incomplete_configuration interface_missing neighbor_discovery_unsupported parse_failed invalid_output_encoding persistence_unconfirmed stale_plan startup_config_missing template_invalid template_missing template_unreadable transfer_failed transfer_finalize_failed transfer_path_mismatch transfer_path_unconfirmed transfer_unconfirmed uncommitted_configuration unrecognized_output unsupported_configuration_format verification_plan_changed candidate_isolation_unavailable backup_durability_unsupported backup_finalize_failed backup_persistence_unconfirmed file_finalize_failed file_persistence_unconfirmed file_write_failed directory_sync_unsupported tftp_history_unavailable tftp_archive_failed`)
-var knownPhases = words(`connect login enable command script read write close logging backup collect discover parse plan apply verify persist save interact tftp_backup remote_backup report callback`)
+var knownCodes = stringSet(`error connection_error authentication_error login_timeout command_timeout write_timeout prompt_error connection_closed transport_error device_error configuration_error script_error internal_error output_limit_exceeded script_output_limit_exceeded session_busy unsupported_operation log_error parsing_error backup_busy backup_persistence_error backup_finalize_error tftp_completion_error authentication_failed connection_failed connection_refused no_route connection_reset connection_timeout host_key_changed host_key_untrusted known_hosts_busy known_hosts_unsafe known_hosts_inherited rsa_too_small unsupported_cipher ambiguous_description ambiguous_neighbor confirmation_required description_stages_unsupported description_unconfirmed description_unsupported incomplete_configuration interface_missing neighbor_discovery_unsupported parse_failed invalid_output_encoding persistence_unconfirmed stale_plan startup_config_missing template_invalid template_missing template_unreadable evidence_limit_exceeded transfer_failed transfer_finalize_failed transfer_path_mismatch transfer_path_unconfirmed transfer_unconfirmed uncommitted_configuration unrecognized_output unsupported_configuration_format verification_plan_changed candidate_isolation_unavailable backup_durability_unsupported backup_finalize_failed backup_persistence_unconfirmed file_finalize_failed file_persistence_unconfirmed file_write_failed directory_sync_unsupported tftp_history_unavailable tftp_archive_failed`)
+var knownPhases = stringSet(`connect login enable command script read write close logging backup collect discover parse plan apply verify persist save interact tftp_backup remote_backup report callback`)
+var knownArtifactStates = stringSet(`not_committed committed durable reported_uploaded`)
+var knownArtifactPhases = stringSet(`resolve_parent temporary_file write file_sync rename directory_open directory_sync cleanup complete path finalize`)
+var knownVerifications = stringSet(`device_reported`)
 
-func words(s string) map[string]bool {
+func stringSet(s string) map[string]bool {
 	m := map[string]bool{}
 	for _, v := range strings.Fields(s) {
 		m[v] = true
 	}
 	return m
 }
-func allowed(m map[string]bool, s string) string {
+func knownValue(m map[string]bool, s string) string {
 	if m[s] {
 		return s
 	}
@@ -49,21 +52,21 @@ func allowed(m map[string]bool, s string) string {
 
 type Diagnostic struct{ ErrorCode, ErrorType, Phase, UnderlyingType, ArtifactState, ArtifactPhase, Verification string }
 
-func (d Diagnostic) safe() Diagnostic {
-	d.ErrorCode = allowed(knownCodes, d.ErrorCode)
+func (d Diagnostic) sanitized() Diagnostic {
+	d.ErrorCode = knownValue(knownCodes, d.ErrorCode)
 	if d.ErrorType != "" && !knownTypes[d.ErrorType] {
 		d.ErrorType = "StandardError"
 	}
-	d.Phase = allowed(knownPhases, d.Phase)
+	d.Phase = knownValue(knownPhases, d.Phase)
 	if d.UnderlyingType != "" && !knownTypes[d.UnderlyingType] {
 		d.UnderlyingType = "StandardError"
 	}
-	d.ArtifactState = allowed(words("not_committed committed durable reported_uploaded"), d.ArtifactState)
-	d.ArtifactPhase = allowed(words("resolve_parent temporary_file write file_sync rename directory_open directory_sync cleanup complete path finalize"), d.ArtifactPhase)
-	d.Verification = allowed(words("device_reported"), d.Verification)
+	d.ArtifactState = knownValue(knownArtifactStates, d.ArtifactState)
+	d.ArtifactPhase = knownValue(knownArtifactPhases, d.ArtifactPhase)
+	d.Verification = knownValue(knownVerifications, d.Verification)
 	return d
 }
-func diagnose(e error, a Artifact) Diagnostic {
+func diagnoseError(e error, a Artifact) Diagnostic {
 	if e == nil {
 		return Diagnostic{}
 	}
@@ -159,7 +162,7 @@ func diagnose(e error, a Artifact) Diagnostic {
 		d.ArtifactState = "reported_uploaded"
 		d.Verification = "device_reported"
 	}
-	return d.safe()
+	return d.sanitized()
 }
 
 // A later cleanup error must not replace the operation's classification just
@@ -249,6 +252,6 @@ func trustedCauseType(err error) string {
 	}
 }
 func (d Diagnostic) summary() map[string]any {
-	d = d.safe()
-	return map[string]any{"phase": optional(d.Phase), "underlying_type": optional(d.UnderlyingType), "artifact_state": optional(d.ArtifactState), "artifact_phase": optional(d.ArtifactPhase), "verification": optional(d.Verification)}
+	d = d.sanitized()
+	return map[string]any{"phase": nullableString(d.Phase), "underlying_type": nullableString(d.UnderlyingType), "artifact_state": nullableString(d.ArtifactState), "artifact_phase": nullableString(d.ArtifactPhase), "verification": nullableString(d.Verification)}
 }

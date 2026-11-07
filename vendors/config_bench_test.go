@@ -18,10 +18,7 @@ func BenchmarkRunningConfig(b *testing.B) {
 		b.Run(fmt.Sprintf("%dKiB", size>>10), func(b *testing.B) {
 			const line = "interface Ethernet1\r\n description uplink\r\n!\r\n"
 			body := "show running-config\r\nBuilding configuration...\r\n" + strings.Repeat(line, size/len(line)) + "end\r\nsw#"
-			p, err := Profile("cisco_ios")
-			if err != nil {
-				b.Fatal(err)
-			}
+			p := profileForTest(b, "cisco_ios")
 			done := make(chan struct{})
 			d, err := connector.New(p, connector.ConnectionConfig{Host: "fixture", MaxOutputBytes: int64(len(body) + 1024), CommandTimeout: 30 * time.Second},
 				connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {

@@ -1,0 +1,530 @@
+package connector
+
+import (
+	"context"
+	"errors"
+	"io"
+	"regexp"
+	"strings"
+	"sync"
+	"time"
+
+	expect "github.com/gatework/go-expect"
+)
+
+func (d *Device) ExecuteCommand(ctx context.Context, c Command, opts ExecuteOptions) (Result, error) {
+	return d.ExecuteScript(ctx, Script{Commands: []Command{c}}, opts)
+}
+func (d *Device) ExecuteScript(ctx context.Context, script Script, opts ExecuteOptions) (Result, error) {
+	s, e := script.clone()
+	if e != nil {
+		return Result{}, e
+	}
+	if opts.MaxOutputBytes < 0 {
+		return Result{}, ErrInvalid
+	}
+	if e = d.acquire(); e != nil {
+		return Result{}, e
+	}
+	defer d.release()
+	ctx, cancel := d.operationContext(ctx)
+	defer cancel()
+	return d.execute(ctx, s, opts, nil)
+}
+
+var ansiColor = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+type execution struct {
+	textMode     configTextMode
+	attempts     []Attempt
+	device       *Device
+	values       map[string]string
+	valuesMu     sync.Mutex
+	bytes, limit int64
+	strategy     ConfigStrategy
+}
+
+type hookExecutor struct {
+	execution *execution
+	scope     *callScope
+}
+
+func (x *hookExecutor) Value(key string) string {
+	x.execution.valuesMu.Lock()
+	defer x.execution.valuesMu.Unlock()
+	return x.execution.values[key]
+}
+func (x *hookExecutor) SetValue(key, value string) {
+	x.execution.valuesMu.Lock()
+	defer x.execution.valuesMu.Unlock()
+	x.execution.values[key] = value
+}
+func (x *hookExecutor) Execute(ctx context.Context, c Command) (StepResult, error) {
+	ctx, leave, e := x.scope.enter(ctx)
+	if e != nil {
+		return StepResult{}, e
+	}
+	defer leave()
+	if e = c.validate(); e != nil {
+		return StepResult{}, e
+	}
+	return x.execution.command(ctx, c.clone())
+}
+func (x *execution) hook(ctx context.Context, run func(Executor) error) (err error) {
+	executor := &hookExecutor{execution: x, scope: newCallScope(ctx)}
+	defer func() {
+		if executor.scope.end() && err == nil {
+			err = context.Canceled
+		}
+	}()
+	return run(executor)
+}
+func (d *Device) execute(ctx context.Context, script Script, opts ExecuteOptions, strategy ConfigStrategy) (result Result, err error) {
+	returned := false
+	defer func() {
+		if !returned {
+			_ = d.closeResources()
+			return
+		}
+		if e := d.log.scope(d.baseSecrets(), true); e != nil {
+			err = joinFailures(err, newError("log_error", "logging", Command{}, e))
+		}
+		level, status := "info", "completed"
+		if err != nil {
+			level, status = "error", "failed"
+		}
+		if e := d.sessionEvent(ctx, "operation_complete", level, Command{}, status); e != nil {
+			err = joinFailures(err, e)
+		}
+		if err != nil {
+			err = joinCleanup(err, d.closeResources())
+		}
+	}()
+	result, err = d.runScript(ctx, script, opts, strategy)
+	returned = true
+	return
+}
+func (d *Device) runScript(ctx context.Context, script Script, opts ExecuteOptions, strategy ConfigStrategy) (result Result, err error) {
+	if len(script.Commands) == 0 {
+		return result, ctx.Err()
+	}
+	if err = d.connect(ctx); err != nil {
+		return
+	}
+	x := &execution{textMode: opts.textMode, device: d, values: make(map[string]string), limit: d.config.MaxScriptOutputBytes, strategy: strategy}
+	defer func() { result.attempts = append([]Attempt(nil), x.attempts...) }()
+	if opts.MaxOutputBytes > 0 {
+		x.limit = opts.MaxOutputBytes
+	}
+
+	if !opts.SkipPrivilege && d.profile.PrivilegeCommand != "" && !d.privileged.Load() {
+		secret := d.config.EnablePassword
+		if secret == "" {
+			secret = d.config.Password
+		}
+		ac, cancel := context.WithTimeout(ctx, d.config.LoginTimeout)
+		err = d.sendLine(ac, d.profile.PrivilegeCommand+d.config.LineEnding, false)
+		if err == nil {
+			var s StepResult
+			s, err = d.readResponse(ac, Command{}, d.profile.PrivilegePrompt, d.loginInteractions(secret), true, false)
+			if err == nil {
+				d.setPrompt(s.Response())
+				d.privileged.Store(true)
+			}
+		}
+		cancel()
+		if err != nil {
+			return
+		}
+	}
+	for _, original := range script.Commands {
+		if err = ctx.Err(); err != nil {
+			return
+		}
+		c := original
+		if d.profile.Prepare != nil {
+			var skip bool
+			err = x.hook(ctx, func(ex Executor) error { var e error; c, skip, e = d.profile.Prepare(ctx, c, ex); return e })
+			if err != nil {
+				err = newError("prepare_failed", "script", original, err)
+				return
+			}
+			if skip {
+				continue
+			}
+			if err = c.validate(); err != nil {
+				return
+			}
+		}
+		var step StepResult
+		step, err = x.command(ctx, c)
+		if step.Response().RawPrompt() != "" {
+			result.steps = append(result.steps, step)
+		}
+		if err == nil && d.profile.AfterCommand != nil {
+			e := x.hook(ctx, func(ex Executor) error { return d.profile.AfterCommand(ctx, c, step, ex) })
+			if e != nil {
+				err = newError("after_command_failed", "script", c, e)
+			}
+		}
+		if err == nil && strategy != nil {
+			e := x.hook(ctx, func(ex Executor) error { return strategy.Validate(ctx, c, step, ex) })
+			if e != nil {
+				err = configurationFailure(c, e)
+			}
+		}
+		if step.Response().RawPrompt() != "" && opts.OnReceipt != nil {
+			if e := opts.OnReceipt(ctx, step); e != nil {
+				err = joinFailures(err, newError("receipt_callback_failed", "script", c, e))
+			}
+		}
+		if err != nil {
+			return
+		}
+		if err = ctx.Err(); err != nil {
+			return
+		}
+		if opts.OnStep != nil {
+			if e := opts.OnStep(ctx, step); e != nil {
+				err = newError("step_callback_failed", "script", c, e)
+				return
+			}
+		}
+		if err = ctx.Err(); err != nil {
+			return
+		}
+	}
+	return
+}
+func (x *execution) command(ctx context.Context, c Command) (step StepResult, err error) {
+	attempted := false
+	written := 0
+	var response Response
+	defer func() {
+		if attempted {
+			x.attempts = append(x.attempts, Attempt{command: c.clone(), response: response, written: written, complete: response.RawPrompt() != "", err: err})
+		}
+	}()
+
+	d := x.device
+	if err = ctx.Err(); err != nil {
+		return step, err
+	}
+	secrets := d.baseSecrets()
+	if c.Sensitive {
+		secrets = append(secrets, c.Text)
+	}
+	private := c.Sensitive || c.OutputSensitive
+	for _, rules := range [][]Interaction{c.Interactions, d.profile.Interactions} {
+		for _, rule := range rules {
+			private = private || rule.Sensitive
+		}
+	}
+	restore, e := d.log.push(secrets, private)
+	if e != nil {
+		return step, newError("log_error", "logging", c, e)
+	}
+	defer func() {
+		if e := restore(); e != nil {
+			err = joinFailures(err, newError("log_error", "logging", c, e))
+		}
+	}()
+	if e := d.sessionEvent(ctx, "command_start", "info", c, ""); e != nil {
+		return step, e
+	}
+	defer func() {
+		level, status := "info", "response_received"
+		if err != nil {
+			level, status = "error", "failed"
+		}
+		if e := d.sessionEvent(ctx, "command_complete", level, c, status); e != nil {
+			err = joinFailures(err, e)
+		}
+	}()
+	d.log.count = func(n int) { x.bytes += int64(n) }
+	defer func() { d.log.count = nil }()
+	if x.limit > 0 && x.bytes >= x.limit {
+		return step, newError("script_output_limit_exceeded", "script", c, ErrScriptLimit)
+	}
+	timeout := d.config.CommandTimeout
+	if c.Timeout != nil {
+		timeout = *c.Timeout
+	}
+	if c.Poll {
+		timeout = 0
+	}
+	cc := ctx
+	cancel := func() {}
+	if timeout > 0 {
+		cc, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+	started := time.Now()
+	prompt := c.Prompt
+	if prompt.IsZero() {
+		prompt = d.profile.CommandPrompt
+	}
+	if x.strategy != nil && c.Prompt.IsZero() {
+		var e error
+		prompt, e = x.strategy.MatchPrompt(c.Text, d.RawPrompt())
+		if e != nil {
+			return step, e
+		}
+		if e = prompt.ValidateText(); e != nil {
+			return step, ErrIncomplete
+		}
+	}
+	attempted = true
+	if err = d.sendLine(cc, c.Text+d.config.LineEnding, c.Poll); err != nil {
+		var progress *expect.WriteError
+		if errors.As(err, &progress) {
+			written = progress.Written
+		}
+		return step, writeFailure("command", c, err)
+	}
+	written = len(c.Text) + len(d.config.LineEnding)
+	replies := append(cloneInteractions(c.Interactions), d.profile.Interactions...)
+	replies = append(replies, Interaction{Pattern: d.profile.Pager, Reply: d.profile.PagerResponse, Unlimited: true})
+	step, err = d.readResponse(cc, c, prompt, replies, false, c.Poll)
+	response = step.Response()
+	step.duration = time.Since(started)
+	if err != nil {
+		return StepResult{}, err
+	}
+	var diagnostic string
+	var conversionErr error
+	switch x.textMode {
+	case configTextBackupSource:
+		diagnostic, conversionErr = response.data.convertBackup()
+	case configTextPreserveInvalid:
+		diagnostic, conversionErr = response.data.convert()
+		if conversionErr != nil {
+			diagnostic, conversionErr = response.data.convertOriginal()
+		}
+	default:
+		diagnostic, conversionErr = response.data.convert()
+	}
+	if conversionErr != nil {
+		return StepResult{}, newError("invalid_output_encoding", "parse", c, conversionErr)
+	}
+	if int64(len(step.response.data.output)) > d.config.MaxOutputBytes {
+		return step, newError("output_limit_exceeded", "parse", c, ErrOutputLimit)
+	}
+	if len(d.profile.CommandErrors) > 0 {
+		if strings.Contains(diagnostic, "\x1b[") {
+			diagnostic = ansiColor.ReplaceAllString(diagnostic, "")
+		}
+		diagnostic = strings.ReplaceAll(strings.ReplaceAll(diagnostic, "\r\n", "\n"), "\r", "\n")
+	}
+	rendered, _ := response.Rendered()
+	for _, pattern := range d.profile.CommandErrors {
+		if pattern.MatchString(diagnostic) || pattern.MatchString(rendered) {
+			return StepResult{}, newError("device_error", "command", c, ErrDevice)
+		}
+	}
+	d.setPrompt(step.Response())
+	if x.limit > 0 && x.bytes > x.limit {
+		return step, newError("script_output_limit_exceeded", "script", c, ErrScriptLimit)
+	}
+	// The prompt handler records completion before a late cancellation is returned.
+	if err = cc.Err(); err != nil {
+		return step, err
+	}
+	return step, nil
+}
+func (d *Device) sendLine(ctx context.Context, text string, poll bool) error {
+	if poll {
+		_, e := d.session.SendAllPoll(ctx, text)
+		return e
+	}
+	wc, cancel := context.WithTimeout(ctx, d.config.WriteTimeout)
+	defer cancel()
+	_, e := d.session.SendAll(wc, text)
+	return e
+}
+func (d *Device) readResponse(ctx context.Context, c Command, prompt expect.Pattern, replies []Interaction, login, poll bool) (step StepResult, err error) {
+	if prompt.IsZero() {
+		return step, ErrInvalid
+	}
+	var raw, body responseCollector
+	var rawPrompt string
+	separate := false
+	defer func() {
+		step.command = c.clone()
+		wire := raw.String()
+		output := wire
+		if separate {
+			output = body.String()
+		}
+		step.response = Response{data: &responseData{raw: wire, rawPrompt: rawPrompt, output: output,
+			outputErr: ErrIncomplete, renderErr: ErrIncomplete, promptErr: ErrIncomplete}}
+	}()
+	completed := false
+	appendSegment := func(r expect.Result, capture bool) error {
+		if !capture && !separate {
+			// Most responses never remove a pager marker: share raw until then.
+			body = raw.clone()
+			separate = true
+		}
+		raw.WriteString(r.Before)
+		raw.WriteString(r.Match)
+		if separate {
+			body.WriteString(r.Before)
+		}
+		if capture {
+			if separate {
+				body.WriteString(r.Match)
+			}
+		} else {
+			// Go regex boundaries consume delimiters that Ruby lookarounds retain.
+			for _, b := range r.Match {
+				if b == '\r' || b == '\n' {
+					body.WriteRune(b)
+				}
+			}
+		}
+		if int64(raw.Len()) > d.config.MaxOutputBytes {
+			return ErrOutputLimit
+		}
+		return nil
+	}
+	var cases []expect.Case
+	add := func(p expect.Pattern, h expect.Handler) {
+		pattern := p
+		cases = append(cases, expect.Case{Pattern: pattern, Handler: h})
+	}
+	if login {
+		for _, failure := range loginFailures {
+			add(failure.pattern, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
+				return expect.Return, failure.cause
+			})
+		}
+		add(loginAuthError, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
+			return expect.Return, ErrAuthentication
+		})
+		for _, r := range d.profile.AuthenticationErrors {
+			p, _ := expect.FromRegexp(r)
+			add(p, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
+				return expect.Return, ErrAuthentication
+			})
+		}
+	}
+	counts := make([]int, len(replies))
+	for i, reply := range replies {
+		if reply.Pattern.IsZero() {
+			return step, ErrInvalid
+		}
+		add(reply.Pattern, func(hctx context.Context, _ *expect.Session, r expect.Result) (expect.Action, error) {
+			if e := appendSegment(r, reply.Capture); e != nil {
+				return expect.Return, e
+			}
+			counts[i]++
+			if !reply.Unlimited && counts[i] > max(1, reply.Limit) {
+				if login {
+					return expect.Return, ErrAuthentication
+				}
+				return expect.Return, ErrResponseLimit
+			}
+			answer := reply.Reply
+			if reply.Respond != nil {
+				var e error
+				answer, e = reply.Respond(hctx, r.Match)
+				if e != nil {
+					return expect.Return, e
+				}
+			}
+			if reply.Sensitive {
+				if e := d.log.protectReply(strings.TrimSuffix(answer, "\n")); e != nil {
+					return expect.Return, e
+				}
+			}
+			if e := hctx.Err(); e != nil {
+				return expect.Return, e
+			}
+			if e := d.sendLine(hctx, answer, poll); e != nil {
+				return expect.Return, writeFailure(map[bool]string{true: "login", false: "command"}[login], c, e)
+			}
+			return expect.ContinueKeepTimer, nil
+		})
+	}
+	add(prompt, func(_ context.Context, _ *expect.Session, r expect.Result) (expect.Action, error) {
+		if e := appendSegment(r, true); e != nil {
+			return expect.Return, e
+		}
+		rawPrompt = r.Match
+		completed = true
+		return expect.Return, nil
+	})
+	options := []expect.ExpectOption{expect.WithTimeout(0), expect.WithMatchOrder(expect.Declaration), expect.WithStreamingFallback(func(_ context.Context, _ *expect.Session, r expect.Result) (expect.Action, error) {
+		return expect.ContinueKeepTimer, appendSegment(r, true)
+	})}
+	var final expect.Result
+	if poll {
+		final, err = d.session.Poll(ctx, cases, options...)
+	} else {
+		final, err = d.session.Expect(ctx, cases, options...)
+	}
+	if err != nil && !completed && final.CaseIndex < 0 && final.Before != "" {
+		// The unmatched prefix has not passed a handler or streaming fallback.
+		remaining := max(0, int(d.config.MaxOutputBytes)-raw.Len())
+		prefix := final.Before[:min(len(final.Before), remaining)]
+		if len(prefix) < len(final.Before) {
+			prefix = strings.Clone(prefix)
+		}
+		raw.WriteString(prefix)
+		if separate {
+			body.WriteString(prefix)
+		}
+	}
+	if err != nil && !completed {
+		phase := map[bool]string{true: "login", false: "command"}[login]
+		var classified *Error
+		if errors.As(err, &classified) {
+			return StepResult{}, err
+		}
+		code := "transport_error"
+		switch {
+		case errors.Is(err, ErrResponseLimit):
+			code = "response_limit_exceeded"
+		case errors.Is(err, ErrAuthentication):
+			code = "authentication_error"
+		case errors.Is(err, ErrOutputLimit), errors.Is(err, expect.ErrBufferLimit):
+			code = "output_limit_exceeded"
+		case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+			code = "connection_closed"
+		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, expect.ErrTimeout):
+			switch {
+			case !c.Prompt.IsZero():
+				code = "prompt_error"
+			case login:
+				code = "login_timeout"
+			default:
+				code = "command_timeout"
+			}
+		case errors.Is(err, context.Canceled):
+			return StepResult{}, err
+		}
+		return StepResult{}, newError(code, phase, c, err)
+	}
+	if completed {
+		return step, nil
+	}
+	return step, err
+}
+
+func writeFailure(phase string, c Command, err error) error {
+	var classified *Error
+	if errors.As(err, &classified) {
+		metadata := *classified
+		metadata.cause = err
+		return &metadata
+	}
+	if errors.Is(err, expect.ErrBufferLimit) || errors.Is(err, ErrOutputLimit) {
+		return newError("output_limit_exceeded", phase, c, err)
+	}
+	code := "transport_error"
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, expect.ErrTimeout) {
+		code = "write_timeout"
+	}
+	return newError(code, phase, c, err)
+}

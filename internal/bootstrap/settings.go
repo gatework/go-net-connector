@@ -17,8 +17,8 @@ import (
 	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/netdisco"
+	"github.com/gatework/go-net-connector/transfer"
 	"github.com/gatework/go-net-connector/vendors"
-	"github.com/samber/do/v2"
 )
 
 var ErrCredentials = fleet.ErrMissingCredentials
@@ -26,117 +26,148 @@ var ErrCredentials = fleet.ErrMissingCredentials
 type Secret func(string) string
 type DeviceFactory func(connector.Profile, connector.ConnectionConfig) (*connector.Device, error)
 type Services struct {
-	policy  config.Snapshot
-	secret  Secret
-	rules   *fleet.Rules
-	factory DeviceFactory
-	scope   *do.RootScope
+	observer   func(context.Context, connector.SessionEvent) error
+	policy     config.Snapshot
+	secret     Secret
+	rules      *fleet.Rules
+	factory    DeviceFactory
+	templates  map[string]connector.ConnectionConfig
+	settings   resolvedSettings
+	tftpPolicy *transfer.Policy
+	registry   *vendors.Registry
+}
+
+// resolvedSettings freezes frequently used scalar settings once at the
+// composition root. Policy remains available for provenance and less common
+// values, but runtime workflows do not repeatedly unpack these fields.
+type resolvedSettings struct {
+	parallel          int
+	limitPerVendor    int
+	backupDirectory   string
+	backupLayout      string
+	logDirectory      string
+	tftpUploadTimeout time.Duration
+	inventoryLimits   netdisco.Limits
 }
 
 func New(policy config.Snapshot, secret Secret) (*Services, error) {
 	if secret == nil {
 		secret = policy.Secret
 	}
-	scope := do.New()
-	do.ProvideValue(scope, policy)
-	do.ProvideValue(scope, secret)
-	do.ProvideValue[fleet.ProfileLookup](scope, vendors.Profile)
-	do.Provide(scope, func(i do.Injector) (*fleet.Rules, error) {
-		p, e := do.Invoke[config.Snapshot](i)
-		if e != nil {
-			return nil, e
-		}
-		lookup, e := do.Invoke[fleet.ProfileLookup](i)
-		if e != nil {
-			return nil, e
-		}
-		o, e := ruleOptions(p)
-		if e != nil {
-			return nil, e
-		}
-		return fleet.NewRules(o, lookup)
-	})
-	rules, e := do.Invoke[*fleet.Rules](scope)
+	o, e := ruleOptions(policy)
 	if e != nil {
 		return nil, e
 	}
-	s := &Services{policy: policy, secret: secret, rules: rules, scope: scope, factory: func(p connector.Profile, c connector.ConnectionConfig) (*connector.Device, error) {
+	registry := vendors.NewBuiltinRegistry()
+	rules, e := fleet.NewRules(o, registry)
+	if e != nil {
+		return nil, e
+	}
+	s := &Services{policy: policy, secret: secret, rules: rules, registry: registry, factory: func(p connector.Profile, c connector.ConnectionConfig) (*connector.Device, error) {
 		return connector.New(p, c)
-	}}
-	for _, vendor := range vendors.Names() {
-		p, _ := vendors.Profile(vendor)
-		c, e := s.connection(vendor)
+	}, templates: make(map[string]connector.ConnectionConfig)}
+	for _, vendor := range registry.Names() {
+		d, _ := registry.Lookup(vendor)
+		p := d.Profile()
+		c, e := s.compileConnection(vendor)
 		if e != nil {
 			return nil, e
 		}
 		if e = p.Validate(); e != nil {
 			return nil, e
 		}
+		s.templates[vendor] = c
 		if e = c.ValidateOptions(); e != nil {
 			return nil, e
 		}
 	}
-	workers := number(policy, "backup.parallel", 4)
-	if workers < 1 || workers > 500 {
-		return nil, config.ErrInvalid
+	s.settings, e = resolveSettings(policy)
+	if e != nil {
+		return nil, e
 	}
-	limit := number(policy, "backup.limit_per_vendor", 0)
-	if limit < 0 || limit > 5 {
-		return nil, config.ErrInvalid
-	}
-	if mode := str(policy, "netdisco.cache_mode", "prefer"); mode != "prefer" && mode != "only" && mode != "refresh" {
+	if mode := stringValue(policy, "netdisco.cache_mode"); mode != "prefer" && mode != "only" && mode != "refresh" {
 		return nil, config.ErrInvalid
 	}
 	if e = s.validatePolicy(); e != nil {
 		return nil, e
 	}
+	s.tftpPolicy, e = s.buildTFTPPolicy()
+	if e != nil {
+		return nil, e
+	}
 	return s, nil
 }
-func (s *Services) Close() {
-	if s != nil && s.scope != nil {
-		s.scope.Shutdown()
+
+func resolveSettings(policy config.Snapshot) (resolvedSettings, error) {
+	settings := resolvedSettings{
+		parallel:          integerValue(policy, "backup.parallel"),
+		limitPerVendor:    integerValue(policy, "backup.limit_per_vendor"),
+		backupDirectory:   stringValue(policy, "backup.directory"),
+		backupLayout:      stringValue(policy, "backup.layout"),
+		logDirectory:      stringValue(policy, "ssh.log_directory"),
+		tftpUploadTimeout: durationValue(policy, "tftp.upload_timeout"),
+		inventoryLimits: netdisco.Limits{
+			PageSize:          integerValue(policy, "netdisco.page_size"),
+			MaxPages:          integerValue(policy, "netdisco.max_pages"),
+			MaxDevices:        integerValue(policy, "netdisco.max_devices"),
+			MaxResponseBytes:  int64(integerValue(policy, "netdisco.max_response_bytes")),
+			MaxInventoryBytes: int64(integerValue(policy, "netdisco.max_inventory_bytes")),
+			Timeout:           durationValue(policy, "netdisco.inventory_timeout"),
+		},
 	}
+	if settings.backupLayout != "batch" && settings.backupLayout != "flat" || settings.parallel < 1 || settings.parallel > 500 || settings.limitPerVendor < 0 || settings.limitPerVendor > 5 {
+		return resolvedSettings{}, config.ErrInvalid
+	}
+	return settings, nil
 }
-func (s *Services) Policy() config.Snapshot { return s.policy }
-func (s *Services) Rules() *fleet.Rules     { return s.rules }
+
+// WithSessionObserver binds an operation-local observer without mutating shared templates.
+func (s *Services) WithSessionObserver(observer func(context.Context, connector.SessionEvent) error) *Services {
+	copy := *s
+	copy.observer = observer
+	return &copy
+}
+func (s *Services) Policy() config.Snapshot     { return s.policy }
+func (s *Services) Rules() *fleet.Rules         { return s.rules }
+func (s *Services) Registry() *vendors.Registry { return s.registry }
 func (s *Services) WithDeviceFactory(factory DeviceFactory) *Services {
 	copy := *s
 	copy.factory = factory
 	return &copy
 }
-func str(p config.Snapshot, k, fallback string) string {
-	if v, ok := p.Value(k).(string); ok {
+func stringValue(snapshot config.Snapshot, path string) string {
+	if v, ok := snapshot.Value(path).(string); ok {
 		return v
 	}
-	return fallback
+	return ""
 }
-func number(p config.Snapshot, k string, fallback int) int {
-	switch v := p.Value(k).(type) {
+func integerValue(snapshot config.Snapshot, path string) int {
+	switch v := snapshot.Value(path).(type) {
 	case int:
 		return v
 	case float64:
 		return int(v)
 	}
-	return fallback
+	return 0
 }
-func boolean(p config.Snapshot, k string, fallback bool) bool {
-	if v, ok := p.Value(k).(bool); ok {
+func boolValue(snapshot config.Snapshot, path string) bool {
+	if v, ok := snapshot.Value(path).(bool); ok {
 		return v
 	}
-	return fallback
+	return false
 }
-func duration(p config.Snapshot, k string, fallback time.Duration) time.Duration {
-	switch v := p.Value(k).(type) {
+func durationValue(snapshot config.Snapshot, path string) time.Duration {
+	switch v := snapshot.Value(path).(type) {
 	case int:
 		return time.Duration(v) * time.Second
 	case float64:
 		return time.Duration(v * float64(time.Second))
 	}
-	return fallback
+	return 0
 }
-func list(p config.Snapshot, k string) []string {
+func stringList(snapshot config.Snapshot, path string) []string {
 	out := []string{}
-	if a, ok := p.Value(k).([]any); ok {
+	if a, ok := snapshot.Value(path).([]any); ok {
 		for _, v := range a {
 			if s, ok := v.(string); ok {
 				out = append(out, s)
@@ -145,9 +176,9 @@ func list(p config.Snapshot, k string) []string {
 	}
 	return out
 }
-func mapping(p config.Snapshot, k string) (map[string]string, error) {
+func stringMap(snapshot config.Snapshot, path string) (map[string]string, error) {
 	out := map[string]string{}
-	if value := p.Value(k); value != nil {
+	if value := snapshot.Value(path); value != nil {
 		m, ok := value.(map[string]any)
 		if !ok {
 			return nil, config.ErrInvalid
@@ -163,13 +194,13 @@ func mapping(p config.Snapshot, k string) (map[string]string, error) {
 	return out, nil
 }
 func ruleOptions(p config.Snapshot) (fleet.RuleOptions, error) {
-	o := fleet.RuleOptions{Selection: inventory.SelectionOptions{IncludeHosts: list(p, "inventory.include_hosts"), ExcludeHosts: list(p, "inventory.exclude_hosts"), IncludeNames: list(p, "inventory.include_names"), ExcludeNames: list(p, "inventory.exclude_names"), IncludeVendors: list(p, "inventory.include_vendors"), ExcludeVendors: list(p, "inventory.exclude_vendors"), IncludeModels: list(p, "inventory.include_models"), ExcludeModels: list(p, "inventory.exclude_models"), NameMatch: str(p, "inventory.name_match", "contains"), ModelMatch: str(p, "inventory.model_match", "contains")}}
+	o := fleet.RuleOptions{Selection: inventory.SelectionOptions{IncludeHosts: stringList(p, "inventory.include_hosts"), ExcludeHosts: stringList(p, "inventory.exclude_hosts"), IncludeNames: stringList(p, "inventory.include_names"), ExcludeNames: stringList(p, "inventory.exclude_names"), IncludeVendors: stringList(p, "inventory.include_vendors"), ExcludeVendors: stringList(p, "inventory.exclude_vendors"), IncludeModels: stringList(p, "inventory.include_models"), ExcludeModels: stringList(p, "inventory.exclude_models"), NameMatch: stringValue(p, "inventory.name_match"), ModelMatch: stringValue(p, "inventory.model_match")}}
 	var e error
-	o.VendorOverrides, e = mapping(p, "inventory.vendor_overrides")
+	o.VendorOverrides, e = stringMap(p, "inventory.vendor_overrides")
 	if e != nil {
 		return o, e
 	}
-	o.HostOverrides, e = mapping(p, "inventory.host_overrides")
+	o.HostOverrides, e = stringMap(p, "inventory.host_overrides")
 	if e != nil {
 		return o, e
 	}
@@ -206,15 +237,15 @@ func ruleOptions(p config.Snapshot) (fleet.RuleOptions, error) {
 	}
 	return o, nil
 }
-func (s *Services) connection(vendor string) (connector.ConnectionConfig, error) {
+func (s *Services) compileConnection(vendor string) (connector.ConnectionConfig, error) {
 	p := s.policy
-	c := connector.ConnectionConfig{LogLevel: str(p, "ssh.log_level", "info"), Protocol: connector.Protocol(str(p, "ssh.protocol", "ssh")), KnownHosts: str(p, "ssh.known_hosts", ""), HostKeyPolicy: connector.HostKeyPolicy(str(p, "ssh.host_key_policy", "strict")), MaxScriptOutputBytes: int64(number(p, "ssh.max_script_output_bytes", 0))}
-	protocols, e := mapping(p, "ssh.vendor_protocols")
+	c := connector.ConnectionConfig{LogLevel: stringValue(p, "ssh.log_level"), Protocol: connector.Protocol(stringValue(p, "ssh.protocol")), KnownHosts: stringValue(p, "ssh.known_hosts"), HostKeyPolicy: connector.HostKeyPolicy(stringValue(p, "ssh.host_key_policy")), MaxScriptOutputBytes: int64(integerValue(p, "ssh.max_script_output_bytes"))}
+	protocols, e := stringMap(p, "ssh.vendor_protocols")
 	if e != nil {
 		return c, e
 	}
 	for name, v := range protocols {
-		if _, e := vendors.Profile(name); e != nil || v != "ssh" && v != "telnet" {
+		if _, e := s.registry.Lookup(name); e != nil || v != "ssh" && v != "telnet" {
 			return c, config.ErrInvalid
 		}
 	}
@@ -230,16 +261,18 @@ func (s *Services) DeviceWithLogger(ctx context.Context, r fleet.Record, logger 
 	if e := ctx.Err(); e != nil {
 		return nil, e
 	}
-	p, e := vendors.Profile(r.Vendor)
+	d, e := s.registry.Lookup(r.Vendor)
 	if e != nil {
 		return nil, e
 	}
-	c, e := s.connection(r.Vendor)
-	if e != nil {
-		return nil, e
+	p := d.Profile()
+	c, ok := s.templates[r.Vendor]
+	if !ok {
+		return nil, config.ErrInvalid
 	}
 	c.Host = r.Host
 	c.Logger = logger
+	c.OnSessionEvent = s.observer
 	prefix := "NC_" + strings.ToUpper(r.Vendor) + "_"
 	get := func(suffix, fallback string) string {
 		if v := s.secret(prefix + suffix); strings.TrimSpace(v) != "" {
@@ -256,43 +289,49 @@ func (s *Services) DeviceWithLogger(ctx context.Context, r fleet.Record, logger 
 	return s.factory(p, c)
 }
 func (s *Services) limits() netdisco.Limits {
-	p := s.policy
-	return netdisco.Limits{PageSize: number(p, "netdisco.page_size", 500), MaxPages: number(p, "netdisco.max_pages", 10000), MaxDevices: number(p, "netdisco.max_devices", 100000), MaxResponseBytes: int64(number(p, "netdisco.max_response_bytes", 16<<20)), MaxInventoryBytes: int64(number(p, "netdisco.max_inventory_bytes", 128<<20)), Timeout: duration(p, "netdisco.inventory_timeout", 300*time.Second)}
+	return s.settings.inventoryLimits
 }
 func (s *Services) Inventory(ctx context.Context, mode string) (netdisco.CacheResult, error) {
 	p := s.policy
 	if mode == "" {
-		mode = str(p, "netdisco.cache_mode", "prefer")
+		mode = stringValue(p, "netdisco.cache_mode")
 	}
 	limits := s.limits()
 	var source netdisco.Source
 	var identity []byte
 	var e error
-	switch str(p, "netdisco.source", "http") {
+	switch stringValue(p, "netdisco.source") {
 	case "http":
-		raw := str(p, "netdisco.url", "")
+		raw := stringValue(p, "netdisco.url")
 		u, err := url.Parse(raw)
-		if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") || (!boolean(p, "netdisco.allow_insecure_http", false) && u.Scheme != "https") {
+		if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") || (!boolValue(p, "netdisco.allow_insecure_http") && u.Scheme != "https") {
 			return netdisco.CacheResult{}, config.ErrInvalid
 		}
 		u.Scheme = strings.ToLower(u.Scheme)
 		u.Host = strings.ToLower(u.Host)
 		user, password, key := s.secret("ND_USERNAME"), "", s.secret("ND_API_KEY")
-		auth := map[string]string{}
-		if key != "" {
-			auth["api_key"] = key
-		} else {
+		cacheEnabled := boolValue(p, "netdisco.cache_enabled")
+		namespace := stringValue(p, "netdisco.cache_namespace")
+		if key != "" && cacheEnabled && strings.TrimSpace(user) == "" && strings.TrimSpace(namespace) == "" {
+			return netdisco.CacheResult{}, &netdisco.InventoryError{Code: "cache_namespace_required"}
+		}
+		if key == "" {
 			if user == "" {
 				return netdisco.CacheResult{}, ErrCredentials
 			}
-			auth["username"] = user
 		}
-		identity, _ = json.Marshal([]any{"http", u.String(), auth})
+		options := netdisco.HTTPOptions{URL: u.String(), Username: user, APIKey: key, RequireHTTPS: !boolValue(p, "netdisco.allow_insecure_http"), Limits: limits}
+		identity, e = httpSourceIdentity(options, namespace)
+		if e != nil {
+			return netdisco.CacheResult{}, e
+		}
 		if mode != "only" {
 			password = s.secret("ND_PASSWORD")
 			transport := http.DefaultTransport.(*http.Transport).Clone()
 			defer transport.CloseIdleConnections()
-			source, e = netdisco.NewHTTP(netdisco.HTTPOptions{Client: &http.Client{Transport: transport}, URL: u.String(), Username: user, Password: password, APIKey: key, RequireHTTPS: !boolean(p, "netdisco.allow_insecure_http", false), Limits: limits})
+			options.Client = &http.Client{Transport: transport}
+			options.Password = password
+			source, e = netdisco.NewHTTP(options)
 		}
 	case "postgres":
 		keys := []struct{ name, env string }{{"host", "ND_DB_HOST"}, {"dbname", "ND_DB_NAME"}, {"user", "ND_DB_USER"}}
@@ -304,17 +343,17 @@ func (s *Services) Inventory(ctx context.Context, mode string) (netdisco.CacheRe
 				return netdisco.CacheResult{}, ErrCredentials
 			}
 			values[k.name] = v
-			dsn = append(dsn, k.name+"="+pgQuote(v))
+			dsn = append(dsn, k.name+"="+quoteDSNValue(v))
 		}
 		for _, k := range []string{"port", "sslmode", "sslrootcert", "connect_timeout"} {
 			v := p.Value("netdisco.db_" + k)
 			if v != nil {
 				value := fmt.Sprint(v)
 				values[k] = v
-				dsn = append(dsn, k+"="+pgQuote(value))
+				dsn = append(dsn, k+"="+quoteDSNValue(value))
 			}
 		}
-		query := str(p, "netdisco.query", "")
+		query := stringValue(p, "netdisco.query")
 		params, _ := p.Value("netdisco.query_params").([]any)
 		if params == nil {
 			params = []any{}
@@ -329,7 +368,7 @@ func (s *Services) Inventory(ctx context.Context, mode string) (netdisco.CacheRe
 			if password == "" {
 				return netdisco.CacheResult{}, ErrCredentials
 			}
-			dsn = append(dsn, "password="+pgQuote(password))
+			dsn = append(dsn, "password="+quoteDSNValue(password))
 			source, e = netdisco.NewPostgres(netdisco.PostgresOptions{Connection: strings.Join(dsn, " "), Query: query, Parameters: params, Limits: limits})
 			if e != nil {
 				return netdisco.CacheResult{}, e
@@ -341,37 +380,37 @@ func (s *Services) Inventory(ctx context.Context, mode string) (netdisco.CacheRe
 	if e != nil {
 		return netdisco.CacheResult{}, e
 	}
-	if !boolean(p, "netdisco.cache_enabled", true) {
+	if !boolValue(p, "netdisco.cache_enabled") {
 		if mode == "only" {
 			return netdisco.CacheResult{}, config.ErrInvalid
 		}
 		rows, e := source.Devices(ctx)
-		return netdisco.CacheResult{Rows: rows, Status: "disabled"}, e
+		return netdisco.CacheResult{Rows: rows, Status: netdisco.CacheStatusDisabled}, e
 	}
-	ttl := duration(p, "netdisco.cache_ttl", 72*time.Hour)
-	cache, e := netdisco.NewCache(source, netdisco.CacheOptions{Directory: str(p, "netdisco.cache_directory", ""), Identity: netdisco.Identity(identity), TTL: &ttl, Limits: limits})
+	ttl := durationValue(p, "netdisco.cache_ttl")
+	cache, e := netdisco.NewCache(source, netdisco.CacheOptions{Directory: stringValue(p, "netdisco.cache_directory"), Identity: netdisco.Identity(identity), TTL: &ttl, Limits: limits})
 	if e != nil {
 		return netdisco.CacheResult{}, e
 	}
 	return cache.Fetch(ctx, mode)
 }
-func pgQuote(s string) string {
+func quoteDSNValue(s string) string {
 	return "'" + strings.ReplaceAll(strings.ReplaceAll(s, "\\", "\\\\"), "'", "\\'") + "'"
 }
-func (s *Services) Workers() int      { return number(s.policy, "backup.parallel", 4) }
-func (s *Services) Limit() int        { return number(s.policy, "backup.limit_per_vendor", 0) }
-func (s *Services) Directory() string { return str(s.policy, "backup.directory", "") }
+func (s *Services) Workers() int      { return s.settings.parallel }
+func (s *Services) Limit() int        { return s.settings.limitPerVendor }
+func (s *Services) Directory() string { return s.settings.backupDirectory }
 func (s *Services) String() string    { return "bootstrap.Services" }
 func (s *Services) GoString() string  { return s.String() }
 
 // LogDirectory resolves the frozen command-mode policy once at the composition
 // root. Root backup/TFTP and ordinary batch backup have no implicit session log;
 // batch TFTP and topology fall back to their batch directory's logs subdirectory.
-func (s *Services) LogDirectory(program, mode, directory string) string {
-	if explicit := str(s.policy, "ssh.log_directory", ""); explicit != "" {
+func (s *Services) LogDirectory(mode, directory string) string {
+	if explicit := s.settings.logDirectory; explicit != "" {
 		return explicit
 	}
-	if program == "net-topology" || program != "net-backup" && mode == "tftp" {
+	if mode == "topology" || mode == "tftp" {
 		return filepath.Join(directory, "logs")
 	}
 	return ""

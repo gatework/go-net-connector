@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -10,10 +11,11 @@ import (
 
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/internal/bootstrap"
+	"github.com/gatework/go-net-connector/transfer"
 	"golang.org/x/term"
 )
 
-var errSetupDeclined = errors.New("required configuration was not created")
+var errSetupDeclined = errors.New("未创建必需的配置文件")
 
 func missingSetupFile(path string) (bool, error) {
 	info, err := os.Lstat(path)
@@ -44,7 +46,7 @@ func (r Runtime) setupConsent(snapshot config.Snapshot, reader *bufio.Reader) (b
 	}
 	approve := func(path string) (bool, error) {
 		for {
-			if _, err := fmt.Fprintf(r.Error, "Not found: %s; create it? [y/N]: ", path); err != nil {
+			if _, err := fmt.Fprintf(r.Error, "未找到文件：%s；是否创建？[y/N]：", path); err != nil {
 				return false, err
 			}
 			line, err := readLine(reader, 64)
@@ -57,7 +59,7 @@ func (r Runtime) setupConsent(snapshot config.Snapshot, reader *bufio.Reader) (b
 			case "", "n", "no":
 				return false, nil
 			}
-			if _, err := fmt.Fprintln(r.Error, "Enter y or n."); err != nil {
+			if _, err := fmt.Fprintln(r.Error, "请输入 y 或 n。"); err != nil {
 				return false, err
 			}
 		}
@@ -86,8 +88,8 @@ func (r Runtime) terminal() (*os.File, bool) {
 	output, ok := r.Error.(*os.File)
 	return input, ok && term.IsTerminal(int(output.Fd()))
 }
-func (r Runtime) passwords(o *options) error {
-	for _, p := range []struct{ flag, key, label string }{{"ask-password", "NC_DEVICE_PASSWORD", "Device password"}, {"ask-netdisco-password", "ND_PASSWORD", "Netdisco password"}} {
+func (r Runtime) passwords(ctx context.Context, o *options) error {
+	for _, p := range []struct{ flag, key, label string }{{"ask-password", "NC_DEVICE_PASSWORD", "设备密码"}, {"ask-netdisco-password", "ND_PASSWORD", "Netdisco 密码"}} {
 		ask, _ := o.flags.GetBool(p.flag)
 		if !ask {
 			continue
@@ -97,7 +99,7 @@ func (r Runtime) passwords(o *options) error {
 			return config.ErrInvalid
 		}
 		fmt.Fprint(r.Error, p.label+": ")
-		password, e := term.ReadPassword(int(input.Fd()))
+		password, e := readTerminalSecret(ctx, input)
 		fmt.Fprintln(r.Error)
 		if e != nil {
 			return e
@@ -118,7 +120,9 @@ func (r Runtime) configure(snapshot config.Snapshot, o options, name string, rea
 		return snapshot, nil
 	}
 	answer := func(label, defaultValue string) (string, error) {
-		fmt.Fprintf(r.Error, "%s [%s]: ", label, defaultValue)
+		if _, e := fmt.Fprintf(r.Error, "%s [%s]: ", label, defaultValue); e != nil {
+			return "", e
+		}
 		line, e := readLine(reader, 64<<10)
 		if e != nil {
 			return "", e
@@ -129,61 +133,83 @@ func (r Runtime) configure(snapshot config.Snapshot, o options, name string, rea
 		}
 		return line, nil
 	}
-	start, e := answer("Start interactive configuration? y/N", "n")
+	start, e := answer("是否开始交互式配置？y/N", "n")
 	if e != nil || !strings.EqualFold(start, "y") {
 		return snapshot, e
 	}
 	values := map[string]string{}
-	fields := []struct{ key, label, defaultValue string }{{"ND_SOURCE", "Inventory source http/postgres", "http"}, {"ND_URL", "Inventory URL", "https://netdisco.example.invalid"}, {"NC_INCLUDE_HOSTS", "Include hosts", ""}, {"NC_EXCLUDE_HOSTS", "Exclude hosts", ""}, {"NC_INCLUDE_NAMES", "Include names", ""}, {"NC_EXCLUDE_NAMES", "Exclude names", ""}, {"NC_INCLUDE_MODELS", "Include models", ""}, {"NC_EXCLUDE_MODELS", "Exclude models", ""}, {"NC_NAME_MATCH", "Name matching contains/prefix/glob", "contains"}, {"NC_MODEL_MATCH", "Model matching contains/prefix/glob", "contains"}, {"NC_INCLUDE_VENDORS", "Include vendors", ""}, {"NC_EXCLUDE_VENDORS", "Exclude vendors", ""}}
-	if name == "topology" {
-		fields = append(fields, struct{ key, label, defaultValue string }{"NC_TOPOLOGY_PARALLEL", "Topology concurrency 1..500", "4"}, struct{ key, label, defaultValue string }{"NC_TOPOLOGY_DIRECTORY", "Topology report directory", "./topologys"})
-	} else {
-		fields = append(fields, struct{ key, label, defaultValue string }{"NC_PARALLEL", "Concurrency 1..500", "4"}, struct{ key, label, defaultValue string }{"NC_BACKUP_DIRECTORY", "Backup directory", "./backups"})
-		if o.mode == "tftp" {
-			fields = append(fields, struct{ key, label, defaultValue string }{"NC_TFTP_HOST", "TFTP server", ""})
-		}
+	for key, value := range o.public {
+		values[key] = value
 	}
 	result := snapshot
-	for _, field := range fields {
-		if field.key == "ND_URL" && values["ND_SOURCE"] == "postgres" {
-			continue
-		}
+	ask := func(key, label, defaultValue string, valid func(string) bool) error {
 		for {
-			v, e := answer(field.label, field.defaultValue)
-			if e != nil {
-				return snapshot, e
+			value, err := answer(label, defaultValue)
+			if err != nil {
+				return err
 			}
-			values[field.key] = v
-			overrides, e := config.FromEnvironment(values)
-			if e == nil {
-				result, e = config.Load(config.Options{Name: name, CWD: r.CWD, Home: r.Home, Program: r.Program, Directories: []string{}, Defaults: snapshot.Public(), Overrides: overrides, Environment: map[string]string{}, AllowMissing: true})
-			}
-			if e == nil {
-				var services *bootstrap.Services
-				services, e = bootstrap.New(result, func(string) string { return "" })
-				if services != nil {
-					services.Close()
+			if !valid(value) {
+				if _, err = fmt.Fprintln(r.Error, "值无效，请重新输入。"); err != nil {
+					return err
 				}
+				continue
 			}
-			if e == nil && field.key == "ND_SOURCE" && v != "http" && v != "postgres" {
-				e = config.ErrInvalid
-			}
-			if e == nil && field.key == "ND_URL" {
-				u, err := url.Parse(v)
-				if err != nil || u.Host == "" || u.Scheme != "https" && u.Scheme != "http" {
-					e = config.ErrInvalid
-				}
-			}
-			if e == nil {
-				break
-			}
-			fmt.Fprintln(r.Error, "Invalid value; enter it again.")
+			values[key] = value
+			return nil
 		}
 	}
+	source, _ := snapshot.Value("netdisco.source").(string)
+	if source == "" {
+		source = "http"
+	}
+	urlValue, _ := snapshot.Value("netdisco.url").(string)
+	query, _ := snapshot.Value("netdisco.query").(string)
+	fields, _ := snapshot.Sources()["fields"].(map[string]string)
+	if source == "http" && urlValue == "" && query == "" && fields["/netdisco/source"] == "default" {
+		if e = ask("ND_SOURCE", "清单来源 http/postgres", source, func(v string) bool { return v == "http" || v == "postgres" }); e != nil {
+			return snapshot, e
+		}
+		source = values["ND_SOURCE"]
+	}
+	if source == "http" && urlValue == "" {
+		if e = ask("ND_URL", "清单服务地址", "", func(v string) bool {
+			u, err := url.Parse(v)
+			return err == nil && u.Host != "" && u.User == nil && (u.Scheme == "https" || u.Scheme == "http")
+		}); e != nil {
+			return snapshot, e
+		}
+	}
+	if source == "postgres" && query == "" {
+		if e = ask("ND_QUERY", "PostgreSQL 只读清单查询", "", func(v string) bool { return strings.TrimSpace(v) != "" }); e != nil {
+			return snapshot, e
+		}
+	}
+	if o.mode == "tftp" {
+		server, _ := snapshot.Value("tftp.server").(string)
+		servers, _ := snapshot.Value("tftp.servers").(map[string]any)
+		if server == "" && len(servers) == 0 {
+			if e = ask("NC_TFTP_HOST", "TFTP 服务器地址", "", func(v string) bool { return transfer.ValidateServer(v) == nil }); e != nil {
+				return snapshot, e
+			}
+			server = values["NC_TFTP_HOST"]
+		}
+		root, _ := snapshot.Value("tftp.verification_root").(string)
+		roots, _ := snapshot.Value("tftp.verification_roots").(map[string]any)
+		if server != "" && root == "" && roots[server] == nil {
+			if e = ask("NC_TFTP_ROOT", "TFTP 归档根目录（本地路径或 ssh://用户@服务器/目录）", "", func(v string) bool { _, err := transfer.VerificationRoot(v); return err == nil }); e != nil {
+				return snapshot, e
+			}
+		}
+	}
+
 	// Keep the originally selected config/env paths and environment precedence.
 	overrides, e := config.FromEnvironment(values)
 	if e != nil {
 		return snapshot, e
 	}
-	return config.Load(config.Options{Name: name, CWD: r.CWD, Home: r.Home, Program: r.Program, Directories: r.Directories, ConfigFile: o.config, EnvFile: o.envFile, Defaults: snapshot.Public(), Overrides: overrides, Environment: r.Environment, AllowMissing: true})
+	result, e = config.Load(config.Options{Name: name, CWD: r.CWD, Home: r.Home, Program: r.Program, Directories: r.Directories, ConfigFile: o.config, EnvFile: o.envFile, Defaults: snapshot.Public(), Overrides: overrides, Environment: r.Environment, AllowMissing: true})
+	if e == nil {
+		_, e = bootstrap.New(result, nil)
+	}
+	return result, e
 }

@@ -1,10 +1,15 @@
 package archive
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -103,13 +108,14 @@ func TestPoolCloseCancelsActiveUpload(t *testing.T) {
 	}
 }
 
-func TestPoolLocalBatchReservationAndCollision(t *testing.T) {
+func TestPoolLocalDailyDirectoryReuse(t *testing.T) {
 	root := t.TempDir()
 	root, _ = filepath.EvalSymlinks(root)
 	base := "2026-10-26_12-34-56"
 	report := filepath.Join(t.TempDir(), base)
-	// Separate batches sharing a report name must reserve distinct suffixes.
-	for _, want := range []string{base, base + "_01", base + "_02"} {
+	// Multiple runs on the same day share one human-readable directory.
+	day := time.Now().In(time.FixedZone("UTC+8", 8*3600)).Format("2006-01-02")
+	for _, want := range []string{day, day, day} {
 		p, err := NewPool(PoolOptions{Root: root, Directory: report, Parallel: 5})
 		if err != nil {
 			t.Fatal(err)
@@ -129,7 +135,7 @@ func TestPoolLocalBatchReservationAndCollision(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, want := range []string{base + "_09", base + "_09_01"} {
+	for _, want := range []string{day, day} {
 		p, err := NewPool(PoolOptions{Root: root, Directory: filepath.Join(t.TempDir(), base+"_09"), Parallel: 1})
 		if err != nil {
 			t.Fatal(err)
@@ -191,6 +197,61 @@ func TestPoolCloseCancelsAndJoinsPrepare(t *testing.T) {
 	}
 }
 
+func TestRemotePoolCloseCancelsAndJoinsPrepare(t *testing.T) {
+	p, err := NewPool(PoolOptions{Root: "ssh://root@192.0.2.10/srv/tftp", Directory: t.TempDir(), Parallel: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.masters[0].cmd = &exec.Cmd{Process: &os.Process{Pid: 1}}
+	p.masters[0].reap = func(int, chan error) error { return nil }
+	entered := make(chan struct{})
+	p.clients[0].launch = func(ctx context.Context) (Channel, error) {
+		client, server := net.Pipe()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			defer server.Close()
+			request, readErr := readRequest(bufio.NewReader(server))
+			if readErr != nil || request.Action != "probe" {
+				return
+			}
+			close(entered)
+			<-ctx.Done()
+		}()
+		return Channel{Input: client, Output: client, Close: func() error {
+			_ = client.Close()
+			<-done
+			return nil
+		}}, nil
+	}
+	prepared := make(chan error, 1)
+	go func() { prepared <- p.PrepareWithProgress(context.Background(), nil) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		_ = p.Close()
+		t.Fatal("remote preflight did not enter the protocol probe")
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- p.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close blocked behind remote Prepare")
+	}
+	select {
+	case err := <-prepared:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Prepare after Close = %v, want cancellation", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("remote Prepare was not joined")
+	}
+}
+
 func TestPoolOptionDiagnosticsRetainExecutionPassword(t *testing.T) {
 	o := PoolOptions{Root: "ssh://archive@example.test/var/tftp", Directory: t.TempDir(), Parallel: 1, Password: "private password"}
 	_ = o.String()
@@ -205,5 +266,143 @@ func TestPoolOptionDiagnosticsRetainExecutionPassword(t *testing.T) {
 	defer p.Close()
 	if len(p.masters) != 1 || p.masters[0].password != o.Password || p.masters[0].endpoint.Path != "/var/tftp" {
 		t.Fatal("option diagnostics changed execution")
+	}
+}
+
+func TestRemotePoolSharesOneBatch(t *testing.T) {
+	p, err := NewPool(PoolOptions{Root: "ssh://root@192.0.2.10/srv/tftp", Directory: filepath.Join(t.TempDir(), "2026-11-04_14-34-44"), Parallel: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	want := p.clients[0].batch
+	for _, c := range p.clients {
+		if c.batch != want {
+			t.Fatal("one batch fragmented across SSH clients")
+		}
+	}
+}
+
+func TestRemotePoolPreparesClientsWithBoundedConcurrency(t *testing.T) {
+	p, err := NewPool(PoolOptions{Root: "ssh://root@192.0.2.10/srv/tftp", Directory: t.TempDir(), Parallel: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, master := range p.masters {
+		master.cmd = &exec.Cmd{Process: &os.Process{Pid: 1}}
+		master.reap = func(int, chan error) error { return nil }
+	}
+
+	var active, peak atomic.Int32
+	started := make(chan struct{}, len(p.clients))
+	release := make(chan struct{}, len(p.clients))
+	for _, client := range p.clients {
+		var preparing atomic.Bool
+		client.launch = func(ctx context.Context) (Channel, error) {
+			input, output := net.Pipe()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				defer output.Close()
+				request, readErr := readRequest(bufio.NewReader(output))
+				if readErr != nil {
+					return
+				}
+				if request.Action == "probe" && !preparing.Swap(true) {
+					current := active.Add(1)
+					for previous := peak.Load(); current > previous && !peak.CompareAndSwap(previous, current); previous = peak.Load() {
+					}
+					started <- struct{}{}
+					select {
+					case <-release:
+					case <-ctx.Done():
+						return
+					}
+				}
+				response := frame{OK: true, Phase: "ready"}
+				if request.Action == "probe" {
+					response.Version = Version
+					response.Capabilities = append([]string(nil), capabilities...)
+				}
+				encoded, _ := json.Marshal(response)
+				if _, writeErr := output.Write(append(encoded, '\n')); writeErr == nil && request.Action == "preflight" && preparing.Swap(false) {
+					active.Add(-1)
+				}
+			}()
+			return Channel{Input: input, Output: input, Close: func() error {
+				_ = input.Close()
+				<-done
+				return nil
+			}}, nil
+		}
+	}
+
+	prepared := make(chan error, 1)
+	progressEvents := make(chan PrepareProgress, len(p.clients)*4)
+	go func() {
+		prepared <- p.PrepareWithProgress(context.Background(), func(event PrepareProgress) {
+			progressEvents <- event
+		})
+	}()
+	for i := 0; i < min(4, len(p.clients)); i++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			for range len(p.clients) {
+				release <- struct{}{}
+			}
+			_ = p.Close()
+			t.Fatalf("only %d archive clients started before a probe completed", i)
+		}
+	}
+	select {
+	case <-started:
+		for range len(p.clients) {
+			release <- struct{}{}
+		}
+		_ = p.Close()
+		t.Fatal("archive pool exceeded four concurrent preflights")
+	case <-time.After(50 * time.Millisecond):
+	}
+	for range len(p.clients) {
+		release <- struct{}{}
+	}
+	select {
+	case err = <-prepared:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		_ = p.Close()
+		t.Fatal("archive preflight did not finish")
+	}
+	if got := peak.Load(); got != 4 {
+		t.Fatalf("peak in-flight archive preflights = %d, want 4", got)
+	}
+	var last PrepareProgress
+	previousCompleted := 0
+	for len(progressEvents) > 0 {
+		current := <-progressEvents
+		if current.Active < 0 || current.Active > 4 {
+			t.Fatalf("reported active preflights = %d, want 0..4", current.Active)
+		}
+		if current.Completed < previousCompleted {
+			t.Fatalf("completed count moved backwards: %d -> %d", previousCompleted, current.Completed)
+		}
+		previousCompleted = current.Completed
+		last = current
+	}
+	if last.Completed != len(p.clients) || last.Total != len(p.clients) || last.Active != 0 || last.Workers != 4 || last.Stage != PrepareStageReady {
+		t.Fatalf("final preflight progress = %+v", last)
+	}
+	var reused []PrepareProgress
+	if err := p.PrepareWithProgress(context.Background(), func(event PrepareProgress) { reused = append(reused, event) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(reused) != 1 || reused[0].Completed != len(p.clients) || reused[0].Total != len(p.clients) || reused[0].Workers != 4 || reused[0].Stage != PrepareStageReady {
+		t.Fatalf("already-prepared progress = %+v", reused)
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -33,7 +33,7 @@ func TestFrozenRubyTransferCommandsAndReplies(t *testing.T) {
 			if want.Source != nil {
 				source = *want.Source
 			}
-			command := transferCommand(vendor, "192.0.2.1", TFTPOptions{Server: "192.0.2.9", Path: want.Path, SourceFile: source}, true)
+			command := tftpPolicyForTest(t, vendor).Command("192.0.2.1", TFTPOptions{Server: "192.0.2.9", Path: want.Path, SourceFile: source, Timeout: 180 * time.Second}, true)
 			if len(want.Commands) != 1 {
 				t.Fatal("command count changed")
 			}

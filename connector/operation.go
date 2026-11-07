@@ -79,6 +79,7 @@ func (o *Operation) SaveConfig(ctx context.Context, opts ExecuteOptions) (Result
 	return o.device.saveConfig(ctx, opts)
 }
 
-func (o *Operation) CurrentPrompt() string { return o.device.CurrentPrompt() }
-func (o *Operation) ProfileName() string   { return o.device.ProfileName() }
-func (o *Operation) Host() string          { return o.device.Host() }
+func (o *Operation) RawPrompt() string       { return o.device.RawPrompt() }
+func (o *Operation) Prompt() (string, error) { return o.device.Prompt() }
+func (o *Operation) ProfileName() string     { return o.device.ProfileName() }
+func (o *Operation) Host() string            { return o.device.Host() }

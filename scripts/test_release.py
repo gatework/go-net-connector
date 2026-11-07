@@ -13,7 +13,7 @@ import tempfile
 import unittest
 
 SCRIPT = Path(__file__).with_name('release.py').resolve()
-BINS = ('net-backup', 'net-backup-batch', 'net-backup-tftp', 'net-topology', 'net-connector-archive')
+BINS = ('netman', 'tftp-archive')
 
 
 def command(root, *args):
@@ -135,7 +135,7 @@ class ReleaseTests(unittest.TestCase):
         verified = self.release('verify', '--sha', self.sha, '--version', 'v0.1.0')
         self.assertEqual(verified.returncode, 0, verified.stderr)
         # An untracked build input must never leak into committed-tree releases.
-        untracked = self.root / 'cmd/net-backup/untracked.go'
+        untracked = self.root / 'cmd/netman/untracked.go'
         untracked.write_text('deliberately invalid Go source')
         self.addCleanup(untracked.unlink)
         second = Path(self.case.name) / 'second'
@@ -221,11 +221,11 @@ class ReleaseTests(unittest.TestCase):
                 path = next(self.output.glob('*_linux_amd64.tar.gz'))
                 def mutate(entries):
                     if mutation == 'missing':
-                        return [(m,b) for m,b in entries if m.name != 'bin/net-backup']
+                        return [(m,b) for m,b in entries if m.name != 'bin/netman']
                     if mutation == 'extra':
                         m = tarfile.TarInfo('bin/unexpected'); m.mode = 0o755
                         return entries + [(m,b'wrong')]
-                    return [(m, b'v0.2.0\n' if mutation == 'version' and m.name == 'VERSION' else b'corrupt' if mutation == 'bytes' and m.name == 'bin/net-backup' else b) for m,b in entries]
+                    return [(m, b'v0.2.0\n' if mutation == 'version' and m.name == 'VERSION' else b'corrupt' if mutation == 'bytes' and m.name == 'bin/netman' else b) for m,b in entries]
                 self.rewrite_archive(path, mutate)
                 self.assertNotEqual(self.release('verify', '--sha', self.sha).returncode, 0)
                 shutil.rmtree(self.output)
@@ -269,18 +269,18 @@ class ReleaseTests(unittest.TestCase):
                 self.good_copy()
                 path = next(self.output.glob('*_linux_amd64.tar.gz'))
                 with tarfile.open(path) as archive:
-                    content = archive.extractfile('bin/net-backup').read()
+                    content = archive.extractfile('bin/netman').read()
                 if mutation == 'version':
                     content = content.replace(b'go-net-connector v0.1.0 revision ', b'go-net-connector v0.2.0 revision ')
                 elif mutation == 'revision':
                     content = content.replace(self.sha.encode(), b'0' * 40)
                 else:
                     with tarfile.open(next(self.output.glob('*_darwin_amd64.tar.gz'))) as archive:
-                        content = archive.extractfile('bin/net-backup').read()
-                self.rewrite_archive(path, lambda entries: [(m, content if m.name == 'bin/net-backup' else b) for m,b in entries])
+                        content = archive.extractfile('bin/netman').read()
+                self.rewrite_archive(path, lambda entries: [(m, content if m.name == 'bin/netman' else b) for m,b in entries])
                 manifest_path = self.output / 'MANIFEST.json'
                 manifest = json.loads(manifest_path.read_text())
-                manifest['platforms']['linux_amd64']['bin/net-backup'].update(sha256=hashlib.sha256(content).hexdigest(), size=len(content))
+                manifest['platforms']['linux_amd64']['bin/netman'].update(sha256=hashlib.sha256(content).hexdigest(), size=len(content))
                 manifest_path.write_text(json.dumps(manifest))
                 self.rehash()
                 result = self.release('verify', '--sha', self.sha)

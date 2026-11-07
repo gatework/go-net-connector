@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sync"
 	"testing"
@@ -23,7 +22,7 @@ import (
 )
 
 func TestFleetRetainsArtifactAndIsolatesCallback(t *testing.T) {
-	rules, _ := NewRules(RuleOptions{}, vendors.Profile)
+	rules, _ := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 	p, _ := NewPlan([]inventory.Device{{IP: "192.0.2.1", Vendor: "h3c"}, {IP: "192.0.2.2", Vendor: "h3c"}}, rules, PlanOptions{Mode: "backup"})
 	b, e := Run(context.Background(), p, RunOptions{Workers: 1, Run: func(_ context.Context, task Task) (Artifact, error) {
 		a := Artifact{Backup: &connector.BackupReceipt{Path: task.Device.Host, File: storage.Receipt{State: "committed"}}}
@@ -41,7 +40,7 @@ func TestFleetRetainsArtifactAndIsolatesCallback(t *testing.T) {
 	}
 }
 func TestFleetCancelStopsDispatch(t *testing.T) {
-	rules, _ := NewRules(RuleOptions{}, vendors.Profile)
+	rules, _ := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 	p, _ := NewPlan([]inventory.Device{{IP: "192.0.2.1", Vendor: "h3c"}, {IP: "192.0.2.2", Vendor: "h3c"}}, rules, PlanOptions{Mode: "backup"})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -64,7 +63,7 @@ func TestReportSelectedIgnoresOnlyKnownSkips(t *testing.T) {
 }
 
 func TestMissingCredentialsIsExplicitSkip(t *testing.T) {
-	rules, _ := NewRules(RuleOptions{}, vendors.Profile)
+	rules, _ := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 	plan, _ := NewPlan([]inventory.Device{{IP: "192.0.2.1", Vendor: "h3c"}}, rules, PlanOptions{Mode: "backup"})
 	batch, e := Run(context.Background(), plan, RunOptions{Run: func(context.Context, Task) (Artifact, error) { return Artifact{}, ErrMissingCredentials }})
 	if e != nil || batch.Outcomes()[0].Status != "missing_credentials" || batch.Outcomes()[0].ErrorType != "" {
@@ -91,11 +90,13 @@ func TestFleetBackupCompletionRequiresExpectedMode(t *testing.T) {
 		{"backup partial in transfer", "tftp", Artifact{Backup: &connector.BackupReceipt{File: storage.Receipt{State: "durable"}}}, errors.New("private"), "failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rules, err := NewRules(RuleOptions{}, vendors.Profile)
+			rules, err := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 			if err != nil {
 				t.Fatal(err)
 			}
-			p, err := NewPlan([]inventory.Device{{IP: "192.0.2.1", Vendor: "h3c"}}, rules, PlanOptions{Mode: tc.mode, Target: func(Record) (Target, error) { return Target{Server: "192.0.2.9", Path: "config.txt"}, nil }})
+			p, err := NewPlan([]inventory.Device{{IP: "192.0.2.1", Vendor: "h3c"}}, rules, PlanOptions{Mode: tc.mode, Target: func(Record) (transfer.Target, error) {
+				return transfer.Target{TFTPOptions: transfer.TFTPOptions{Server: "192.0.2.9", Path: "config.txt"}}, nil
+			}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -114,7 +115,7 @@ func TestFleetBackupCompletionRequiresExpectedMode(t *testing.T) {
 	}
 }
 func TestFleetSecondConnectorBackupSucceedsWithoutRewrite(t *testing.T) {
-	profile := connector.Profile{Name: "fixture", LoginPrompt: regexp.MustCompile(`sw#\s*$`), CommandPrompt: regexp.MustCompile(`sw#\s*$`), ConfigCommands: []string{"show config"}}
+	profile := connector.Profile{Name: "fixture", LoginPrompt: testPattern(`sw#\s*$`), CommandPrompt: testPattern(`sw#\s*$`), ConfigCommands: []string{"show config"}}
 	done := make(chan struct{})
 	d, err := connector.New(profile, connector.ConnectionConfig{Host: "192.0.2.1", CommandTimeout: time.Second, LoginTimeout: time.Second}, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
 		a, b := net.Pipe()
@@ -155,7 +156,7 @@ func TestFleetSecondConnectorBackupSucceedsWithoutRewrite(t *testing.T) {
 	if err := os.Chtimes(path, when, when); err != nil {
 		t.Fatal(err)
 	}
-	rules, err := NewRules(RuleOptions{HostOverrides: map[string]string{"192.0.2.1": "fixture"}}, func(string) (connector.Profile, error) { return profile, nil })
+	rules, err := NewRules(RuleOptions{HostOverrides: map[string]string{"192.0.2.1": "fixture"}}, profileRegistry{"fixture": profile})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,11 +189,13 @@ func TestFleetSecondConnectorBackupSucceedsWithoutRewrite(t *testing.T) {
 
 func TestFleetClonesTransferRequestedPath(t *testing.T) {
 	requested := "config.txt"
-	rules, err := NewRules(RuleOptions{}, vendors.Profile)
+	rules, err := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := NewPlan([]inventory.Device{{IP: "192.0.2.1", Vendor: "h3c"}}, rules, PlanOptions{Mode: "tftp", Target: func(Record) (Target, error) { return Target{Server: "192.0.2.9", Path: requested}, nil }})
+	p, err := NewPlan([]inventory.Device{{IP: "192.0.2.1", Vendor: "h3c"}}, rules, PlanOptions{Mode: "tftp", Target: func(Record) (transfer.Target, error) {
+		return transfer.Target{TFTPOptions: transfer.TFTPOptions{Server: "192.0.2.9", Path: requested}}, nil
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +219,7 @@ func TestFleetClonesTransferRequestedPath(t *testing.T) {
 }
 
 func TestOutcomeSurvivesObserverGoexit(t *testing.T) {
-	rules, err := NewRules(RuleOptions{}, vendors.Profile)
+	rules, err := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +236,7 @@ func TestOutcomeSurvivesObserverGoexit(t *testing.T) {
 }
 
 func TestObserverGoexitReleasesOtherObservers(t *testing.T) {
-	rules, err := NewRules(RuleOptions{}, vendors.Profile)
+	rules, err := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 	if err != nil {
 		t.Fatal(err)
 	}

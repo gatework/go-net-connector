@@ -10,7 +10,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -30,15 +29,15 @@ func fixtureRuntime(t *testing.T) (Runtime, *bytes.Buffer, *bytes.Buffer) {
 func TestInvalidNumericAndModeFlagsAreOffline(t *testing.T) {
 	for _, args := range [][]string{{"--sample", "0"}, {"--parallel", "0"}, {"--limit", "0"}, {"--apply", "--plan"}, {"--ask-password", "--stdin-credentials"}, {"--host", "192.0.2.0/24"}} {
 		r, _, errout := fixtureRuntime(t)
-		r.Args = args
-		if code := r.Run(t.Context(), "net-topology"); code != 2 {
+		r.Args = append([]string{"topology", "plan"}, args...)
+		if code := r.Run(t.Context()); code != 2 {
 			t.Fatal(args, code, errout.String())
 		}
 	}
 }
 func TestInventoryOnlyNeverConstructsDevice(t *testing.T) {
 	r, out, errout := fixtureRuntime(t)
-	r.Args = []string{"--inventory-only"}
+	r.Args = []string{"inventory", "list"}
 	r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) {
 		return []inventory.Device{{IP: "192.0.2.1", Vendor: "cisco", OS: "ios"}}, nil
 	})
@@ -46,7 +45,7 @@ func TestInventoryOnlyNeverConstructsDevice(t *testing.T) {
 		t.Fatal("constructed device")
 		return nil, nil
 	}
-	if code := r.Run(t.Context(), "net-backup"); code != 0 || !strings.Contains(out.String(), "192.0.2.1") {
+	if code := r.Run(t.Context()); code != 0 || !strings.Contains(out.String(), "192.0.2.1") {
 		t.Fatal(code, out.String(), errout.String())
 	}
 }
@@ -54,7 +53,7 @@ func TestStdinCredentialsOverrideVendorAndRequireRUN(t *testing.T) {
 	for _, run := range []string{"STOP", "RUN"} {
 		t.Run(run, func(t *testing.T) {
 			r, _, errout := fixtureRuntime(t)
-			r.Args = []string{"--stdin-credentials", "--all"}
+			r.Args = []string{"backup", "run", "--stdin-credentials", "--all"}
 			r.Environment = map[string]string{"NC_CISCO_IOS_USERNAME": "old", "NC_CISCO_IOS_PASSWORD": "old"}
 			r.Input = strings.NewReader(`{"netdisco_username":"nd","netdisco_password":"nd-secret","device_username":"new","device_password":"new-secret"}` + "\n" + run + "\n")
 			r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) {
@@ -68,7 +67,7 @@ func TestStdinCredentialsOverrideVendorAndRequireRUN(t *testing.T) {
 				}
 				return nil, fmt.Errorf("expected fixture error")
 			}
-			code := r.Run(t.Context(), "net-backup")
+			code := r.Run(t.Context())
 			if run == "STOP" && calls != 0 || run == "RUN" && (calls != 1 || code != 1) {
 				t.Fatal(code, calls, errout.String())
 			}
@@ -79,14 +78,14 @@ func TestTFTPVerifiedLocalArchiveEndToEnd(t *testing.T) {
 	r, out, errout := fixtureRuntime(t)
 	root := t.TempDir()
 	root, _ = filepath.EvalSymlinks(root)
-	r.Args = []string{"--json", "--tftp-server", "192.0.2.9", "--tftp-root", root, "--success-policy", "verified", "--username", "user", "--password", "private-secret"}
+	r.Args = []string{"backup", "tftp", "--json", "--tftp-server", "192.0.2.9", "--tftp-root", root, "--success-policy", "verified", "--username", "user", "--password", "private-secret"}
 	r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) {
 		return []inventory.Device{{IP: "192.0.2.1", Name: "edge", Vendor: "cisco", OS: "nxos"}}, nil
 	})
 	var uploads atomic.Int32
 	peers := make(chan struct{})
 	r.DeviceFactory = func(_ connector.Profile, c connector.ConnectionConfig) (*connector.Device, error) {
-		return connector.New(connector.Profile{Name: "cisco_nxos", LoginPrompt: regexp.MustCompile(`sw#\s*$`), CommandPrompt: regexp.MustCompile(`sw#\s*$`)}, c, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
+		return connector.New(connector.Profile{Name: "cisco_nxos", LoginPrompt: testPattern(`sw#\s*$`), CommandPrompt: testPattern(`sw#\s*$`)}, c, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
 			a, b := net.Pipe()
 			go func() {
 				defer close(peers)
@@ -117,7 +116,7 @@ func TestTFTPVerifiedLocalArchiveEndToEnd(t *testing.T) {
 			return a, nil
 		}))
 	}
-	if code := r.Run(t.Context(), "net-backup-tftp"); code != 0 {
+	if code := r.Run(t.Context()); code != 0 {
 		t.Fatal(code, out.String(), errout.String())
 	}
 	select {

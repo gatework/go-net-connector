@@ -45,47 +45,48 @@ func (s *Services) validatePolicy() error {
 			}
 		}
 	}
-	if v := p.Value("netdisco.inventory_timeout"); v != nil && duration(p, "netdisco.inventory_timeout", 0) <= 0 {
+	if v := p.Value("netdisco.inventory_timeout"); v != nil && durationValue(p, "netdisco.inventory_timeout") <= 0 {
 		return config.ErrInvalid
 	}
-	if duration(p, "netdisco.cache_ttl", 0) < 0 {
+	if durationValue(p, "netdisco.cache_ttl") < 0 {
 		return config.ErrInvalid
 	}
-	if n := number(p, "topology.parallel", 4); n < 1 || n > 500 {
+	if p.Value("topology.parallel") != nil {
+		if n := integerValue(p, "topology.parallel"); n < 1 || n > 500 {
+			return config.ErrInvalid
+		}
+	}
+	if n := integerValue(p, "topology.limit"); n < 0 {
 		return config.ErrInvalid
 	}
-	if n := number(p, "topology.limit", 0); n < 0 {
-		return config.ErrInvalid
-	}
-	switch str(p, "netdisco.source", "http") {
+	switch stringValue(p, "netdisco.source") {
 	case "http":
 		if p.Value("netdisco.query") != nil || p.Value("netdisco.query_params") != nil {
 			return config.ErrInvalid
 		}
-		if raw := str(p, "netdisco.url", ""); raw != "" {
+		if raw := stringValue(p, "netdisco.url"); raw != "" {
 			u, e := url.Parse(raw)
-			if e != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Scheme != "https" && !(u.Scheme == "http" && boolean(p, "netdisco.allow_insecure_http", false)) {
+			if e != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Scheme != "https" && !(u.Scheme == "http" && boolValue(p, "netdisco.allow_insecure_http")) {
 				return config.ErrInvalid
 			}
 		}
 	case "postgres":
 		params, _ := p.Value("netdisco.query_params").([]any)
-		if _, e := netdisco.NewPostgres(netdisco.PostgresOptions{Connection: "host=localhost user=preflight dbname=preflight sslmode=disable", Query: str(p, "netdisco.query", ""), Parameters: params, Limits: s.limits()}); e != nil {
+		if _, e := netdisco.NewPostgres(netdisco.PostgresOptions{Connection: "host=localhost user=preflight dbname=preflight sslmode=disable", Query: stringValue(p, "netdisco.query"), Parameters: params, Limits: s.limits()}); e != nil {
 			return e
 		}
 	default:
 		return config.ErrInvalid
 	}
-	if n := number(p, "netdisco.db_port", 5432); n < 1 || n > 65535 {
+	if n := integerValue(p, "netdisco.db_port"); n < 1 || n > 65535 {
 		return config.ErrInvalid
 	}
-	if n := number(p, "netdisco.db_connect_timeout", 10); n < 1 {
+	if n := integerValue(p, "netdisco.db_connect_timeout"); n < 1 {
 		return config.ErrInvalid
 	}
-	mode := str(p, "netdisco.db_sslmode", "")
+	mode := stringValue(p, "netdisco.db_sslmode")
 	if mode != "" && !strings.Contains("|disable|allow|prefer|require|verify-ca|verify-full|", "|"+mode+"|") {
 		return config.ErrInvalid
 	}
-	_, e := s.TFTPPolicy()
-	return e
+	return nil
 }

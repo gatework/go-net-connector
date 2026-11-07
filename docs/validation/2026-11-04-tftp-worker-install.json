@@ -1,0 +1,33 @@
+{
+  "verified_at": "2026-11-04T06:34:15.576834+00:00",
+  "server": "10.132.12.51",
+  "worker": "/usr/local/bin/net-connector-archive",
+  "sha256": "89b2058702b812606e0bba9909988922bf67a246afdf23db4b317300c9028671",
+  "identity": "go-net-connector development local-paired source bb7ddee2744574e9",
+  "probe": {
+    "ok": true,
+    "phase": "ready",
+    "version": 1,
+    "capabilities": [
+      "target_lock",
+      "preserve_previous",
+      "stable_sha256",
+      "binary_delivery",
+      "confirmed_cleanup"
+    ]
+  },
+  "preflight": {
+    "ok": true,
+    "phase": "ready",
+    "version": 1,
+    "capabilities": [
+      "target_lock",
+      "preserve_previous",
+      "stable_sha256",
+      "binary_delivery",
+      "confirmed_cleanup"
+    ]
+  },
+  "batch": "2026-11-04_14-34-15",
+  "device_tasks_started": 0
+}

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gatework/go-net-connector/transfer"
@@ -16,6 +18,22 @@ import (
 type PoolOptions struct {
 	Root, Directory, WorkerPath, Password string
 	Parallel                              int
+}
+
+// PrepareStage identifies the safe phase of archive service preparation.
+type PrepareStage string
+
+const (
+	PrepareStageSSH      PrepareStage = "ssh"
+	PrepareStageProtocol PrepareStage = "protocol"
+	PrepareStageReady    PrepareStage = "ready"
+)
+
+// PrepareProgress reports bounded archive preparation metadata.
+type PrepareProgress struct {
+	Completed, Total, Active int
+	Workers                  int
+	Stage                    PrepareStage
 }
 
 type Pool struct {
@@ -70,6 +88,9 @@ func NewPool(o PoolOptions) (*Pool, error) {
 		if e != nil {
 			return nil, e
 		}
+		if len(p.clients) > 0 {
+			client.batch = p.clients[0].batch
+		}
 		p.clients = append(p.clients, client)
 		for i := 0; i < count; i++ {
 			p.available <- client
@@ -82,6 +103,15 @@ func NewPool(o PoolOptions) (*Pool, error) {
 // Prepare preflights every master, protocol version and archive directory.
 // Close can cancel and join this work even when the caller supplied no deadline.
 func (p *Pool) Prepare(ctx context.Context) error {
+	return p.prepare(ctx, nil)
+}
+
+// PrepareWithProgress prepares the pool and reports stage counts without exposing credentials or protocol bodies.
+func (p *Pool) PrepareWithProgress(ctx context.Context, observe func(PrepareProgress)) error {
+	return p.prepare(ctx, observe)
+}
+
+func (p *Pool) prepare(ctx context.Context, observe func(PrepareProgress)) error {
 	for {
 		p.mu.Lock()
 		if p.closed {
@@ -89,7 +119,11 @@ func (p *Pool) Prepare(ctx context.Context) error {
 			return ErrArchive
 		}
 		if p.prepared {
+			progress := PrepareProgress{Completed: len(p.clients), Total: len(p.clients), Workers: p.preparationWorkers(), Stage: PrepareStageReady}
 			p.mu.Unlock()
+			if observe != nil {
+				observe(progress)
+			}
 			return nil
 		}
 		if p.preparing {
@@ -108,7 +142,7 @@ func (p *Pool) Prepare(ctx context.Context) error {
 		p.prepareCancel = cancel
 		p.mu.Unlock()
 
-		err := p.prepareAll(prepCtx)
+		err := p.prepareAll(prepCtx, observe)
 		cancel()
 		p.mu.Lock()
 		if p.closed && err == nil {
@@ -126,7 +160,7 @@ func (p *Pool) Prepare(ctx context.Context) error {
 	}
 }
 
-func (p *Pool) prepareAll(ctx context.Context) error {
+func (p *Pool) prepareAll(ctx context.Context, observe func(PrepareProgress)) error {
 	if p.endpoint == nil {
 		batch, err := reserveLocalBatch(ctx, p.clients[0].root, p.clients[0].directory)
 		if err != nil {
@@ -135,21 +169,120 @@ func (p *Pool) prepareAll(ctx context.Context) error {
 		for _, client := range p.clients {
 			client.batch = batch
 		}
-	}
-	for i, client := range p.clients {
-		if err := ctx.Err(); err != nil {
-			return err
+		if observe != nil {
+			observe(PrepareProgress{Total: len(p.clients), Workers: 1, Stage: PrepareStageProtocol})
 		}
-		if p.endpoint != nil {
-			if err := p.masters[i].prepare(ctx); err != nil {
+		completed := 0
+		for _, client := range p.clients {
+			if err := ctx.Err(); err != nil {
 				return err
 			}
+			if observe != nil {
+				observe(PrepareProgress{Completed: completed, Total: len(p.clients), Active: 1, Workers: 1, Stage: PrepareStageProtocol})
+			}
+			err := client.Prepare(ctx)
+			if err != nil {
+				if observe != nil {
+					observe(PrepareProgress{Completed: completed, Total: len(p.clients), Workers: 1, Stage: PrepareStageProtocol})
+				}
+				return err
+			}
+			completed++
+			if observe != nil {
+				observe(PrepareProgress{Completed: completed, Total: len(p.clients), Workers: 1, Stage: PrepareStageProtocol})
+			}
 		}
-		if err := client.Prepare(ctx); err != nil {
-			return err
+		if observe != nil {
+			observe(PrepareProgress{Completed: completed, Total: len(p.clients), Workers: 1, Stage: PrepareStageReady})
 		}
+		return nil
+	}
+
+	return p.prepareRemote(ctx, observe)
+}
+
+func (p *Pool) prepareRemote(ctx context.Context, observe func(PrepareProgress)) error {
+	workerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var next atomic.Int64
+	var progressMu sync.Mutex
+	var completed, active int
+	workers := p.preparationWorkers()
+	report := func(stage PrepareStage, activeDelta, completedDelta int) {
+		progressMu.Lock()
+		active += activeDelta
+		completed += completedDelta
+		if observe != nil {
+			observe(PrepareProgress{Completed: completed, Total: len(p.clients), Active: active, Workers: workers, Stage: stage})
+		}
+		progressMu.Unlock()
+	}
+	var errorMu sync.Mutex
+	var firstErr error
+	recordError := func(err error) {
+		if err == nil {
+			return
+		}
+		errorMu.Lock()
+		if firstErr == nil {
+			firstErr = err
+			cancel()
+		}
+		errorMu.Unlock()
+	}
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			for {
+				if workerCtx.Err() != nil {
+					return
+				}
+				i := int(next.Add(1) - 1)
+				if i >= len(p.clients) {
+					return
+				}
+				report(PrepareStageSSH, 1, 0)
+				if err := p.masters[i].prepare(workerCtx); err != nil {
+					recordError(err)
+					report(PrepareStageSSH, -1, 0)
+					return
+				}
+				report(PrepareStageProtocol, 0, 0)
+				if err := p.clients[i].Prepare(workerCtx); err != nil {
+					recordError(err)
+					report(PrepareStageProtocol, -1, 0)
+					return
+				}
+				report(PrepareStageProtocol, -1, 1)
+			}
+		}()
+	}
+	wg.Wait()
+	errorMu.Lock()
+	err := firstErr
+	errorMu.Unlock()
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if observe != nil {
+		progressMu.Lock()
+		ready := PrepareProgress{Completed: completed, Total: len(p.clients), Workers: workers, Stage: PrepareStageReady}
+		progressMu.Unlock()
+		observe(ready)
 	}
 	return nil
+}
+
+func (p *Pool) preparationWorkers() int {
+	if p.endpoint == nil {
+		return 1
+	}
+	return min(4, len(p.clients))
 }
 
 // Upload borrows one of at most Parallel slots and returns it after the transaction.
@@ -274,4 +407,9 @@ func safeOptionURL(raw string) string {
 		return "[invalid URL]"
 	}
 	return u.Scheme + "://" + u.Host
+}
+
+// ArchiveDirectory returns the server directory after successful preparation.
+func (p *Pool) ArchiveDirectory() string {
+	return filepath.Join(p.clients[0].root, "archive", p.clients[0].batch)
 }

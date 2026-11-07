@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-const defaultWorkerPath = "/usr/local/bin/net-connector-archive"
+const defaultWorkerPath = "/usr/local/bin/tftp-archive"
 
 // sshMaster owns a single foreground ControlMaster and its private socket.
 // The password, when configured, is provided only to a private askpass helper.
@@ -100,7 +100,7 @@ func (m *sshMaster) prepare(ctx context.Context) (err error) {
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	if m.password != "" {
-		cmd.Env = append(os.Environ(), "SSH_ASKPASS="+filepath.Join(m.dir, "askpass"), "SSH_ASKPASS_REQUIRE=force", "DISPLAY=net-connector:0", "NC_ARCHIVE_ASKPASS_SECRET="+m.password)
+		cmd.Env = append(os.Environ(), "SSH_ASKPASS="+filepath.Join(m.dir, "askpass"), "SSH_ASKPASS_REQUIRE=force", "DISPLAY=netman:0", "NC_ARCHIVE_ASKPASS_SECRET="+m.password)
 	}
 	if err = cmd.Start(); err != nil {
 		return ErrArchive
@@ -117,7 +117,7 @@ func (m *sshMaster) prepare(ctx context.Context) (err error) {
 		checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		check := exec.CommandContext(checkCtx, "ssh", m.commandArgs(true, "-O", "check")...)
 		check.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		check.WaitDelay = 2 * time.Second
+		check.WaitDelay = 750 * time.Millisecond
 		check.Cancel = func() error {
 			if check.Process == nil {
 				return os.ErrProcessDone

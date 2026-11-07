@@ -27,7 +27,7 @@ func TestWorkerTransactionAndUnconfirmedStaging(t *testing.T) {
 			done := make(chan error, 1)
 			go func() { defer server.Close(); done <- Serve(context.Background(), server, server) }()
 			reader := bufio.NewReader(client)
-			send := func(v any) {
+			writeRequest := func(v any) {
 				t.Helper()
 				if e := json.NewEncoder(client).Encode(v); e != nil {
 					t.Fatal(e)
@@ -45,11 +45,11 @@ func TestWorkerTransactionAndUnconfirmedStaging(t *testing.T) {
 				}
 				return m
 			}
-			send(map[string]any{"root": root, "filename": "config.txt", "archive_name": "device.txt", "batch": "2026-10-25_12-00-00-ssh-0123456789abcdef"})
+			writeRequest(map[string]any{"root": root, "filename": "config.txt", "archive_name": "device.txt", "batch": "2026-10-25_12-00-00-ssh-0123456789abcdef"})
 			frame("ready")
 			data := []byte("new configuration\n")
 			os.WriteFile(filepath.Join(root, "config.txt"), data, 0600)
-			send(map[string]any{"action": "verify"})
+			writeRequest(map[string]any{"action": "verify"})
 			m := frame("archived")
 			if m["sha256"] != fmt.Sprintf("%x", sha256.Sum256(data)) {
 				t.Fatal(m)
@@ -60,10 +60,10 @@ func TestWorkerTransactionAndUnconfirmedStaging(t *testing.T) {
 			}
 			frame("delivered")
 			if cleanup {
-				send(map[string]any{"action": "cleanup", "sha256": m["sha256"]})
+				writeRequest(map[string]any{"action": "cleanup", "sha256": m["sha256"]})
 				frame("complete")
 			} else {
-				send(map[string]any{"action": "abort"})
+				writeRequest(map[string]any{"action": "abort"})
 			}
 			if e := <-done; e != nil {
 				t.Fatal(e)

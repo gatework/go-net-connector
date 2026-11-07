@@ -29,7 +29,6 @@ func TestInventoryReturnsPostgresConstructorError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(services.Close)
 	_, err = services.Inventory(t.Context(), "refresh")
 	var inventoryError *netdisco.InventoryError
 	if !errors.As(err, &inventoryError) || inventoryError.Code != "invalid_connection" {

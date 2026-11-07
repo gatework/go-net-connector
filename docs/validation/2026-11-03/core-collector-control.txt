@@ -1,0 +1,80 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandLogging/nil-10         	   15112	      8020 ns/op	    5128 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10        	   10000	     10281 ns/op	    7353 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10       	    9831	     11902 ns/op	   10802 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandLogging/nil-10         	   14496	      8313 ns/op	    5117 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10        	   10000	     10530 ns/op	    7280 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10       	   10000	     12154 ns/op	   10736 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandLogging/nil-10         	   13982	      8521 ns/op	    5152 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10        	   10000	     10642 ns/op	    7288 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10       	    9804	     12443 ns/op	   10763 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandLogging/nil-10         	   14066	      8496 ns/op	    5151 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10        	   10000	     10900 ns/op	    7273 B/op	     122 allocs/op
+BenchmarkCommandLogging/debug-10       	    8410	     13067 ns/op	   10733 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandLogging/nil-10         	   14154	      8466 ns/op	    5159 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10        	   10000	     10496 ns/op	    7298 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10       	    9658	     12123 ns/op	   10767 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandLogging/nil-10         	   14246	      8409 ns/op	    5104 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10        	   10000	     11086 ns/op	    7293 B/op	     122 allocs/op
+BenchmarkCommandLogging/debug-10       	    8305	     13940 ns/op	   10812 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandLogging/nil-10         	   13742	      8750 ns/op	    5092 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10        	   10000	     10920 ns/op	    7319 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10       	    9324	     12716 ns/op	   10715 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandLogging/nil-10         	   13642	      8688 ns/op	    5121 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10        	   10000	     10773 ns/op	    7316 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10       	    9954	     12524 ns/op	   10751 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandLogging/nil-10         	   13533	      8716 ns/op	    5175 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10        	   10000	     11004 ns/op	    7276 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10       	    8326	     12618 ns/op	   10768 B/op	     210 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/connector
+cpu: Apple M5
+BenchmarkCommandLogging/nil-10         	   13616	      8760 ns/op	    5141 B/op	      70 allocs/op
+BenchmarkCommandLogging/info-10        	   10000	     10984 ns/op	    7289 B/op	     123 allocs/op
+BenchmarkCommandLogging/debug-10       	    9651	     12605 ns/op	   10711 B/op	     210 allocs/op
+PASS

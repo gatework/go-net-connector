@@ -3,16 +3,22 @@ package transfer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
-// RemoteOptions describes a Junos FTP/SCP destination. Password is used only for
-// its scoped interaction and is never included in the command or receipt.
+// RemoteOptions describes a remote configuration destination. Password is used
+// only by the platform's scoped interaction and is never included in receipts.
 type RemoteOptions struct{ Server, Path, Username, Protocol, Password string }
+
+func (o RemoteOptions) dialectOptions() dialect.RemoteBackupOptions {
+	return dialect.RemoteBackupOptions{Server: o.Server, Path: o.Path, Username: o.Username, Protocol: o.Protocol}
+}
 
 func ValidateRemote(o RemoteOptions) error {
 	if o.Protocol != "" && o.Protocol != "ftp" && o.Protocol != "scp" || ValidateServer(o.Server) != nil || ValidatePath(o.Path) != nil || !vrfPattern.MatchString(o.Username) || strings.ContainsAny(o.Password, "\r\n\x00") {
@@ -21,13 +27,18 @@ func ValidateRemote(o RemoteOptions) error {
 	return nil
 }
 
-// RemoteBackup exports committed Junos configuration without changing candidate
-// configuration. The receipt establishes device-reported completion only.
-func RemoteBackup(ctx context.Context, d *connector.Device, o RemoteOptions) (result Result, err error) {
-	if d == nil {
+// RemoteBackup runs a platform-provided remote export capability. The receipt
+// establishes device-reported completion only.
+func RemoteBackup(ctx context.Context, registry dialect.Registry, d *connector.Device, o RemoteOptions) (result Result, err error) {
+	if registry == nil || len(registry.Names()) == 0 || d == nil {
 		return result, ErrInvalid
 	}
-	if d.ProfileName() != "juniper" {
+	declaration, err := registry.Lookup(d.ProfileName())
+	if err != nil {
+		return result, ErrUnsupported
+	}
+	policy, ok := declaration.(RemoteBackupPolicy)
+	if !ok {
 		return result, ErrUnsupported
 	}
 	if err = ValidateRemote(o); err != nil {
@@ -36,31 +47,23 @@ func RemoteBackup(ctx context.Context, d *connector.Device, o RemoteOptions) (re
 	if o.Protocol == "" {
 		o.Protocol = "scp"
 	}
-	destination := o.Protocol + "://" + o.Username + "@" + o.Server + "/" + o.Path
-	timeout := 180 * time.Second
-	command := connector.Command{Text: "show configuration | save " + destination, Timeout: &timeout, OutputSensitive: true}
-	if o.Password != "" {
-		command.Interactions = []connector.Interaction{{Pattern: regexp.MustCompile(`(?i)(?:password(?: for [^\r\n:]*)?):\s*$`), Reply: o.Password + "\n", Sensitive: true, Limit: 1}}
-	}
+	options := o.dialectOptions()
+	destination := policy.Destination(options)
+	command := policy.Command(options, o.Password)
 	err = d.WithOperation(ctx, func(ctx context.Context, op *connector.Operation) error {
 		r, e := op.ExecuteCommand(ctx, command, connector.ExecuteOptions{SkipPrivilege: true})
 		result.Steps = r.Steps()
-		lines, outputs, parseErr := evidence(result.Steps)
-		if parseErr != nil {
-			return parseErr
-		}
-		rejected := regexp.MustCompile(`(?mi)^[ \t]*(?:error:|(?:ftp|scp|ssh):\s|permission denied\b|lost connection\b)`)
-		for _, output := range outputs {
-			if rejected.MatchString(output) {
-				return &Error{Code: "transfer_failed", Phase: "remote_backup", cause: connector.ErrDevice}
+		lines, failureDetected, evidenceErr := inspectTransferEvidence(result.Steps, remoteRejected)
+		if evidenceErr != nil {
+			if errors.Is(evidenceErr, errEvidenceLimit) {
+				return &Error{Code: "evidence_limit_exceeded", Phase: "remote_backup", cause: errors.Join(evidenceErr, e)}
 			}
+			return errors.Join(evidenceErr, e)
 		}
-		success := regexp.MustCompile(`^Wrote [1-9][0-9]* lines of output to '` + regexp.QuoteMeta(destination) + `'$`)
-		confirmed := false
-		for _, line := range lines {
-			confirmed = confirmed || success.MatchString(strings.TrimSpace(line))
+		if failureDetected {
+			return &Error{Code: "transfer_failed", Phase: "remote_backup", cause: errors.Join(connector.ErrDevice, e)}
 		}
-		if !confirmed {
+		if !policy.Completed(lines, destination) {
 			if e != nil {
 				return e
 			}
@@ -73,6 +76,12 @@ func RemoteBackup(ctx context.Context, d *connector.Device, o RemoteOptions) (re
 		return nil
 	})
 	return result, err
+}
+
+var pattern = regexp.MustCompile(`(?i)(?:^|[\r\n])[ \t]*(?:error:|(?:ftp|scp|ssh):[ \t]+|permission denied\b|lost connection\b)`)
+
+func remoteRejected(command connector.Command, prompt, output string) bool {
+	return matchesEvidencePattern(command, prompt, output, pattern)
 }
 
 // MarshalJSON exposes operational metadata only; credentials remain available explicitly on the options.

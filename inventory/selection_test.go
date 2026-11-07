@@ -24,10 +24,20 @@ func TestAddressSetDoesNotExpandNetworks(t *testing.T) {
 	if len(set.intervals) > 3 {
 		t.Fatal("network expanded")
 	}
-	for _, bad := range []string{"192.0.2.20-10", "192.0.2.1-2001:db8::1", "0.0.0.0/33"} {
+	for _, bad := range []string{"192.0.2.20-10", "192.0.2.1-2001:db8::1", "0.0.0.0/33", "fe80::1%en0", "router.example"} {
 		if _, e = NewAddressSet([]string{bad}); e == nil {
 			t.Fatal(bad)
 		}
+	}
+}
+
+func TestAddressSetPreservesIPv4MappedAddressFamily(t *testing.T) {
+	set, err := NewAddressSet([]string{"::ffff:192.0.2.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !set.Contains("::ffff:192.0.2.1") || set.Contains("192.0.2.1") {
+		t.Fatal("IPv4-mapped IPv6 must retain its address family")
 	}
 }
 func TestSelectionIntersectionAndExclusions(t *testing.T) {

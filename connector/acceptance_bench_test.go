@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +19,7 @@ func BenchmarkCommandOutput(b *testing.B) {
 			b.SetBytes(int64(size))
 			for b.Loop() {
 				done := make(chan struct{})
-				d, e := New(Profile{Name: "benchmark", LoginPrompt: regexp.MustCompile(`sw#\s*$`), CommandPrompt: regexp.MustCompile(`sw#\s*$`)}, ConnectionConfig{Host: "fixture", MaxOutputBytes: int64(size + 1024), CommandTimeout: 30 * time.Second}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
+				d, e := New(Profile{Name: "benchmark", LoginPrompt: testPattern(`sw#\s*$`), CommandPrompt: testPattern(`sw#\s*$`)}, ConnectionConfig{Host: "fixture", MaxOutputBytes: int64(size + 1024), CommandTimeout: 30 * time.Second}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 					a, c := net.Pipe()
 					go func() {
 						defer close(done)
@@ -50,8 +49,8 @@ func BenchmarkCommandOutput(b *testing.B) {
 	}
 }
 func BenchmarkCommandPaged1000(b *testing.B) {
-	prompt := regexp.MustCompile(`sw#\s*$`)
-	pager := regexp.MustCompile(`--More--`)
+	prompt := testPattern(`sw#\s*$`)
+	pager := testPattern(`--More--`)
 	b.ReportAllocs()
 	for b.Loop() {
 		done := make(chan struct{})
@@ -97,7 +96,7 @@ func BenchmarkCommandMultiline(b *testing.B) {
 			b.SetBytes(int64(len(body)))
 			for b.Loop() {
 				done := make(chan struct{})
-				d, e := New(Profile{Name: "benchmark", LoginPrompt: regexp.MustCompile(`sw#\s*$`), CommandPrompt: regexp.MustCompile(`sw#\s*$`)}, ConnectionConfig{Host: "fixture", MaxOutputBytes: int64(size + 1024), CommandTimeout: 30 * time.Second}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
+				d, e := New(Profile{Name: "benchmark", LoginPrompt: testPattern(`sw#\s*$`), CommandPrompt: testPattern(`sw#\s*$`)}, ConnectionConfig{Host: "fixture", MaxOutputBytes: int64(size + 1024), CommandTimeout: 30 * time.Second}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 					a, c := net.Pipe()
 					go func() {
 						defer close(done)
@@ -134,7 +133,7 @@ func BenchmarkCommandLogging(b *testing.B) {
 			if level != "nil" {
 				cfg.Logger, cfg.LogLevel = io.Discard, level
 			}
-			prompt := regexp.MustCompile(`sw#\s*$`)
+			prompt := testPattern(`sw#\s*$`)
 			done := make(chan struct{})
 			d, err := New(Profile{Name: "benchmark", LoginPrompt: prompt, CommandPrompt: prompt}, cfg,
 				WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {

@@ -47,6 +47,9 @@ func Decode(input, name string) (text, detected string, err error) {
 		if utf8.ValidString(input) {
 			return input, "utf-8", nil
 		}
+		if truncatedUTF8Line(input) {
+			return "", "", ErrEncoding
+		}
 		// Bound detector work and skip potentially large ASCII configuration
 		// prefixes. Decode and validate the entire response below.
 		start := 0
@@ -88,13 +91,31 @@ func Decode(input, name string) (text, detected string, err error) {
 	if err != nil {
 		return "", "", ErrEncoding
 	}
-	// x/text decoders substitute U+FFFD for malformed input without an error.
-	// Accept a literal U+FFFD only when it round-trips to the original bytes.
-	if strings.ContainsRune(text, utf8.RuneError) {
+	// x/text may substitute invalid bytes without returning an error. Require
+	// byte-for-byte reversibility for every legacy conversion, including literal U+FFFD.
+	{
 		roundtrip, e := codec.NewEncoder().String(text)
 		if e != nil || roundtrip != input {
 			return "", "", ErrEncoding
 		}
 	}
 	return text, name, nil
+}
+
+// A valid UTF-8 line prefix followed by an unfinished rune is not evidence for a legacy encoding.
+func truncatedUTF8Line(input string) bool {
+	for line := range strings.SplitSeq(input, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		for len(line) > 0 {
+			r, n := utf8.DecodeRuneInString(line)
+			if r == utf8.RuneError && n == 1 {
+				if !utf8.FullRuneInString(line) {
+					return true
+				}
+				break
+			}
+			line = line[n:]
+		}
+	}
+	return false
 }

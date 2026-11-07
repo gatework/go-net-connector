@@ -2,8 +2,6 @@ package archive
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"io"
 	"path/filepath"
@@ -41,11 +39,7 @@ func NewClient(o ClientOptions) (*Client, error) {
 	if e != nil {
 		return nil, e
 	}
-	var random [8]byte
-	if _, e = rand.Read(random[:]); e != nil {
-		return nil, e
-	}
-	batch := time.Now().In(time.FixedZone("UTC+8", 8*3600)).Format("2006-01-02_15-04-05") + "-ssh-" + hex.EncodeToString(random[:])
+	batch := time.Now().In(time.FixedZone("UTC+8", 8*3600)).Format("2006-01-02")
 	return &Client{root: o.Root, directory: directory, batch: batch, launch: o.Launcher, timeout: o.Timeout, slots: make(chan struct{}, 4), prepareGate: make(chan struct{}, 1)}, nil
 }
 func (c *Client) channel(ctx context.Context, run func(*Protocol) error) (err error) {
@@ -152,7 +146,7 @@ func (c *Client) Upload(ctx context.Context, filename, archiveName string, uploa
 	c.mu.Lock()
 	prepared := c.prepared
 	c.mu.Unlock()
-	if !prepared || !safeName(filename) || !safeName(archiveName) || upload == nil {
+	if !prepared || !isSafeName(filename) || !isSafeName(archiveName) || upload == nil {
 		return receipt, ErrArchive
 	}
 	err = c.channel(ctx, func(p *Protocol) error {

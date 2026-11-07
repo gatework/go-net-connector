@@ -2,15 +2,9 @@ package archive
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"net"
-	"path/filepath"
-	"regexp"
 	"sync"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 // LocalLauncher runs the same pinned-directory transaction used by the remote
@@ -27,11 +21,11 @@ func LocalLauncher() Launcher {
 	}
 }
 
-var localBatchName = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:_\d{2,})?$`)
-
-// reserveLocalBatch atomically chooses one server archive directory for the
-// entire local pool. The reservation is never reused by another batch.
+// reserveLocalBatch prepares the shared daily directory without deleting history.
 func reserveLocalBatch(ctx context.Context, root, reportDirectory string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	dirs, err := openDirectories(root)
 	if err != nil {
 		return "", err
@@ -41,29 +35,9 @@ func reserveLocalBatch(ctx context.Context, root, reportDirectory string) (strin
 	if err != nil {
 		return "", err
 	}
-	base := filepath.Base(reportDirectory)
-	if !localBatchName.MatchString(base) {
-		base = time.Now().In(time.FixedZone("UTC+8", 8*3600)).Format("2006-01-02_15-04-05")
+	day := time.Now().In(time.FixedZone("UTC+8", 8*3600)).Format("2006-01-02")
+	if _, err := dirs.private(archive, day); err != nil {
+		return "", err
 	}
-	for suffix := 0; suffix < 10000; suffix++ {
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		candidate := base
-		if suffix != 0 {
-			candidate = fmt.Sprintf("%s_%02d", base, suffix)
-		}
-		err := unix.Mkdirat(archive, candidate, 0700)
-		if errors.Is(err, unix.EEXIST) {
-			continue
-		}
-		if err != nil {
-			return "", err
-		}
-		if err := unix.Fsync(archive); err != nil {
-			return "", err
-		}
-		return candidate, nil
-	}
-	return "", ErrArchive
+	return day, nil
 }

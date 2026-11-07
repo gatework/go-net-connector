@@ -16,7 +16,7 @@ func TestSaveRequiresProfileEvidenceAndPreservesCompletedStep(t *testing.T) {
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
-				if !strings.Contains(r.Output(), "saved") {
+				if !strings.Contains(testResultOutput(r), "saved") {
 					return ErrUnconfirmed
 				}
 				return nil

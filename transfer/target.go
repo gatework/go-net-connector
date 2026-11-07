@@ -1,21 +1,20 @@
 package transfer
 
 import (
-	"crypto/sha256"
-	"fmt"
-	"net/netip"
+	"errors"
 	"regexp"
 	"strings"
 
-	"github.com/gatework/go-net-connector/vendors"
+	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
-type TFTPOptions struct{ Server, Path, SourceFile, VRF, SourceInterface string }
+type TFTPOptions = dialect.TFTPOptions
 
+var filenameLabel = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 var serverPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$`)
 var pathPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$`)
 var sourcePattern = regexp.MustCompile(`^[A-Za-z0-9._:/-]+$`)
-var interfacePattern = regexp.MustCompile(`^([A-Za-z][A-Za-z-]*) ?([0-9][0-9/.:]*)$`)
 var vrfPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*$`)
 
 func ValidateServer(host string) error {
@@ -46,86 +45,55 @@ func ValidateSource(source string) error {
 	}
 	return nil
 }
-func Validate(vendor, deviceHost string, o TFTPOptions) error {
-	p, e := vendors.Profile(vendor)
-	if e != nil || !p.Capabilities.TFTP {
+func Validate(registry dialect.Registry, vendor, deviceHost string, o TFTPOptions) error {
+	if o.Timeout < 0 {
+		return ErrInvalid
+	}
+	if registry == nil {
+		return ErrUnsupported
+	}
+	d, e := registry.Lookup(vendor)
+	if e != nil {
+		return ErrUnsupported
+	}
+	tftp, ok := d.(TFTPPolicy)
+	if !ok {
 		return ErrUnsupported
 	}
 	if ValidateServer(o.Server) != nil || o.Path != "" && ValidatePath(o.Path) != nil || o.SourceFile != "" && ValidateSource(o.SourceFile) != nil || o.VRF != "" && !vrfPattern.MatchString(o.VRF) {
 		return ErrInvalid
 	}
-	if o.SourceFile != "" && vendor != "h3c" && vendor != "h3c_wireless" && vendor != "huawei" {
-		return ErrInvalid
+	if tftp.RequiresSourceFile() && o.SourceFile == "" {
+		return errors.Join(ErrInvalid, ErrSourceFileRequired)
 	}
-	if vendor == "huawei" && o.SourceFile == "" {
-		return ErrInvalid
-	}
-	if o.VRF != "" && vendor != "cisco_nxos" && vendor != "hillstone" {
-		return ErrInvalid
-	}
-	if vendor == "hillstone" && strings.Contains(o.Path, "/") {
-		return ErrInvalid
-	}
-	if vendor == "palo_alto" && o.Path != "" && o.Path != "running-config.xml" {
-		return ErrInvalid
-	}
-	if o.SourceInterface != "" {
-		switch vendor {
-		case "h3c", "h3c_wireless":
-			if o.SourceInterface == "management" {
-				a, e := netip.ParseAddr(deviceHost)
-				if e != nil || !a.Is4() {
-					return ErrInvalid
-				}
-			} else if !interfacePattern.MatchString(o.SourceInterface) {
-				return ErrInvalid
-			}
-		case "radware", "centec":
-			if o.SourceInterface != "management" && o.SourceInterface != "data" {
-				return ErrInvalid
-			}
-		default:
-			return ErrInvalid
+	if err := tftp.ValidateOptions(deviceHost, o); err != nil {
+		if errors.Is(err, connector.ErrUnsupported) {
+			return ErrUnsupported
 		}
+		return ErrInvalid
 	}
 	return nil
 }
-func Filename(vendor, host, label string) (string, error) {
-	p, e := vendors.Profile(vendor)
-	if e != nil || !p.Capabilities.TFTP {
+func Filename(registry dialect.Registry, vendor, host, label string) (string, error) {
+	if registry == nil {
 		return "", ErrUnsupported
 	}
-	if vendor == "palo_alto" {
-		return "running-config.xml", nil
+	d, e := registry.Lookup(vendor)
+	if e != nil {
+		return "", ErrUnsupported
 	}
-	extension := "cfg"
-	if vendor == "hillstone" {
-		extension = "dat"
+	tftp, ok := d.(TFTPPolicy)
+	if !ok {
+		return "", ErrUnsupported
 	}
-	if vendor == "radware" {
-		extension = "tgz"
+	name, err := tftp.Filename(host, label)
+	if err != nil || ValidatePath(name) != nil {
+		return "", ErrInvalid
 	}
-	address := regexp.MustCompile(`[^A-Za-z0-9._-]`).ReplaceAllString(host, "_")
-	suffix := address + "." + extension
-	if len(suffix) > 218 {
-		suffix = fmt.Sprintf("%x.%s", sha256.Sum256([]byte(host)), extension)
-	}
-	name := suffix
-	if label != "" {
-		for _, c := range label {
-			if c > 127 {
-				return "", ErrInvalid
-			}
-		}
-		if max := 220 - len(suffix) - 1; len(label) > max {
-			label = label[:max]
-		}
-		name = label + "-" + suffix
-	}
-	return name, ValidatePath(name)
+	return name, nil
 }
-func InventoryFilename(vendor, host, name string) (string, error) {
-	label := regexp.MustCompile(`[^A-Za-z0-9._-]+`).ReplaceAllString(name, "-")
+func InventoryFilename(registry dialect.Registry, vendor, host, name string) (string, error) {
+	label := filenameLabel.ReplaceAllString(name, "-")
 	if len(label) > 180 {
 		label = label[:180]
 	}
@@ -136,5 +104,5 @@ func InventoryFilename(vendor, host, name string) (string, error) {
 			label = "device"
 		}
 	}
-	return Filename(vendor, host, label)
+	return Filename(registry, vendor, host, label)
 }

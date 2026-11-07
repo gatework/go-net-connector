@@ -3,6 +3,7 @@ package connector
 import (
 	"encoding/json"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/gatework/go-net-connector/internal/terminal"
 	"github.com/gatework/go-net-connector/internal/textcodec"
@@ -19,6 +20,7 @@ type Response struct{ data *responseData }
 type responseData struct {
 	raw, rawPrompt, output, rendered, prompt, encoding string
 	outputErr, renderErr, promptErr                    error
+	rawWarning                                         *TextWarning
 }
 
 func (r Response) Raw() string {
@@ -97,4 +99,62 @@ func (r *responseData) convert() (diagnostic string, err error) {
 		return diagnostic, r.renderErr
 	}
 	return diagnostic, r.promptErr
+}
+
+// convertBackup preserves undecodable source bytes without weakening commands
+// used by configuration parsers. The original response remains immutable.
+func (r *responseData) convertBackup() (string, error) {
+	wire := r.output
+	diagnostic := r.raw
+	if !utf8.ValidString(r.raw) {
+		var count int
+		var offsets []int
+		diagnostic, _, count, offsets = textcodec.BackupViewSource(r.raw)
+		r.rawWarning = sourceWarning(r.raw, count, offsets)
+	}
+	if utf8.ValidString(wire) {
+		return r.convert()
+	}
+	visible, err := terminal.RenderEncoded([]byte(wire), false, "bytes")
+	if err != nil {
+		r.outputErr, r.renderErr, r.promptErr = err, err, err
+		return "", err
+	}
+	output, encoding, _ := textcodec.BackupView(visible)
+	r.encoding = encoding
+	r.output = output
+	r.rendered, r.renderErr = terminal.RenderString(output, true)
+	r.outputErr = nil
+	_, promptEncoding, promptErr := textcodec.Decode(r.rawPrompt, "auto")
+	if promptErr != nil {
+		r.promptErr = promptErr
+	} else {
+		r.prompt, r.promptErr = terminal.RenderEncoded([]byte(r.rawPrompt), true, promptEncoding)
+	}
+	// Device rejection checks inspect both pre-edit and visible text. Editing an
+	// error out of the terminal must never turn rejection into a successful backup.
+	if r.raw != wire {
+		diagnostic, _, _ = textcodec.BackupView(wire)
+	}
+	if r.renderErr != nil {
+		return diagnostic, r.renderErr
+	}
+	return diagnostic, r.promptErr
+}
+
+// convertOriginal is limited to explicit backup preservation; parsers retain strict decoding.
+func (r *responseData) convertOriginal() (string, error) {
+	output, err := terminal.RenderEncoded([]byte(r.output), false, "bytes")
+	if err != nil {
+		return "", err
+	}
+	prompt, err := terminal.RenderEncoded([]byte(r.rawPrompt), true, "auto")
+	if err != nil {
+		return "", err
+	}
+	r.output, r.rendered, r.prompt = output, output, prompt
+	r.outputErr, r.renderErr, r.promptErr = nil, nil, nil
+	r.encoding = "original-bytes"
+	diagnostic, _, _ := textcodec.BackupView(r.raw)
+	return diagnostic, nil
 }

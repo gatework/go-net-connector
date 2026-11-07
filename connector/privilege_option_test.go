@@ -1,14 +1,13 @@
 package connector
 
 import (
-	"regexp"
 	"testing"
 )
 
 func TestNativeTransferMaySkipPrivilege(t *testing.T) {
 	p := fixtureProfile()
 	p.PrivilegeCommand = "enable"
-	p.PrivilegePrompt = regexp.MustCompile(`sw#`)
+	p.PrivilegePrompt = testPattern(`sw#`)
 	d, sent := fixtureDevice(t, p, []string{"copy\r\ncomplete\r\nsw#"})
 	result, e := d.ExecuteCommand(t.Context(), Command{Text: "copy"}, ExecuteOptions{SkipPrivilege: true})
 	d.Close()

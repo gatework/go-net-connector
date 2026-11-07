@@ -1,0 +1,111 @@
+// Package dialect contains the leaf contracts shared by vendor drivers and
+// the workflows that consume them. It intentionally imports no workflow
+// package such as topology or transfer.
+package dialect
+
+import (
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/gatework/go-net-connector/connector"
+)
+
+var (
+	ErrUnsupported = errors.New("vendor dialect: unsupported behavior")
+	ErrParse       = errors.New("vendor dialect: unrecognized output")
+)
+
+// DiagnosticError carries stable machine-readable failure metadata across a
+// vendor-policy boundary without importing a workflow package.
+type DiagnosticError struct {
+	Code, Phase string
+	Cause       error
+}
+
+func (e *DiagnosticError) Error() string {
+	if e == nil {
+		return "vendor dialect: diagnostic unavailable"
+	}
+	return fmt.Sprintf("vendor dialect: %s (%s)", e.Code, e.Phase)
+}
+func (e *DiagnosticError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+func (e *DiagnosticError) DiagnosticCode() string {
+	if e == nil {
+		return ""
+	}
+	return e.Code
+}
+func (e *DiagnosticError) DiagnosticPhase() string {
+	if e == nil {
+		return ""
+	}
+	return e.Phase
+}
+
+// DiagnosticMetadata lets consumers preserve structured errors while keeping
+// the shared dialect package independent of business workflows.
+type DiagnosticMetadata interface {
+	error
+	DiagnosticCode() string
+	DiagnosticPhase() string
+}
+
+func NewDiagnosticError(code, phase string, cause error) error {
+	return &DiagnosticError{Code: code, Phase: phase, Cause: cause}
+}
+
+// Platform describes one authoritative CLI platform. Profile returns
+// a detached runtime declaration; callers may safely customize that copy.
+type Platform interface {
+	Name() string
+	Profile() connector.Profile
+}
+
+// Registry resolves immutable dialect objects by their canonical platform key.
+type Registry interface {
+	Names() []string
+	Lookup(name string) (Platform, error)
+}
+
+// InventoryIdentity contains the vendor, operating system and model reported
+// by an inventory source. Built-in registries normalize these values before
+// asking platform matchers to classify them.
+type InventoryIdentity struct {
+	Vendor, OS, Model string
+}
+
+// Neighbor is the workflow-neutral form of a discovered adjacency.
+type Neighbor struct {
+	LocalInterface    string `json:"local_interface"`
+	NeighborName      string `json:"neighbor_name"`
+	NeighborInterface string `json:"neighbor_interface"`
+	ChassisID         string `json:"chassis_id"`
+	Protocol          string `json:"protocol"`
+}
+
+// WriteMode describes the mode transitions around a platform's interface
+// description commands.
+type WriteMode struct{ Enter, Leave, InterfaceExit string }
+
+// TFTPOptions carries target-specific upload choices across the package
+// boundary without importing transfer.
+type TFTPOptions struct {
+	Server, Path, SourceFile, VRF, SourceInterface string
+	Timeout                                        time.Duration
+}
+
+type TFTPReceipt struct {
+	ConfigurationKind, Format, SourceFile string
+	IncludeRequestedPath                  bool
+}
+
+// RemoteBackupOptions carries options for a platform's native remote export.
+type RemoteBackupOptions struct {
+	Server, Path, Username, Protocol string
+}

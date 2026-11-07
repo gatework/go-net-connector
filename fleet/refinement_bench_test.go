@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/gatework/go-net-connector/inventory"
+	"github.com/gatework/go-net-connector/transfer"
 	"github.com/gatework/go-net-connector/vendors"
 )
 
@@ -19,7 +20,7 @@ func BenchmarkNewPlan(b *testing.B) {
 					rows[i].Vendor, rows[i].OS = "H3C", "comware"
 				}
 			}
-			rules, err := NewRules(RuleOptions{}, vendors.Profile)
+			rules, err := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -31,5 +32,35 @@ func BenchmarkNewPlan(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// BenchmarkTFTPPlanCapabilityPreflight1000 exercises the transfer behavior
+// interface without constructing connector profiles during TFTP planning.
+func BenchmarkTFTPPlanCapabilityPreflight1000(b *testing.B) {
+	rows := make([]inventory.Device, 1000)
+	for i := range rows {
+		rows[i] = inventory.Device{IP: fmt.Sprintf("10.%d.%d.%d", i>>16, (i>>8)&255, i&255), Vendor: "Cisco", OS: "ios"}
+		if i%3 == 0 {
+			rows[i].Vendor, rows[i].OS = "H3C", "comware"
+		}
+	}
+	rules, err := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
+	if err != nil {
+		b.Fatal(err)
+	}
+	options := PlanOptions{
+		Mode: "tftp",
+		Target: func(record Record) (transfer.Target, error) {
+			return transfer.Target{TFTPOptions: transfer.TFTPOptions{Server: "192.0.2.9", Path: "archive/" + record.Host + ".cfg"}}, nil
+		},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		plan, err := NewPlan(rows, rules, options)
+		if err != nil || len(plan.Tasks()) != len(rows) {
+			b.Fatalf("tasks=%d err=%v", len(plan.Tasks()), err)
+		}
 	}
 }

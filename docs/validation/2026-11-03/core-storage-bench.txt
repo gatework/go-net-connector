@@ -1,0 +1,46 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/gatework/go-net-connector/storage
+cpu: Apple M5
+BenchmarkFingerprint8MiB/Read-10         	       1	   4148084 ns/op	2022.28 MB/s	17064400 B/op	      39 allocs/op
+BenchmarkFingerprint8MiB/Read-10         	       1	   4174500 ns/op	2009.49 MB/s	17064288 B/op	      38 allocs/op
+BenchmarkFingerprint8MiB/Read-10         	       1	   3989417 ns/op	2102.72 MB/s	17064384 B/op	      38 allocs/op
+BenchmarkFingerprint8MiB/Read-10         	       1	   3882000 ns/op	2160.90 MB/s	17064272 B/op	      37 allocs/op
+BenchmarkFingerprint8MiB/Read-10         	       1	   3948042 ns/op	2124.75 MB/s	17064272 B/op	      37 allocs/op
+BenchmarkFingerprint8MiB/Read-10         	       1	   3762958 ns/op	2229.26 MB/s	17064272 B/op	      37 allocs/op
+BenchmarkFingerprint8MiB/Read-10         	       1	   3932042 ns/op	2133.40 MB/s	17064272 B/op	      37 allocs/op
+BenchmarkFingerprint8MiB/Read-10         	       1	   3755125 ns/op	2233.91 MB/s	17064384 B/op	      38 allocs/op
+BenchmarkFingerprint8MiB/Read-10         	       1	   3933458 ns/op	2132.63 MB/s	17064272 B/op	      37 allocs/op
+BenchmarkFingerprint8MiB/Read-10         	       1	   3768125 ns/op	2226.20 MB/s	17064272 B/op	      37 allocs/op
+BenchmarkFingerprint8MiB/Inspect-10      	       1	   3397375 ns/op	2469.14 MB/s	   33520 B/op	      11 allocs/op
+BenchmarkFingerprint8MiB/Inspect-10      	       1	   3324917 ns/op	2522.95 MB/s	   33520 B/op	      11 allocs/op
+BenchmarkFingerprint8MiB/Inspect-10      	       1	   3298333 ns/op	2543.29 MB/s	   33520 B/op	      11 allocs/op
+BenchmarkFingerprint8MiB/Inspect-10      	       1	   3303584 ns/op	2539.24 MB/s	   33520 B/op	      11 allocs/op
+BenchmarkFingerprint8MiB/Inspect-10      	       1	   3287417 ns/op	2551.73 MB/s	   33520 B/op	      11 allocs/op
+BenchmarkFingerprint8MiB/Inspect-10      	       1	   3288916 ns/op	2550.57 MB/s	   33520 B/op	      11 allocs/op
+BenchmarkFingerprint8MiB/Inspect-10      	       1	   3278458 ns/op	2558.71 MB/s	   33520 B/op	      11 allocs/op
+BenchmarkFingerprint8MiB/Inspect-10      	       1	   3301542 ns/op	2540.82 MB/s	   33520 B/op	      11 allocs/op
+BenchmarkFingerprint8MiB/Inspect-10      	       1	   3278250 ns/op	2558.87 MB/s	   33520 B/op	      11 allocs/op
+BenchmarkFingerprint8MiB/Inspect-10      	       1	   3271375 ns/op	2564.25 MB/s	   33520 B/op	      11 allocs/op
+BenchmarkWriteText8MiB/Bytes-10          	       1	  11690750 ns/op	 717.54 MB/s	 8394000 B/op	      59 allocs/op
+BenchmarkWriteText8MiB/Bytes-10          	       1	   9266000 ns/op	 905.31 MB/s	 8393952 B/op	      59 allocs/op
+BenchmarkWriteText8MiB/Bytes-10          	       1	   9370000 ns/op	 895.26 MB/s	 8394000 B/op	      59 allocs/op
+BenchmarkWriteText8MiB/Bytes-10          	       1	   8462667 ns/op	 991.25 MB/s	 8393936 B/op	      59 allocs/op
+BenchmarkWriteText8MiB/Bytes-10          	       1	   7364125 ns/op	1139.12 MB/s	 8394112 B/op	      60 allocs/op
+BenchmarkWriteText8MiB/Bytes-10          	       1	   7481875 ns/op	1121.19 MB/s	 8394016 B/op	      60 allocs/op
+BenchmarkWriteText8MiB/Bytes-10          	       1	   7435417 ns/op	1128.20 MB/s	 8394112 B/op	      60 allocs/op
+BenchmarkWriteText8MiB/Bytes-10          	       1	   8450625 ns/op	 992.66 MB/s	 8393936 B/op	      59 allocs/op
+BenchmarkWriteText8MiB/Bytes-10          	       1	   9477167 ns/op	 885.14 MB/s	 8394176 B/op	      61 allocs/op
+BenchmarkWriteText8MiB/Bytes-10          	       1	   9392583 ns/op	 893.11 MB/s	 8394000 B/op	      59 allocs/op
+BenchmarkWriteText8MiB/Stream-10         	       1	  10464167 ns/op	 801.65 MB/s	   38176 B/op	      59 allocs/op
+BenchmarkWriteText8MiB/Stream-10         	       1	   9437750 ns/op	 888.84 MB/s	   38160 B/op	      59 allocs/op
+BenchmarkWriteText8MiB/Stream-10         	       1	   9438167 ns/op	 888.80 MB/s	   38176 B/op	      59 allocs/op
+BenchmarkWriteText8MiB/Stream-10         	       1	   9512875 ns/op	 881.82 MB/s	   38112 B/op	      59 allocs/op
+BenchmarkWriteText8MiB/Stream-10         	       1	  10298917 ns/op	 814.51 MB/s	   38176 B/op	      59 allocs/op
+BenchmarkWriteText8MiB/Stream-10         	       1	  10293833 ns/op	 814.92 MB/s	   38096 B/op	      59 allocs/op
+BenchmarkWriteText8MiB/Stream-10         	       1	  10259584 ns/op	 817.64 MB/s	   38160 B/op	      59 allocs/op
+BenchmarkWriteText8MiB/Stream-10         	       1	  10286958 ns/op	 815.46 MB/s	   38176 B/op	      59 allocs/op
+BenchmarkWriteText8MiB/Stream-10         	       1	  10466625 ns/op	 801.46 MB/s	   38160 B/op	      59 allocs/op
+BenchmarkWriteText8MiB/Stream-10         	       1	  10463833 ns/op	 801.68 MB/s	   38176 B/op	      59 allocs/op
+PASS
+ok  	github.com/gatework/go-net-connector/storage	8.286s

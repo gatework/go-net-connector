@@ -47,10 +47,10 @@ func TestH3CPagedGBKPreservesRawResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	steps := r.Steps()
-	if len(steps) != 1 || steps[0].Raw() != first+last || steps[0].OutputEncoding() != "gb18030" {
+	if len(steps) != 1 || steps[0].Response().Raw() != first+last || steps[0].Response().Encoding() != "gb18030" {
 		t.Fatalf("original bytes or encoding lost: %v", r)
 	}
-	if got := r.Output(); !strings.Contains(got, "description 中文\n") || !strings.Contains(got, "description 核心\n") || strings.Contains(got, "--More--") {
+	if got := testResultOutput(r); !strings.Contains(got, "description 中文\n") || !strings.Contains(got, "description 核心\n") || strings.Contains(got, "--More--") {
 		t.Fatalf("paged config = %q", got)
 	}
 }
@@ -58,7 +58,7 @@ func TestH3CPagedGBKPreservesRawResponse(t *testing.T) {
 func TestH3CAutoPreservesUTF8(t *testing.T) {
 	d, _ := dialogue(t, "h3c", "<core>", []exchange{{"dis cur\n", "dis cur\r\n description 中文\r\n<core>"}})
 	r, err := d.RunningConfig(t.Context())
-	if err != nil || r.Output() != "dis cur\n description 中文\n<core>" || r.Steps()[0].OutputEncoding() != "utf-8" {
+	if err != nil || testResultOutput(r) != "dis cur\n description 中文\n<core>" || r.Steps()[0].Response().Encoding() != "utf-8" {
 		t.Fatalf("UTF-8 response changed: %v %v", r, err)
 	}
 }
@@ -67,7 +67,7 @@ func TestH3CGBKTerminalEditsBeforeTranscoding(t *testing.T) {
 	wire := "dis cur\r\n description \xd6\xd0\b\bOK\r\n<core>"
 	d, _ := dialogue(t, "h3c", "<core>", []exchange{{"dis cur\n", wire}})
 	r, err := d.RunningConfig(t.Context())
-	if err != nil || r.Output() != "dis cur\n description OK\n<core>" || r.Steps()[0].Raw() != wire {
+	if err != nil || testResultOutput(r) != "dis cur\n description OK\n<core>" || r.Steps()[0].Response().Raw() != wire {
 		t.Fatalf("GBK terminal edits: %v, %v", r, err)
 	}
 }
@@ -80,20 +80,30 @@ func TestH3CRejectsEchoOnly(t *testing.T) {
 	}
 }
 
-func TestH3CInvalidEncodingPreservesPreviousBackup(t *testing.T) {
+func TestH3CBackupPreservesInvalidSourceWithWarning(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "core.cfg")
-	if err := os.WriteFile(path, []byte("last good backup"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	d, _ := dialogue(t, "h3c", "<core>", []exchange{{"dis cur\n", "dis cur\r\n description \xff\r\n<core>"}})
+	wire := "dis cur\r\n description 中文 \xff\r\n<core>"
+	d, _ := dialogue(t, "h3c", "<core>", []exchange{{"dis cur\n", wire}})
 	receipt, err := d.Backup(t.Context(), connector.BackupOptions{Path: path})
-	var classified *connector.Error
-	if !errors.As(err, &classified) || classified.Code != "invalid_output_encoding" || receipt.File.Committed() || d.Connected() {
-		t.Fatalf("invalid encoding accepted: %+v, %v", receipt, err)
+	if err != nil || !receipt.File.Durable() || receipt.Source == nil || !receipt.Source.File.Durable() || receipt.TextWarning == nil || receipt.TextWarning.Count != 1 {
+		t.Fatalf("source backup or warning missing: %v", err)
 	}
-	got, err := os.ReadFile(path)
-	if err != nil || string(got) != "last good backup" {
-		t.Fatalf("previous backup changed: %q, %v", got, err)
+	text, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(text), `description 中文 \xFF`) {
+		t.Fatal("valid UTF-8 or escaped byte lost")
+	}
+	raw, err := os.ReadFile(receipt.Source.Path)
+	if err != nil || string(raw) != wire {
+		t.Fatal("original bytes lost")
+	}
+}
+
+func TestH3CRunningConfigStillRejectsInvalidEncoding(t *testing.T) {
+	d, _ := dialogue(t, "h3c", "<core>", []exchange{{"dis cur\n", "dis cur\r\n description \xff\r\n<core>"}})
+	_, err := d.RunningConfig(t.Context())
+	var classified *connector.Error
+	if !errors.As(err, &classified) || classified.Code != "invalid_output_encoding" || d.Connected() {
+		t.Fatal("strict running configuration accepted invalid encoding")
 	}
 }
 
@@ -101,7 +111,7 @@ func TestH3CDecodedOutputLimitPreservesReceipt(t *testing.T) {
 	wire := "description " + strings.Repeat("\xd6\xd0", 10) + "\n<core>"
 	d, _ := dialogue(t, "h3c", "<core>", []exchange{{"show\n", wire}}, connector.ConnectionConfig{MaxOutputBytes: int64(len(wire))})
 	r, err := d.ExecuteCommand(t.Context(), connector.Command{Text: "show"}, connector.ExecuteOptions{})
-	if !errors.Is(err, connector.ErrOutputLimit) || len(r.Steps()) != 1 || r.Steps()[0].Raw() != wire || d.Connected() {
+	if !errors.Is(err, connector.ErrOutputLimit) || len(r.Steps()) != 1 || r.Steps()[0].Response().Raw() != wire || d.Connected() {
 		t.Fatalf("decoded byte limit: %v, %v", r, err)
 	}
 }
@@ -120,4 +130,25 @@ func TestH3CLogConvertsAndRedactsEncodedSecrets(t *testing.T) {
 			t.Fatalf("invalid or unredacted log: %q", text)
 		}
 	})
+}
+
+func TestH3CGBKPromptUsesDecodedConfigurationBoundary(t *testing.T) {
+	for _, backup := range []bool{false, true} {
+		t.Run(fmt.Sprintf("backup=%t", backup), func(t *testing.T) {
+			prompt := "<\xd6\xd0\xce\xc4>"
+			d, _ := dialogue(t, "h3c", prompt, []exchange{{"dis cur\n", "dis cur\r\n description \xd6\xd0\xce\xc4\r\n" + prompt}})
+			if backup {
+				r, err := d.Backup(t.Context(), connector.BackupOptions{Path: filepath.Join(t.TempDir(), "config")})
+				if err != nil || !r.Complete() {
+					t.Fatalf("backup: %+v %v", r, err)
+				}
+			} else {
+				r, err := d.RunningConfig(t.Context())
+				text, ok := r.Config()
+				if err != nil || !ok || !strings.HasSuffix(text, "<中文>") {
+					t.Fatalf("configuration: %q %v", text, err)
+				}
+			}
+		})
+	}
 }

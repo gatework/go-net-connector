@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create and verify immutable release bytes from one committed Git tree; never publish."""
+"""从已提交的 Git 源码生成并校验不可变发布文件；不执行发布。"""
 import argparse
 import gzip
 import hashlib
@@ -9,10 +9,11 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
+import sys
 import tarfile
 import tempfile
 
-BINS = ('net-backup', 'net-backup-batch', 'net-backup-tftp', 'net-topology', 'net-connector-archive')
+BINS = ('netman', 'tftp-archive')
 PLATFORMS = ('darwin_amd64', 'darwin_arm64', 'linux_amd64', 'linux_arm64')
 MODULE = 'github.com/gatework/go-net-connector'
 SEMVER = re.compile(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z')
@@ -334,12 +335,26 @@ def verify(root, directory, sha, version=None):
             verify_binary(root, entries['bin/' + binary][1], platform, binary, version, sha, manifest['toolchain'])
 
 
+class ChineseHelpFormatter(argparse.HelpFormatter):
+    def _format_usage(self, usage, actions, groups, prefix):
+        return super()._format_usage(usage, actions, groups, prefix or '用法：')
+
+
+class ChineseArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        self.exit(2, f'{self.prog}：参数无效，请使用 --help 查看用法。\n')
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('package', 'verify', 'check-modules'))
-    parser.add_argument('--output', type=Path, default=Path('dist'))
-    parser.add_argument('--sha', help='full tested commit SHA; defaults to HEAD')
-    parser.add_argument('--version', help='expected version for verification')
+    parser = ChineseArgumentParser(description=__doc__, formatter_class=ChineseHelpFormatter, usage='%(prog)s [选项] {package,verify,check-modules}', add_help=False)
+    parser.add_argument('-h', '--help', action='help', help='显示帮助并退出')
+    parser._positionals.title = '位置参数'
+    parser._optionals.title = '选项'
+    parser.add_argument('action', help='操作：package 打包、verify 校验、check-modules 检查模块', choices=('package', 'verify', 'check-modules'))
+    parser.add_argument('--output', type=Path, default=Path('dist'), help='输出目录；默认 dist')
+    parser.add_argument('--sha', help='已测试的完整提交 SHA；默认使用 HEAD')
+    parser.add_argument('--version', help='用于校验的预期版本')
     args = parser.parse_args()
     root = Path(git(Path.cwd(), 'rev-parse', '--show-toplevel'))
     if args.action == 'check-modules':
@@ -352,7 +367,7 @@ def main():
         package(root, args.output.absolute(), sha)
     else:
         verify(root, args.output.absolute(), sha, args.version)
-    print(args.action + ' verified: ' + sha)
+    print(args.action + ' 已校验：' + sha)
 
 
 if __name__ == '__main__':

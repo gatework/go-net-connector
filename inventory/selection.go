@@ -77,7 +77,7 @@ func NewAddressSet(values []string) (AddressSet, error) {
 			continue
 		}
 		address, e := netip.ParseAddr(value)
-		if e != nil {
+		if e != nil || address.Zone() != "" {
 			return s, ErrInvalid
 		}
 		s.exact[address] = struct{}{}
@@ -123,6 +123,7 @@ type SelectionOptions struct {
 type textRules struct {
 	include, exclude []string
 	mode             string
+	globs            map[string]string
 }
 type Selection struct {
 	includeHosts, excludeHosts AddressSet
@@ -151,11 +152,14 @@ func NewSelection(o SelectionOptions) (Selection, error) {
 		if mode != "contains" && mode != "prefix" && mode != "glob" && mode != "exact" {
 			return textRules{}, ErrInvalid
 		}
-		r := textRules{mode: mode}
+		r := textRules{mode: mode, globs: map[string]string{}}
 		for idx, list := range [][]string{in, out} {
 			for _, v := range list {
 				if !utf8.ValidString(v) || strings.TrimSpace(v) == "" || strings.IndexFunc(v, unicode.IsControl) >= 0 {
 					return r, ErrInvalid
+				}
+				if mode == "glob" {
+					r.globs[strings.ToLower(v)] = translateGlob(strings.ToLower(v))
 				}
 				if idx == 0 {
 					r.include = append(r.include, strings.ToLower(v))
@@ -189,6 +193,10 @@ func (s Selection) Evaluate(d Device) Decision {
 		rules       textRules
 	}{{"vendor", d.Vendor, s.vendors}, {"name", d.Name, s.names}, {"model", d.Model, s.models}} {
 		value := strings.ToLower(strings.ToValidUTF8(field.value, ""))
+		globValue := value
+		if field.rules.mode == "glob" {
+			globValue = strings.ReplaceAll(value, "/", "\x00")
+		}
 		matches := func(list []string) bool {
 			for _, p := range list {
 				switch field.rules.mode {
@@ -205,8 +213,11 @@ func (s Selection) Evaluate(d Device) Decision {
 						return true
 					}
 				case "glob":
-					if glob(p, value) {
-						return true
+					if !strings.HasPrefix(value, ".") || strings.HasPrefix(p, ".") {
+						ok, e := path.Match(field.rules.globs[p], globValue)
+						if e == nil && ok {
+							return true
+						}
 					}
 				}
 			}
@@ -220,10 +231,7 @@ func (s Selection) Evaluate(d Device) Decision {
 	}
 	return Decision{reasons}
 }
-func glob(pattern, value string) bool {
-	if strings.HasPrefix(value, ".") && !strings.HasPrefix(pattern, ".") {
-		return false
-	}
+func translateGlob(pattern string) string {
 	// Ruby fnmatch without PATHNAME permits '*' to cross '/'.
 	// Ruby accepts both [!...] and [^...] for class negation. Respect escapes.
 	translated := make([]byte, 0, len(pattern))
@@ -259,8 +267,5 @@ func glob(pattern, value string) bool {
 		}
 		translated = append(translated, pattern[i])
 	}
-	p := strings.ReplaceAll(string(translated), "/", "\x00")
-	v := strings.ReplaceAll(value, "/", "\x00")
-	ok, e := path.Match(p, v)
-	return e == nil && ok
+	return strings.ReplaceAll(string(translated), "/", "\x00")
 }

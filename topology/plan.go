@@ -5,58 +5,50 @@ import (
 	"maps"
 	"reflect"
 	"slices"
-	"strings"
 
 	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/vendors"
+	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
-func key(vendor, name string) string {
-	if vendor == "huawei" {
-		name = strings.NewReplacer(" ", "", "\t", "").Replace(name)
+func identityKey(policy InterfaceIdentity, name string) string {
+	if policy == nil {
+		return InterfaceKey(name)
 	}
-	if vendor == "fortinet" {
-		return name
-	}
-	return InterfaceKey(name)
+	return policy.InterfaceKey(name)
 }
-func writable(vendor string) error {
-	p, e := vendors.Profile(vendor)
-	if e != nil {
-		return failure("description_unsupported", "plan", ErrUnsupported)
-	}
-	if !p.Capabilities.TopologyWrite {
+func requireWriter(writer DescriptionWriter, denial WriteRestriction) error {
+	if writer == nil {
 		code := "description_unsupported"
-		if vendor == "palo_alto" || vendor == "juniper" {
-			code = "candidate_isolation_unavailable"
+		if denial != nil && denial.UnavailableCode() != "" {
+			code = denial.UnavailableCode()
 		}
-		return failure(code, "plan", ErrUnsupported)
+		return newError(code, "plan", ErrUnsupported)
 	}
 	return nil
 }
-func format(peer Neighbor, opts FormatOptions) (string, error) {
+func formatDescription(peer Neighbor, opts FormatOptions) (string, error) {
 	if opts.Formatter != nil {
 		v, e := opts.Formatter(peer)
 		if e != nil {
-			return "", failure("formatter_failed", "plan", errors.Join(ErrInvalid, e))
+			return "", newError("formatter_failed", "plan", errors.Join(ErrInvalid, e))
 		}
 		return v, ValidateDescription(v)
 	}
 	return FormatDescription(peer, opts)
 }
-func evidenceFor(vendor string, peers []Neighbor, descriptions map[string]string) (map[string]Evidence, error) {
+func evidenceFor(policy InterfaceIdentity, peers []Neighbor, descriptions map[string]string) (map[string]Evidence, error) {
 	out := map[string]Evidence{}
 	for _, peer := range peers {
-		k := key(vendor, peer.LocalInterface)
+		k := identityKey(policy, peer.LocalInterface)
 		if _, ok := out[k]; ok {
-			return nil, failure("ambiguous_neighbor", "plan", ErrParse)
+			return nil, newError("ambiguous_neighbor", "plan", ErrParse)
 		}
 		if code := peer.IdentityIssue(); code != "" {
-			return nil, failure(code, "plan", ErrParse)
+			return nil, newError(code, "plan", ErrParse)
 		}
 		old, ok := descriptions[k]
 		if !ok {
-			return nil, failure("interface_missing", "plan", ErrParse)
+			return nil, newError("interface_missing", "plan", ErrParse)
 		}
 		out[k] = Evidence{peer.NeighborName, peer.NeighborInterface, old}
 	}
@@ -64,35 +56,44 @@ func evidenceFor(vendor string, peers []Neighbor, descriptions map[string]string
 }
 
 // BuildPlan is pure: it opens no connections and resolves no credentials.
-func BuildPlan(host, vendor string, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Plan, error) {
-	p, e := vendors.Profile(vendor)
+func BuildPlan(registry dialect.Registry, host, vendor string, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Plan, error) {
+	if registry == nil {
+		return Plan{}, ErrInvalid
+	}
+	d, e := registry.Lookup(vendor)
 	if e != nil {
 		return Plan{}, e
 	}
-	return buildPlan(host, p, peers, descriptions, opts)
+	identity, _ := d.(InterfaceIdentity)
+	writer, _ := d.(DescriptionWriter)
+	denial, _ := d.(WriteRestriction)
+	return buildPlan(host, d.Profile(), identity, writer, denial, peers, descriptions, opts)
 }
-func buildPlan(host string, profile connector.Profile, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Plan, error) {
-	if e := writable(profile.Name); e != nil {
+func buildPlan(host string, profile connector.Profile, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Plan, error) {
+	if identity == nil {
+		return Plan{}, newError("description_unsupported", "plan", ErrUnsupported)
+	}
+	if e := requireWriter(writer, denial); e != nil {
 		return Plan{}, e
 	}
-	evidence, e := evidenceFor(profile.Name, peers, descriptions)
+	evidence, e := evidenceFor(identity, peers, descriptions)
 	if e != nil {
 		return Plan{}, e
 	}
 	p := Plan{Host: host, Vendor: profile.Name, Evidence: evidence, Changes: []Change{}, Commands: []string{}, Scope: "device"}
 	for _, peer := range peers {
-		old := descriptions[key(p.Vendor, peer.LocalInterface)]
-		proposed, e := format(peer, opts)
+		old := descriptions[identityKey(identity, peer.LocalInterface)]
+		proposed, e := formatDescription(peer, opts)
 		if e != nil {
 			return Plan{}, e
 		}
 		if EquivalentDescription(old, proposed) {
 			continue
 		}
-		p.Changes = append(p.Changes, Change{ConfigurationInterface(peer.LocalInterface), old, proposed, peer})
+		p.Changes = append(p.Changes, Change{identity.ConfigName(peer.LocalInterface), old, proposed, peer})
 	}
 	if len(p.Changes) > 0 {
-		s, e := stagesFor(profile, p.Changes)
+		s, e := stagesFor(profile, identity, writer, denial, p.Changes)
 		if e != nil {
 			return Plan{}, e
 		}
@@ -102,20 +103,32 @@ func buildPlan(host string, profile connector.Profile, peers []Neighbor, descrip
 }
 
 // BuildAudit preserves evidence issues separately and plans only verified interfaces.
-func BuildAudit(host, vendor string, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Audit, error) {
-	p, e := vendors.Profile(vendor)
+func BuildAudit(registry dialect.Registry, host, vendor string, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Audit, error) {
+	if registry == nil {
+		return Audit{}, ErrInvalid
+	}
+	d, e := registry.Lookup(vendor)
 	if e != nil {
 		return Audit{}, e
 	}
-	return buildAudit(host, p, peers, descriptions, opts)
+	identity, _ := d.(InterfaceIdentity)
+	if identity == nil {
+		return Audit{}, ErrUnsupported
+	}
+	writer, _ := d.(DescriptionWriter)
+	denial, _ := d.(WriteRestriction)
+	return buildAudit(host, d.Profile(), identity, writer, denial, peers, descriptions, opts)
 }
-func buildAudit(host string, profile connector.Profile, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Audit, error) {
+func buildAudit(host string, profile connector.Profile, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Audit, error) {
+	if identity == nil {
+		return Audit{}, ErrUnsupported
+	}
 	a := Audit{Comparisons: []Comparison{}, Issues: []Issue{}}
 	p := Plan{Host: host, Vendor: profile.Name, Scope: "interfaces", Evidence: map[string]Evidence{}, Changes: []Change{}, Commands: []string{}}
 	groups := map[string][]Neighbor{}
 	order := []string{}
 	for _, n := range peers {
-		k := key(profile.Name, n.LocalInterface)
+		k := identityKey(identity, n.LocalInterface)
 		if _, ok := groups[k]; !ok {
 			order = append(order, k)
 		}
@@ -139,15 +152,12 @@ func buildAudit(host string, profile connector.Profile, peers []Neighbor, descri
 			code = "interface_missing"
 		}
 		if code == "" {
-			proposed, e := format(n, opts)
+			proposed, e := formatDescription(n, opts)
 			var formatterError *Error
 			if errors.As(e, &formatterError) && formatterError.Code == "formatter_failed" {
 				return a, e
 			}
-			local := ConfigurationInterface(n.LocalInterface)
-			if profile.Name == "fortinet" {
-				local = n.LocalInterface
-			}
+			local := identity.ConfigName(n.LocalInterface)
 			if e != nil || ValidateInterface(local) != nil {
 				code = "unsafe_description"
 			} else {
@@ -174,9 +184,9 @@ func buildAudit(host string, profile connector.Profile, peers []Neighbor, descri
 		}
 		a.Comparisons = append(a.Comparisons, row)
 	}
-	if profile.Capabilities.TopologyWrite && writable(profile.Name) == nil {
+	if requireWriter(writer, denial) == nil {
 		if len(p.Changes) > 0 {
-			s, e := stagesFor(profile, p.Changes)
+			s, e := stagesFor(profile, identity, writer, denial, p.Changes)
 			if e != nil {
 				return a, e
 			}
@@ -200,31 +210,36 @@ func (s stages) commands() []string {
 	all = append(all, s.verify...)
 	return append(all, s.persist...)
 }
-func stagesFor(profile connector.Profile, changes []Change) (stages, error) {
-	if e := writable(profile.Name); e != nil {
+func stagesFor(profile connector.Profile, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction, changes []Change) (stages, error) {
+	if identity == nil {
+		return stages{}, newError("description_unsupported", "plan", ErrUnsupported)
+	}
+	if e := requireWriter(writer, denial); e != nil {
 		return stages{}, e
 	}
 	s := stages{verify: slices.Clone(profile.ConfigCommands), persist: slices.Clone(profile.SaveCommands)}
-	enter, leave, exit := "configure terminal", "end", "exit"
-	switch profile.Name {
-	case "h3c", "h3c_wireless":
-		enter, leave, exit = "system-view", "return", "quit"
-	case "hillstone":
-		enter, leave = "configure", "exit"
+	mode := writer.WriteMode()
+	if mode.Enter == "" || mode.Leave == "" || mode.InterfaceExit == "" {
+		return stages{}, newError("description_stages_unsupported", "plan", ErrUnsupported)
 	}
-	s.change = []string{enter}
+	s.change = []string{mode.Enter}
 	seen := map[string]bool{}
 	for _, c := range changes {
-		k := key(profile.Name, c.Interface)
+		k := identityKey(identity, c.Interface)
 		if ValidateInterface(c.Interface) != nil || ValidateDescription(c.NewDescription) != nil || seen[k] {
 			return stages{}, ErrInvalid
 		}
 		seen[k] = true
-		s.change = append(s.change, "interface "+c.Interface, "description "+c.NewDescription, exit)
+		commands, e := writer.ChangeCommands(c.Interface, c.NewDescription)
+		if e != nil || len(commands) == 0 {
+			return stages{}, newError("description_stages_unsupported", "plan", errors.Join(ErrUnsupported, e))
+		}
+		s.change = append(s.change, commands...)
+		s.change = append(s.change, mode.InterfaceExit)
 	}
-	s.change = append(s.change, leave)
+	s.change = append(s.change, mode.Leave)
 	if len(s.verify) == 0 || len(s.persist) == 0 {
-		return stages{}, failure("description_stages_unsupported", "plan", ErrUnsupported)
+		return stages{}, newError("description_stages_unsupported", "plan", ErrUnsupported)
 	}
 	for _, v := range s.commands() {
 		script, e := connector.ParseScript(v, "topology")
@@ -234,14 +249,20 @@ func stagesFor(profile connector.Profile, changes []Change) (stages, error) {
 	}
 	return s, nil
 }
-func ValidatePlan(p Plan, host, vendor string) error {
-	profile, e := vendors.Profile(vendor)
+func ValidatePlan(registry dialect.Registry, p Plan, host, vendor string) error {
+	if registry == nil {
+		return ErrInvalid
+	}
+	d, e := registry.Lookup(vendor)
 	if e != nil {
 		return e
 	}
-	return validatePlan(p, host, profile)
+	identity, _ := d.(InterfaceIdentity)
+	writer, _ := d.(DescriptionWriter)
+	denial, _ := d.(WriteRestriction)
+	return validatePlan(p, host, d.Profile(), identity, writer, denial)
 }
-func validatePlan(p Plan, host string, profile connector.Profile) error {
+func validatePlan(p Plan, host string, profile connector.Profile, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction) error {
 	if p.Host != host || p.Vendor != profile.Name || (p.Scope != "device" && p.Scope != "interfaces") {
 		return ErrInvalid
 	}
@@ -251,7 +272,7 @@ func validatePlan(p Plan, host string, profile connector.Profile) error {
 		}
 		return nil
 	}
-	s, e := stagesFor(profile, p.Changes)
+	s, e := stagesFor(profile, identity, writer, denial, p.Changes)
 	if e != nil {
 		return e
 	}
@@ -259,8 +280,8 @@ func validatePlan(p Plan, host string, profile connector.Profile) error {
 		return ErrInvalid
 	}
 	for _, c := range p.Changes {
-		k := key(p.Vendor, c.Interface)
-		if k != key(p.Vendor, c.Neighbor.LocalInterface) || c.Neighbor.IdentityIssue() != "" || p.Evidence[k] != (Evidence{c.Neighbor.NeighborName, c.Neighbor.NeighborInterface, c.OldDescription}) {
+		k := identityKey(identity, c.Interface)
+		if c.Interface != identity.ConfigName(c.Neighbor.LocalInterface) || k != identityKey(identity, c.Neighbor.LocalInterface) || c.Neighbor.IdentityIssue() != "" || p.Evidence[k] != (Evidence{c.Neighbor.NeighborName, c.Neighbor.NeighborInterface, c.OldDescription}) {
 			return ErrInvalid
 		}
 	}
@@ -273,28 +294,28 @@ func clonePlan(p Plan) Plan {
 	p.Receipts = slices.Clone(p.Receipts)
 	return p
 }
-func revalidate(p Plan, snapshot Snapshot) error {
+func revalidate(p Plan, snapshot Snapshot, policy InterfaceIdentity) error {
 	peers := snapshot.Neighbors
 	descs := snapshot.Descriptions
 	if p.Scope == "interfaces" {
 		peers = nil
 		for _, n := range snapshot.Neighbors {
-			if _, ok := p.Evidence[key(p.Vendor, n.LocalInterface)]; ok {
+			if _, ok := p.Evidence[identityKey(policy, n.LocalInterface)]; ok {
 				peers = append(peers, n)
 			}
 		}
 	}
-	evidence, e := evidenceFor(p.Vendor, peers, descs)
+	evidence, e := evidenceFor(policy, peers, descs)
 	if e != nil || !reflect.DeepEqual(evidence, p.Evidence) {
-		return failure("stale_plan", "apply", ErrStale)
+		return newError("stale_plan", "apply", ErrStale)
 	}
 	byKey := map[string]Neighbor{}
 	for _, n := range peers {
-		byKey[key(p.Vendor, n.LocalInterface)] = n
+		byKey[identityKey(policy, n.LocalInterface)] = n
 	}
 	for _, c := range p.Changes {
-		if byKey[key(p.Vendor, c.Interface)] != c.Neighbor {
-			return failure("stale_plan", "apply", ErrStale)
+		if byKey[identityKey(policy, c.Interface)] != c.Neighbor {
+			return newError("stale_plan", "apply", ErrStale)
 		}
 	}
 	return nil

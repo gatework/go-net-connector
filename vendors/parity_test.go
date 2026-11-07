@@ -23,15 +23,13 @@ func TestFrozenRubyProfileCommands(t *testing.T) {
 	if e = json.Unmarshal(b, &fixture); e != nil {
 		t.Fatal(e)
 	}
-	if len(fixture.Profiles) != len(Names()) {
+	registry := NewBuiltinRegistry()
+	if len(fixture.Profiles) != len(registry.Names()) {
 		t.Fatal("vendor count changed")
 	}
 	for name, want := range fixture.Profiles {
 		t.Run(name, func(t *testing.T) {
-			p, e := Profile(name)
-			if e != nil {
-				t.Fatal(e)
-			}
+			p := profileForTest(t, name)
 			config := []string{}
 			for _, c := range p.ConfigCommands {
 				config = append(config, c)

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -78,5 +79,28 @@ func TestReadRejectsLinkAndFIFO(t *testing.T) {
 	cancel()
 	if _, err := Write(ctx, target, []byte("bad")); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
+	}
+}
+
+func TestAtomicStringWriteIsBounded(t *testing.T) {
+	body := strings.Repeat("配置\x00", 20000)
+	path := filepath.Join(t.TempDir(), "config")
+	r, err := WriteStream(t.Context(), path, func(w io.Writer) error {
+		text, ok := w.(io.StringWriter)
+		if !ok {
+			return errors.New("stream lacks bounded string writer")
+		}
+		n, err := text.WriteString(body)
+		if err == nil && n != len(body) {
+			return io.ErrShortWrite
+		}
+		return err
+	})
+	if err != nil || !r.Durable() {
+		t.Fatalf("write: %+v %v", r, err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != body {
+		t.Fatal("string bytes changed", err)
 	}
 }

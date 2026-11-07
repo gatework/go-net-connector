@@ -18,7 +18,7 @@ func BenchmarkMockFleet(b *testing.B) {
 			for i := range rows {
 				rows[i] = inventory.Device{IP: fmt.Sprintf("10.%d.%d.%d", i>>16, (i>>8)&255, i&255), Vendor: "cisco", OS: "ios"}
 			}
-			rules, e := NewRules(RuleOptions{}, vendors.Profile)
+			rules, e := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 			if e != nil {
 				b.Fatal(e)
 			}

@@ -33,7 +33,7 @@ type inputResult struct {
 }
 
 func (d *Device) Interact(parent context.Context, o InteractOptions) (result InteractResult, err error) {
-	if o.Input == nil || nilValue(o.Output) {
+	if o.Input == nil || isNilValue(o.Output) {
 		return result, ErrInvalid
 	}
 	if e := d.acquire(); e != nil {
@@ -79,7 +79,7 @@ func (d *Device) Interact(parent context.Context, o InteractOptions) (result Int
 		if e == nil && n != len(p) {
 			e = io.ErrShortWrite
 		}
-		return expect.ContinueWithoutReset, e
+		return expect.ContinueKeepTimer, e
 	}}, {Pattern: expect.EOF()}}, expect.WithTimeout(0))
 	cancel()
 	cleanupErr := d.closeResources()
@@ -91,10 +91,10 @@ func (d *Device) Interact(parent context.Context, o InteractOptions) (result Int
 		return result, e
 	}
 	if readErr != nil && !errors.Is(readErr, context.Canceled) && !errors.Is(readErr, io.EOF) {
-		return result, fail("interaction_failed", "interact", Command{}, readErr)
+		return result, newError("interaction_failed", "interact", Command{}, readErr)
 	}
 	if input.err != nil && !errors.Is(input.err, context.Canceled) && !errors.Is(input.err, expect.ErrClosed) {
-		return result, fail("interaction_failed", "interact", Command{}, input.err)
+		return result, newError("interaction_failed", "interact", Command{}, input.err)
 	}
 	if result.Reason == "" {
 		result.Reason = "peer_eof"

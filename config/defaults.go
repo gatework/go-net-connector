@@ -9,22 +9,47 @@ import (
 )
 
 func Defaults(mode string) map[string]any {
-	m := map[string]any{"netdisco": map[string]any{"source": "http", "cache_enabled": true, "cache_mode": "prefer", "cache_ttl": 259200, "cache_directory": "./.cache/net-connector/inventory", "inventory_timeout": 300, "page_size": 500, "allow_insecure_http": false}, "inventory": map[string]any{"include_hosts": []any{}, "exclude_hosts": []any{}, "include_names": []any{}, "exclude_names": []any{}, "include_vendors": []any{}, "exclude_vendors": []any{}, "include_models": []any{}, "exclude_models": []any{}, "name_match": "contains", "model_match": "contains"}, "ssh": map[string]any{"protocol": "ssh", "host_key_policy": "accept_new", "log_level": "info"}, "backup": map[string]any{"directory": "./backups", "parallel": 4}}
+	m := map[string]any{
+		"netdisco": map[string]any{
+			"source": "http", "cache_enabled": true, "cache_mode": "prefer", "cache_ttl": 259200,
+			"cache_directory": "./.cache/net-connector/inventory", "inventory_timeout": 300,
+			"page_size": 500, "max_pages": 10000, "max_devices": 100000,
+			"max_response_bytes": 16 << 20, "max_inventory_bytes": 128 << 20,
+			"db_port": 5432, "db_connect_timeout": 10, "allow_insecure_http": false,
+		},
+		"inventory": map[string]any{
+			"include_hosts": []any{}, "exclude_hosts": []any{}, "include_names": []any{},
+			"exclude_names": []any{}, "include_vendors": []any{}, "exclude_vendors": []any{},
+			"include_models": []any{}, "exclude_models": []any{},
+			"name_match": "contains", "model_match": "contains",
+		},
+		"ssh":    map[string]any{"protocol": "ssh", "host_key_policy": "accept_new", "log_level": "info"},
+		"backup": map[string]any{"directory": "./backups", "parallel": 4, "limit_per_vendor": 0, "layout": "batch"},
+	}
 	if mode == "topology" {
-		m["topology"] = map[string]any{"mode": "plan", "cache_mode": "prefer", "parallel": 4, "directory": "./topologys", "description_format": "To_%{neighbor}_%{port}", "abbreviate_ports": true, "lowercase_ports": false, "neighbor_name_prefixes": []any{}}
+		// Topology inherits backup.parallel. topology.parallel remains an
+		// optional override so a single batch default applies across commands.
+		m["topology"] = map[string]any{"mode": "plan", "cache_mode": "prefer", "directory": "./topologys", "description_format": "To_%{neighbor}_%{port}", "abbreviate_ports": true, "lowercase_ports": false, "neighbor_name_prefixes": []any{}}
 	}
+	if mode == "backup" || mode == "tftp" {
+		m["tftp"] = map[string]any{"ssh_worker_path": "/usr/local/bin/tftp-archive", "upload_timeout": 180}
+	}
+	policy := "selected"
 	if mode == "tftp" {
-		m["tftp"] = map[string]any{"ssh_worker_path": "/usr/local/bin/net-connector-archive"}
+		policy = "verified"
 	}
+	setPath(m, "backup.success_policy", policy)
 	return m
 }
 
-const EnvironmentTemplate = `# CLI > process environment > YAML > .env > defaults.
-# Credentials are never copied into YAML. Fill in only what you use.
+const EnvironmentTemplate = `# CLI > 进程环境 > YAML > .env > 默认值。
+# 凭据不会写入 YAML，仅填写实际使用的变量。
 # ND_URL=
 # ND_USERNAME=
 # ND_PASSWORD=
 # ND_API_KEY=
+# API key 启用清单缓存时，用同一非敏感账户标识 ND_USERNAME 或 ND_CACHE_NAMESPACE 隔离不同主体。
+# ND_CACHE_NAMESPACE=
 # NC_DEVICE_USERNAME=
 # NC_DEVICE_PASSWORD=
 # NC_ENABLE_PASSWORD=
@@ -33,7 +58,7 @@ const EnvironmentTemplate = `# CLI > process environment > YAML > .env > default
 # ND_DB_USER=
 # ND_DB_PASS=
 # NC_TFTP_SSH_PASSWORD=
-# Single quotes preserve # and $ literally.
+# 单引号保留 # 和 $ 的字面含义。
 `
 
 // Initialize publishes missing files exclusively; it never replaces an existing entry.
@@ -43,10 +68,10 @@ func Initialize(s Snapshot, name string) ([]string, error) {
 
 // InitializeSelected publishes only the files whose creation was approved.
 func InitializeSelected(s Snapshot, name string, createConfig, createEnv bool) ([]string, error) {
-	doc := s.Public()
+	doc := s.initializationValues()
 	if name == "topology" {
 		delete(doc, "backup")
-		set(doc, "topology.mode", "plan")
+		setPath(doc, "topology.mode", "plan")
 	}
 	path, env := s.InitPaths()
 	if filepath.Base(path) == "net-connector.yml" {
@@ -107,7 +132,7 @@ func FromEnvironment(values map[string]string) (map[string]any, error) {
 			if e != nil {
 				return nil, ErrInvalid
 			}
-			set(m, path, v)
+			setPath(m, path, v)
 		}
 	}
 	return m, nil

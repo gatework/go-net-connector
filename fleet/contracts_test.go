@@ -25,7 +25,7 @@ func TestDiagnosticInternalCodesUseCompatibleVocabulary(t *testing.T) {
 	} {
 		t.Run(tc.code, func(t *testing.T) {
 			err := errors.Join(&connector.Error{Code: tc.code, Phase: tc.phase}, errors.New("PRIVATE_CLEANUP"))
-			got := diagnose(err, Artifact{})
+			got := diagnoseError(err, Artifact{})
 			if got.ErrorCode != tc.wantCode || got.Phase != tc.wantPhase || got.ErrorType != "Net::Connector::"+tc.wantKind {
 				t.Fatalf("diagnostic = %#v", got)
 			}
@@ -45,7 +45,7 @@ func TestDiagnosticSecondaryCleanupPreservesPrimaryClassification(t *testing.T) 
 	primary := &connector.Error{Code: "command_timeout", Phase: "command"}
 	cleanup := &connector.Error{Code: "cleanup_failed", Phase: "cleanup"}
 	err := errors.Join(primary, cleanup)
-	got := diagnose(err, Artifact{})
+	got := diagnoseError(err, Artifact{})
 	if got.ErrorCode != "command_timeout" || got.Phase != "command" || got.ErrorType != "Net::Connector::CommandTimeout" || !errors.Is(err, primary) || !errors.Is(err, cleanup) {
 		t.Fatalf("primary classification or error chain lost: %#v", got)
 	}
@@ -55,7 +55,7 @@ func TestDiagnosticCleanupDoesNotReclassifyStorageFailure(t *testing.T) {
 	primary := &storage.WriteError{Cause: syscall.ENOSPC, Receipt: storage.Receipt{State: "not_committed", Phase: "write"}}
 	secondary := &connector.Error{Code: "backup_finalize_failed", Phase: "backup"}
 	err := errors.Join(primary, secondary)
-	diagnostic := diagnose(err, Artifact{})
+	diagnostic := diagnoseError(err, Artifact{})
 	if diagnostic.ErrorCode != "file_write_failed" || diagnostic.ErrorType != "Net::Connector::Storage::AtomicFile::WriteError" || diagnostic.ArtifactState != "not_committed" || diagnostic.UnderlyingType != "Errno::ENOSPC" {
 		t.Fatalf("cleanup replaced primary storage failure: %#v", diagnostic)
 	}
@@ -80,7 +80,7 @@ func TestDiagnosticPreservesPrimaryAcrossMetadataTypes(t *testing.T) {
 		{upload, command, "transfer_unconfirmed", "tftp_backup"},
 	} {
 		err := diagnosticEnvelope{errors.Join(tc.primary, tc.secondary)}
-		got := diagnose(err, Artifact{})
+		got := diagnoseError(err, Artifact{})
 		if got.ErrorCode != tc.code || got.Phase != tc.phase {
 			t.Fatalf("secondary changed primary: %#v", got)
 		}

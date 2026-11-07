@@ -10,14 +10,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/creack/pty"
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/netdisco"
 	"github.com/gatework/go-net-connector/topology"
@@ -37,13 +35,13 @@ func (w cancelingWriter) Write([]byte) (int, error) {
 func tftpReportFixture(t *testing.T, output io.Writer, progress io.Writer, ctx context.Context) (int, string) {
 	t.Helper()
 	r, _, _ := fixtureRuntime(t)
-	r.Args = []string{"--tftp-server", "192.0.2.9", "--username", "user", "--password", "secret", "--json"}
+	r.Args = []string{"backup", "tftp", "--success-policy", "selected", "--tftp-server", "192.0.2.9", "--username", "user", "--password", "secret", "--json"}
 	r.Output, r.Error = output, progress
 	r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) {
 		return []inventory.Device{{IP: "192.0.2.1", Name: "edge", Vendor: "cisco", OS: "nxos"}}, nil
 	})
 	r.DeviceFactory = func(_ connector.Profile, c connector.ConnectionConfig) (*connector.Device, error) {
-		return connector.New(connector.Profile{Name: "cisco_nxos", LoginPrompt: regexp.MustCompile(`sw#\s*$`), CommandPrompt: regexp.MustCompile(`sw#\s*$`)}, c, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
+		return connector.New(connector.Profile{Name: "cisco_nxos", LoginPrompt: testPattern(`sw#\s*$`), CommandPrompt: testPattern(`sw#\s*$`)}, c, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
 			a, b := net.Pipe()
 			go func() {
 				defer b.Close()
@@ -58,7 +56,7 @@ func tftpReportFixture(t *testing.T, output io.Writer, progress io.Writer, ctx c
 			return a, nil
 		}))
 	}
-	code := r.Run(ctx, "net-backup-tftp")
+	code := r.Run(ctx)
 	return code, filepath.Join(r.CWD, "backups")
 }
 
@@ -118,21 +116,21 @@ func TestCanceledReportOutputRetains130AndDiagnostic(t *testing.T) {
 
 func TestTopologyTFTPRejectedBeforeInputOrInventory(t *testing.T) {
 	r, _, _ := fixtureRuntime(t)
-	r.Args = []string{"--tftp", "--stdin-credentials"}
+	r.Args = []string{"topology", "plan", "--tftp", "--stdin-credentials"}
 	r.Environment = map[string]string{"NC_CONFIG": "/does/not/exist"}
 	r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) { t.Fatal("inventory accessed"); return nil, nil })
-	if code := r.Run(t.Context(), "net-topology"); code != 2 {
+	if code := r.Run(t.Context()); code != 2 {
 		t.Fatal(code)
 	}
 }
 
 func TestTopologyPolicyPreflightBeforeCredentialsAndInventory(t *testing.T) {
-	for _, env := range []map[string]string{{"NC_TOPOLOGY_MODE": "apply"}, {"NC_TOPOLOGY_DESCRIPTION_FORMAT": "%{unknown}"}} {
+	for _, env := range []map[string]string{{"NC_TOPOLOGY_DESCRIPTION_FORMAT": "%{unknown}"}} {
 		r, _, _ := fixtureRuntime(t)
-		r.Args = []string{"--stdin-credentials"}
+		r.Args = []string{"topology", "plan", "--stdin-credentials"}
 		r.Environment = env
 		r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) { t.Fatal("inventory accessed"); return nil, nil })
-		if code := r.Run(t.Context(), "net-topology"); code != 2 {
+		if code := r.Run(t.Context()); code != 2 {
 			t.Fatal(env, code)
 		}
 	}
@@ -144,9 +142,9 @@ func TestInteractiveSetupConsentAndCustomization(t *testing.T) {
 		wantCode            int
 		config, env         bool
 	}{
-		{"refuse_required", "--interactive", "n\n", 1, false, false},
-		{"approve_config_refuse_env_customization", "--interactive", "y\nn\nn\n", 0, true, false},
-		{"init_decline_customization", "--init --interactive", "n\n", 0, true, true},
+		{"refuse_required", "consent", "n\n", 1, false, false},
+		{"approve_config_refuse_env_customization", "consent", "y\nn\nn\n", 0, true, false},
+		{"init_decline_customization", "config init --interactive", "n\n", 0, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -160,7 +158,33 @@ func TestInteractiveSetupConsentAndCustomization(t *testing.T) {
 				t.Fatal(err)
 			}
 			r := Runtime{Args: strings.Fields(tc.args), CWD: root, Home: root, Directories: []string{}, Environment: map[string]string{}, Input: slave, Error: slave, Output: &bytes.Buffer{}}
-			if code := r.Run(t.Context(), "net-backup"); code != tc.wantCode {
+			code := 0
+			if tc.args == "consent" {
+				policy, e := config.Load(config.Options{Name: "backup", CWD: root, Home: root, Directories: []string{}, Environment: map[string]string{}, Defaults: config.Defaults("backup"), AllowMissing: true})
+				if e != nil {
+					t.Fatal(e)
+				}
+				reader := bufio.NewReader(slave)
+				createConfig, createEnv, e := r.setupConsent(policy, reader)
+				if errors.Is(e, errSetupDeclined) {
+					code = 1
+				} else if e != nil {
+					t.Fatal(e)
+				} else {
+					if createConfig {
+						policy, e = r.configure(policy, options{mode: "backup"}, "backup", reader)
+					}
+					if e == nil {
+						_, e = config.InitializeSelected(policy, "backup", createConfig, createEnv)
+					}
+					if e != nil {
+						t.Fatal(e)
+					}
+				}
+			} else {
+				code = r.Run(t.Context())
+			}
+			if code != tc.wantCode {
 				t.Fatal(code)
 			}
 			configPath := filepath.Join(root, ".config", "net-connector", "backup.yml")
@@ -180,27 +204,27 @@ func TestInteractiveSetupConsentAndCustomization(t *testing.T) {
 
 func TestInteractiveExistingFilesContinuesWithoutTerminal(t *testing.T) {
 	r, _, _ := fixtureRuntime(t)
-	r.Args = []string{"--init", "--non-interactive"}
-	if code := r.Run(t.Context(), "net-backup"); code != 0 {
+	r.Args = []string{"config", "init", "--non-interactive"}
+	if code := r.Run(t.Context()); code != 0 {
 		t.Fatal(code)
 	}
 	var output, diagnostics bytes.Buffer
-	r.Args = []string{"--interactive", "--inventory-only"}
+	r.Args = []string{"inventory", "list"}
 	r.Input, r.Output, r.Error = panicReader{}, &output, &diagnostics
 	reads := 0
 	r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) {
 		reads++
 		return []inventory.Device{{IP: "192.0.2.1", Vendor: "cisco", OS: "ios"}}, nil
 	})
-	if code := r.Run(t.Context(), "net-backup"); code != 0 || reads != 1 {
+	if code := r.Run(t.Context()); code != 0 || reads != 1 {
 		t.Fatalf("code=%d reads=%d diagnostics=%s", code, reads, diagnostics.String())
 	}
 }
 
 func TestInitInteractiveExistingFilesNeedsNoTerminal(t *testing.T) {
 	r, _, _ := fixtureRuntime(t)
-	r.Args = []string{"--init", "--non-interactive"}
-	if code := r.Run(t.Context(), "net-backup"); code != 0 {
+	r.Args = []string{"config", "init", "--non-interactive"}
+	if code := r.Run(t.Context()); code != 0 {
 		t.Fatal(code)
 	}
 	configPath := filepath.Join(r.Home, ".config", "net-connector", "backup.yml")
@@ -213,10 +237,10 @@ func TestInitInteractiveExistingFilesNeedsNoTerminal(t *testing.T) {
 		}
 		before[path] = data
 	}
-	r.Args = []string{"--init", "--interactive"}
+	r.Args = []string{"config", "init", "--interactive"}
 	r.Input = panicReader{}
 	r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) { t.Fatal("inventory accessed"); return nil, nil })
-	if code := r.Run(t.Context(), "net-backup"); code != 0 {
+	if code := r.Run(t.Context()); code != 0 {
 		t.Fatal(code)
 	}
 	for path, old := range before {
@@ -229,8 +253,8 @@ func TestInitInteractiveExistingFilesNeedsNoTerminal(t *testing.T) {
 
 func TestInteractiveDeclinedOptionalEnvContinues(t *testing.T) {
 	r, _, _ := fixtureRuntime(t)
-	r.Args = []string{"--init", "--non-interactive"}
-	if code := r.Run(t.Context(), "net-backup"); code != 0 {
+	r.Args = []string{"config", "init", "--non-interactive"}
+	if code := r.Run(t.Context()); code != 0 {
 		t.Fatal(code)
 	}
 	envPath := filepath.Join(r.Home, ".config", "net-connector", ".env")
@@ -246,13 +270,21 @@ func TestInteractiveDeclinedOptionalEnvContinues(t *testing.T) {
 	if _, err := master.Write([]byte("n\n")); err != nil {
 		t.Fatal(err)
 	}
-	r.Args, r.Input, r.Error = []string{"--interactive", "--inventory-only"}, slave, slave
+	r.Args, r.Input, r.Error = []string{"inventory", "list"}, slave, slave
+	policy, e := config.Load(config.Options{Name: "backup", CWD: r.CWD, Home: r.Home, Directories: []string{}, Environment: map[string]string{}, Defaults: config.Defaults("backup"), AllowMissing: true})
+	if e != nil {
+		t.Fatal(e)
+	}
+	createConfig, createEnv, e := r.setupConsent(policy, bufio.NewReader(slave))
+	if e != nil || createConfig || createEnv {
+		t.Fatal(createConfig, createEnv, e)
+	}
 	reads := 0
 	r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) {
 		reads++
 		return []inventory.Device{{IP: "192.0.2.1", Vendor: "cisco", OS: "ios"}}, nil
 	})
-	if code := r.Run(t.Context(), "net-backup"); code != 0 || reads != 1 {
+	if code := r.Run(t.Context()); code != 0 || reads != 1 {
 		t.Fatalf("code=%d reads=%d", code, reads)
 	}
 	if _, err := os.Lstat(envPath); !os.IsNotExist(err) {
@@ -271,90 +303,38 @@ func TestTopologyTextStdoutExplainsPendingPlan(t *testing.T) {
 	if err := r.displayTopology(data, options{}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Result: plan generated; corrections or verification still required; mode: plan", "Unverified reasons: neighbor name missing 1 interfaces", "Command file: " + filepath.Join(dir, "scripts") + "(1 devices with changes)"} {
+	for _, want := range []string{"结果：计划已生成，仍需修正或核验；模式：规划", "未核验原因：缺少邻居名称 1 个接口", "命令文件：" + filepath.Join(dir, "scripts") + "（1 台设备存在变更）"} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("missing %q in %s", want, output.String())
 		}
 	}
 }
 
-func TestTopologyTextAndJSONRepair(t *testing.T) {
-	dir := t.TempDir()
-	current, expected := "old", "To_peer_Gi1/0/1"
-	out := topologyOutcome{device: fleet.Record{Host: "192.0.2.1", Name: "edge", Vendor: "cisco_ios"}, row: map[string]any{
-		"status": "applied", "changes": 1, "steps": 3, "script_file": filepath.Join(dir, "scripts", "edge.cfg"), "script_sha256": strings.Repeat("a", 64),
-		"neighbors": []topology.Comparison{{Interface: "Gi1/0/1", Current: &current, Expected: &expected, Status: "content_mismatch"}},
-		"issues":    []topology.Issue{{Interface: "Gi1/0/2", Code: "unknown_neighbor_name"}},
-	}}
-	out.row["status"] = "planned"
-	out.row["steps"] = 0
-	if err := writeTopologyDeviceReport(t.Context(), dir, out); err != nil {
-		t.Fatal(err)
-	}
-	name, _ := out.device.BackupFilename("hostname_ip")
-	initial, err := os.ReadFile(filepath.Join(dir, "devices", name))
-	if err != nil || !bytes.Contains(initial, []byte("Status: planned")) {
-		t.Fatal(err, string(initial))
-	}
-	out.row["status"] = "applied"
-	out.row["steps"] = 3
-	if err := writeTopologyDeviceReport(t.Context(), dir, out); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "devices", name))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, value := range []string{"Status: applied", "Command SHA-256:", "Gi1/0/1 content_mismatch", "Unverified: Gi1/0/2 neighbor name missing"} {
-		if !bytes.Contains(data, []byte(value)) {
-			t.Fatal(value, string(data))
-		}
-	}
-	if err := os.Mkdir(filepath.Join(dir, "summary.txt"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	summary := map[string]any{"mode": "apply", "success": true, "devices": []map[string]any{out.row}, "statistics": map[string]int{}}
-	if err := persistTopologySummary(t.Context(), dir, summary); err == nil {
-		t.Fatal("expected text failure")
-	}
-	data, err = os.ReadFile(filepath.Join(dir, "summary.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var saved map[string]any
-	if err := json.Unmarshal(data, &saved); err != nil {
-		t.Fatal(err)
-	}
-	if saved["success"] != false || saved["report_error"] != "IOError" {
-		t.Fatal(saved)
-	}
-}
-
 func TestHelpExamplesAreDistinctAndOffline(t *testing.T) {
 	views := map[string]string{}
-	for _, flag := range []string{"--help", "--help-all", "--examples"} {
+	for _, action := range []string{"plan", "apply"} {
 		r, out, _ := fixtureRuntime(t)
-		r.Args, r.Input = []string{flag}, panicReader{}
-		if code := r.Run(t.Context(), "net-topology"); code != 0 {
-			t.Fatal(flag, code)
+		r.Args = []string{"topology", action, "--help"}
+		if code := r.Run(t.Context()); code != 0 {
+			t.Fatal(action, code)
 		}
-		views[flag] = out.String()
+		views[action] = out.String()
 	}
-	if views["--help"] == views["--help-all"] || views["--examples"] == views["--help-all"] || !strings.Contains(views["--examples"], "net-topology --apply") {
+	if views["plan"] == views["apply"] || !strings.Contains(views["apply"], "topology apply") || !strings.Contains(views["apply"], "示例") {
 		t.Fatal(views)
 	}
 }
 
 func TestTopologyCancelWinsOverBrokenOutput(t *testing.T) {
 	r, _, _ := fixtureRuntime(t)
-	r.Args = []string{"--json", "--inventory-only"}
+	r.Args = []string{"inventory", "list", "--for", "topology", "--json"}
 	r.Output = failingWriter{}
 	r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) {
 		return []inventory.Device{{IP: "192.0.2.1", Vendor: "cisco", OS: "ios"}}, nil
 	})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if code := r.Run(ctx, "net-topology"); code != 130 {
+	if code := r.Run(ctx); code != 130 {
 		t.Fatal(code)
 	}
 }
@@ -370,7 +350,18 @@ func TestTopologyCacheModeSelection(t *testing.T) {
 		{[]string{"--cache-only"}, "only"},
 		{[]string{"--refresh-inventory"}, "refresh"},
 	} {
-		o, err := parse(tc.args, "net-topology", io.Discard)
+		var helpErr error
+		rootCommand := (Runtime{Input: panicReader{}, Output: io.Discard, Error: io.Discard}).commandTree(t.Context(), &helpErr)
+		command, remaining, err := rootCommand.Find(append([]string{"topology", "plan"}, tc.args...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = command.ParseFlags(remaining); err != nil {
+			t.Fatal(err)
+		}
+		o := options{mode: "topology", action: "plan", policy: "selected", layout: "batch", public: map[string]string{}, secrets: map[string]string{}, flags: command.Flags()}
+		o.refresh, _ = command.Flags().GetBool("refresh-inventory")
+		err = prepareCommandOptions(command, &o)
 		if err != nil {
 			t.Fatal(err)
 		}

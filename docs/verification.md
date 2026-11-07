@@ -19,7 +19,7 @@
 | Darwin/Linux × amd64/arm64 的全部五个二进制交叉构建 | `baseline/cross-builds.log` |
 | go-expect additive APIs、默认行为和 goroutine 回收 | `baseline/expect-race.log` |
 | 独立源码重建、GOWORK=off 消费者、内嵌模板、目录外 CLI | `baseline/consumer-tests.log` |
-| 候选源码额外输入、符号链接、内容漂移与独立重建 | `scripts/test_prepare_workspace.py`，6 项通过 |
+| 候选源码额外输入、符号链接、内容漂移与独立重建 | 历史检查；本地快照重建流程已随 go-expect v0.4.0 正式依赖而退役 |
 | YAML、上传目标随机输入测试 | `baseline/fuzz-config.log`、`fuzz-transfer.log` |
 | 64 KiB/1/8/32 MiB、1,000 页、1,000/10,000 mock devices | `baseline/go-benchmarks.log`、`go-benchmarks-rss.log` |
 
@@ -27,7 +27,7 @@ connector、archive、parallel 和 go-expect 使用 goleak 检查测试退出后
 
 ```sh
 go build -o bin/ ./cmd/...
-NC_TEST_ARCHIVE_WORKER="$PWD/bin/net-connector-archive" \
+NC_TEST_ARCHIVE_WORKER="$PWD/bin/tftp-archive" \
 NC_TEST_POSTGRES_BIN=/opt/homebrew/opt/postgresql@18/bin \
 go test -race ./... -count=1 -timeout 120s
 ```

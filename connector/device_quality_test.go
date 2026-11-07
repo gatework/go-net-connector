@@ -68,7 +68,7 @@ func TestRenderedSnapshotPreservesOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	step := r.Steps()[0]
-	view, ok := any(step).(renderedStep)
+	view, ok := any(step.Response()).(renderedStep)
 	if !ok {
 		t.Fatal("missing Rendered accessor")
 	}
@@ -76,7 +76,7 @@ func TestRenderedSnapshotPreservesOutput(t *testing.T) {
 	if err != nil || got != "new\nsw#" {
 		t.Fatalf("rendered=%q err=%v", got, err)
 	}
-	if step.Raw() != "old\rnew\x1b[K\r\nsw#" || step.Output() != step.Raw() {
+	if step.Response().Raw() != "old\rnew\x1b[K\r\nsw#" || testStepOutput(step) != step.Response().Raw() {
 		t.Fatal("rendering changed raw or output contract")
 	}
 	if err = d.Close(); err != nil {

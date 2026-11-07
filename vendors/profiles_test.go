@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/topology"
+	"github.com/gatework/go-net-connector/transfer"
 )
 
-func TestProfilesExactCommandsAndCapabilities(t *testing.T) {
+func TestProfilesAndDeclaredBehaviors(t *testing.T) {
 	cases := []struct {
 		name               string
 		config, save       []string
@@ -30,19 +32,16 @@ func TestProfilesExactCommandsAndCapabilities(t *testing.T) {
 		{"juniper", []string{"show configuration | display set | no-more"}, nil, 120, "audit@ex01> ", "scp: permission denied"},
 		{"centec", []string{"terminal length 0", "show running-config"}, []string{"copy running-config startup-config"}, 60, "Switch#", "% Syntax error"},
 	}
-	if len(Names()) != len(cases) {
-		t.Fatalf("names: %v", Names())
+	if len(NewBuiltinRegistry().Names()) != len(cases) {
+		t.Fatalf("names: %v", NewBuiltinRegistry().Names())
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			p, e := Profile(c.name)
-			if e != nil {
-				t.Fatal(e)
-			}
+			p := profileForTest(t, c.name)
 			if !reflect.DeepEqual(p.ConfigCommands, c.config) || !reflect.DeepEqual(p.SaveCommands, c.save) || p.CommandTimeout != time.Duration(c.seconds)*time.Second {
 				t.Fatalf("profile: %#v", p)
 			}
-			if !p.LoginPrompt.MatchString(c.prompt) || !p.CommandPrompt.MatchString(c.prompt) {
+			if !matchesPattern(p.LoginPrompt, c.prompt) || !matchesPattern(p.CommandPrompt, c.prompt) {
 				t.Fatal("prompt rejected")
 			}
 			match := false
@@ -57,11 +56,21 @@ func TestProfilesExactCommandsAndCapabilities(t *testing.T) {
 			wantDesc := c.name != "topsec" && c.name != "centec"
 			wantNeighbors := wantDesc && c.name != "radware"
 			wantWrite := c.name == "h3c" || c.name == "h3c_wireless" || c.name == "cisco_ios" || c.name == "cisco_nxos" || c.name == "hillstone"
-			if p.Capabilities != (connector.Capabilities{Save: wantSave, TFTP: wantTFTP, RemoteBackup: c.name == "juniper", Descriptions: wantDesc, Neighbors: wantNeighbors, TopologyWrite: wantWrite}) {
-				t.Fatalf("capabilities: %+v", p.Capabilities)
+			declaration, err := NewBuiltinRegistry().Lookup(c.name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, hasTFTP := declaration.(transfer.TFTPPolicy)
+			_, hasDescriptions := declaration.(topology.DescriptionReader)
+			_, hasNeighbors := declaration.(topology.NeighborDiscovery)
+			_, hasWriter := declaration.(topology.DescriptionWriter)
+			_, hasRemoteBackup := declaration.(transfer.RemoteBackupPolicy)
+			hasSave := len(p.SaveCommands) > 0
+			if hasSave != wantSave || hasTFTP != wantTFTP || hasDescriptions != wantDesc || hasNeighbors != wantNeighbors || hasWriter != wantWrite || hasRemoteBackup != (c.name == "juniper") {
+				t.Fatalf("platform behavior mismatch: save=%t tftp=%t descriptions=%t neighbors=%t writer=%t remote_backup=%t", hasSave, hasTFTP, hasDescriptions, hasNeighbors, hasWriter, hasRemoteBackup)
 			}
 			p.ConfigCommands[0] = "mutated"
-			again, _ := Profile(c.name)
+			again := profileForTest(t, c.name)
 			if again.ConfigCommands[0] == "mutated" {
 				t.Fatal("shared mutable commands")
 			}
@@ -70,7 +79,7 @@ func TestProfilesExactCommandsAndCapabilities(t *testing.T) {
 			}
 		})
 	}
-	if _, e := Profile("paloalto"); !errors.Is(e, connector.ErrUnsupported) {
+	if _, e := NewBuiltinRegistry().Lookup("paloalto"); !errors.Is(e, connector.ErrUnsupported) {
 		t.Fatalf("unknown: %v", e)
 	}
 }
@@ -86,14 +95,14 @@ func TestInteractionsAndPrivilege(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.vendor+c.input, func(t *testing.T) {
-			p, _ := Profile(c.vendor)
+			p := profileForTest(t, c.vendor)
 			rules := p.Interactions
 			if c.login {
 				rules = p.LoginInteractions
 			}
 			got := ""
 			for _, r := range rules {
-				if r.Pattern.MatchString(c.input) {
+				if matchesPattern(r.Pattern, c.input) {
 					if r.Capture != (c.vendor != "fortinet") {
 						t.Error("interaction capture differs from source")
 					}
@@ -109,8 +118,8 @@ func TestInteractionsAndPrivilege(t *testing.T) {
 			}
 		})
 	}
-	p, _ := Profile("huawei")
-	if p.PrivilegeCommand != "su" || !p.PrivilegePrompt.MatchString("privilege level is 3\n<Huawei>") {
+	p := profileForTest(t, "huawei")
+	if p.PrivilegeCommand != "su" || !matchesPattern(p.PrivilegePrompt, "privilege level is 3\n<Huawei>") {
 		t.Fatal("privilege")
 	}
 }
@@ -128,7 +137,7 @@ func (x *hookExecutor) Execute(_ context.Context, c connector.Command) (connecto
 	return connector.StepResult{}, x.err
 }
 func TestH3CRuleHook(t *testing.T) {
-	p, _ := Profile("h3c")
+	p := profileForTest(t, "h3c")
 	x := &hookExecutor{values: map[string]string{}}
 	c := connector.Command{Text: "rule XXX append source-ip 192.0.2.1"}
 	if _, _, e := p.Prepare(t.Context(), c, x); e == nil {

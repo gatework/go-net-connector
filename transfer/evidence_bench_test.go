@@ -2,7 +2,10 @@ package transfer
 
 import (
 	"fmt"
+	"strings"
 	"testing"
+
+	"github.com/gatework/go-net-connector/connector"
 )
 
 func BenchmarkCompleted(b *testing.B) {
@@ -18,6 +21,7 @@ func BenchmarkCompleted(b *testing.B) {
 		{"h3c_wireless", "TFTP: 123 bytes sent in 0.25 second(s)"},
 		{"huawei", "100 123k 0 0 100 123k 0 0 0"},
 	} {
+		policy := tftpPolicyForTest(b, test.vendor)
 		for _, count := range []int{1, 1000, 10000} {
 			for _, outcome := range []string{"success_last", "absent"} {
 				b.Run(fmt.Sprintf("%s/lines=%d/%s", test.vendor, count, outcome), func(b *testing.B) {
@@ -38,7 +42,7 @@ func BenchmarkCompleted(b *testing.B) {
 					b.ReportAllocs()
 					var got bool
 					for b.Loop() {
-						got = completed(test.vendor, lines)
+						_, got, _ = policy.Completed(lines, TFTPOptions{Server: "192.0.2.9", Path: "backup.tgz"})
 					}
 					if got != want {
 						b.Fatalf("completion = %t, want %t", got, want)
@@ -46,5 +50,23 @@ func BenchmarkCompleted(b *testing.B) {
 				})
 			}
 		}
+	}
+}
+
+func BenchmarkEvidence(b *testing.B) {
+	for _, size := range []int{64 << 10, 1 << 20, 16 << 20} {
+		b.Run(fmt.Sprintf("bytes=%d", size), func(b *testing.B) {
+			line := "Interface Ethernet1 telemetry progress 73 percent\r"
+			output := strings.Repeat(line, size/len(line)+1)[:size]
+			steps := []evidenceStep{{command: connector.Command{Text: "show configuration"}, prompt: "switch#", output: output}}
+			b.SetBytes(int64(size))
+			b.ReportAllocs()
+			for b.Loop() {
+				_, _, err := collectEvidence(steps, failed)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }

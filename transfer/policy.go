@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
 type PolicyOptions struct {
@@ -13,7 +15,7 @@ type PolicyOptions struct {
 	Servers, Roots                      map[string]string
 	SourceFiles, SourceInterfaces, VRFs map[string]any
 }
-type Effective struct {
+type Target struct {
 	TFTPOptions
 	Root string
 }
@@ -25,6 +27,7 @@ type Policy struct {
 	server                  string
 	servers, roots          map[string]string
 	files, interfaces, vrfs map[string]vendorValue
+	platforms               map[string]TFTPPolicy
 }
 
 func exactAddress(host string) (string, error) {
@@ -80,8 +83,25 @@ func VerificationRoot(root string) (string, error) {
 	}
 	return p, nil
 }
-func NewPolicy(o PolicyOptions) (*Policy, error) {
-	p := &Policy{servers: map[string]string{}, roots: map[string]string{}}
+func NewPolicy(o PolicyOptions, registry dialect.Registry) (*Policy, error) {
+	if registry == nil {
+		return nil, ErrInvalid
+	}
+	names := registry.Names()
+	if len(names) == 0 {
+		return nil, ErrInvalid
+	}
+	p := &Policy{servers: map[string]string{}, roots: map[string]string{}, platforms: make(map[string]TFTPPolicy)}
+	for _, name := range names {
+		declaration, err := registry.Lookup(name)
+		if err != nil {
+			return nil, ErrInvalid
+		}
+		platform, ok := declaration.(TFTPPolicy)
+		if ok {
+			p.platforms[name] = platform
+		}
+	}
 	var e error
 	if o.Server != "" {
 		p.server, e = serverName(o.Server)
@@ -136,40 +156,37 @@ func NewPolicy(o PolicyOptions) (*Policy, error) {
 		}
 		seen[root] = true
 	}
-	p.files, e = vendorValues(o.SourceFiles, []string{"h3c", "h3c_wireless", "huawei"}, func(_ string, v string) error {
+	p.files, e = vendorValues(o.SourceFiles, p.platforms, func(platform TFTPPolicy, v string) error {
 		if v == "" {
 			return nil
 		}
-		return ValidateSource(v)
-	})
-	if e != nil {
-		return nil, e
-	}
-	p.interfaces, e = vendorValues(o.SourceInterfaces, []string{"h3c", "h3c_wireless", "radware", "centec"}, func(vendor, value string) error {
-		return Validate(vendor, "192.0.2.1", TFTPOptions{Server: "preflight.invalid", SourceInterface: value})
-	})
-	if e != nil {
-		return nil, e
-	}
-	p.vrfs, e = vendorValues(o.VRFs, []string{"cisco_nxos", "hillstone"}, func(_ string, v string) error {
-		if v != "" && !vrfPattern.MatchString(v) {
+		if ValidateSource(v) != nil {
 			return ErrInvalid
 		}
-		return nil
+		return platform.ValidateOptions("192.0.2.1", TFTPOptions{Server: "preflight.invalid", SourceFile: v})
+	})
+	if e != nil {
+		return nil, e
+	}
+	p.interfaces, e = vendorValues(o.SourceInterfaces, p.platforms, func(platform TFTPPolicy, value string) error {
+		return platform.ValidateOptions("192.0.2.1", TFTPOptions{Server: "preflight.invalid", SourceInterface: value})
+	})
+	if e != nil {
+		return nil, e
+	}
+	p.vrfs, e = vendorValues(o.VRFs, p.platforms, func(platform TFTPPolicy, v string) error {
+		return platform.ValidateOptions("192.0.2.1", TFTPOptions{Server: "preflight.invalid", VRF: v})
 	})
 	if e != nil {
 		return nil, e
 	}
 	return p, nil
 }
-func vendorValues(values map[string]any, allowed []string, validate func(string, string) error) (map[string]vendorValue, error) {
+func vendorValues(values map[string]any, platforms map[string]TFTPPolicy, validate func(TFTPPolicy, string) error) (map[string]vendorValue, error) {
 	out := map[string]vendorValue{}
 	for vendor, raw := range values {
-		found := false
-		for _, name := range allowed {
-			found = found || name == vendor
-		}
-		if !found {
+		platform, ok := platforms[vendor]
+		if !ok {
 			return nil, ErrInvalid
 		}
 		value := vendorValue{hosts: map[string]string{}}
@@ -181,7 +198,7 @@ func vendorValues(values map[string]any, allowed []string, validate func(string,
 			if !ok || s == "" {
 				return "", ErrInvalid
 			}
-			return s, validate(vendor, s)
+			return s, validate(platform, s)
 		}
 		if m, ok := raw.(map[string]any); ok {
 			for k := range m {
@@ -225,10 +242,10 @@ func vendorValues(values map[string]any, allowed []string, validate func(string,
 	}
 	return out, nil
 }
-func (p *Policy) For(host, vendor string) (Effective, error) {
+func (p *Policy) For(host, vendor string) (Target, error) {
 	h, e := exactAddress(host)
 	if e != nil {
-		return Effective{}, e
+		return Target{}, e
 	}
 	server := p.server
 	if s, ok := p.servers[h]; ok {
@@ -241,5 +258,17 @@ func (p *Policy) For(host, vendor string) (Effective, error) {
 		}
 		return v.fallback
 	}
-	return Effective{TFTPOptions: TFTPOptions{Server: server, SourceFile: get(p.files), SourceInterface: get(p.interfaces), VRF: get(p.vrfs)}, Root: p.roots[server]}, nil
+	vrf := get(p.vrfs)
+	platform, ok := p.platforms[vendor]
+	if !ok {
+		return Target{}, ErrUnsupported
+	}
+	if vrf == "" {
+		vrf = platform.DefaultVRF()
+	}
+	root := p.roots[server]
+	if platform.RequiresVerificationRoot() && server != "" && root == "" {
+		return Target{}, ErrInvalid
+	}
+	return Target{TFTPOptions: TFTPOptions{Server: server, SourceFile: get(p.files), SourceInterface: get(p.interfaces), VRF: vrf}, Root: root}, nil
 }

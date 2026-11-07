@@ -156,6 +156,26 @@ func (w *contextWriter) Write(p []byte) (int, error) {
 	}
 	return w.w.Write(p)
 }
+
+// WriteString keeps the caller's immutable text while converting only bounded
+// chunks for the underlying byte writer. Each chunk observes cancellation.
+func (w *contextWriter) WriteString(text string) (int, error) {
+	buffer := make([]byte, 32<<10)
+	total := 0
+	for len(text) > 0 {
+		n := copy(buffer, text)
+		written, err := w.Write(buffer[:n])
+		total += written
+		if err != nil {
+			return total, err
+		}
+		if written != n {
+			return total, io.ErrShortWrite
+		}
+		text = text[n:]
+	}
+	return total, w.ctx.Err()
+}
 func Write(ctx context.Context, path string, body []byte) (Receipt, error) {
 	return WriteStream(ctx, path, func(w io.Writer) error {
 		n, e := w.Write(body)
@@ -172,7 +192,7 @@ type Fingerprint struct {
 	Info   os.FileInfo
 }
 
-func Read(ctx context.Context, path string, limit int64) ([]byte, Fingerprint, error) {
+func readFile(ctx context.Context, path string, limit int64, includeContents bool) ([]byte, Fingerprint, error) {
 	if e := ctx.Err(); e != nil {
 		return nil, Fingerprint{}, e
 	}
@@ -195,6 +215,17 @@ func Read(ctx context.Context, path string, limit int64) ([]byte, Fingerprint, e
 	if s.Size() > limit {
 		return nil, Fingerprint{}, ErrLimit
 	}
+	if !includeContents {
+		h := sha256.New()
+		n, err := io.CopyBuffer(h, io.LimitReader(&contextReader{ctx: ctx, r: f}, limit+1), make([]byte, 32<<10))
+		if err != nil {
+			return nil, Fingerprint{}, err
+		}
+		if n > limit {
+			return nil, Fingerprint{}, ErrLimit
+		}
+		return nil, Fingerprint{hex.EncodeToString(h.Sum(nil)), s.Mode(), s}, nil
+	}
 	b, e := io.ReadAll(io.LimitReader(&contextReader{ctx: ctx, r: f}, limit+1))
 	if e != nil {
 		return nil, Fingerprint{}, e
@@ -204,6 +235,15 @@ func Read(ctx context.Context, path string, limit int64) ([]byte, Fingerprint, e
 	}
 	sum := sha256.Sum256(b)
 	return b, Fingerprint{hex.EncodeToString(sum[:]), s.Mode(), s}, nil
+}
+
+// Inspect verifies a bounded regular file without retaining its content.
+func Inspect(ctx context.Context, path string, limit int64) (Fingerprint, error) {
+	_, f, e := readFile(ctx, path, limit, false)
+	return f, e
+}
+func Read(ctx context.Context, path string, limit int64) ([]byte, Fingerprint, error) {
+	return readFile(ctx, path, limit, true)
 }
 
 type contextReader struct {

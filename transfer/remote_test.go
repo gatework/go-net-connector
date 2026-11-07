@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/vendors"
 )
 
 func TestRemoteExactCompletionAndFailurePriority(t *testing.T) {
@@ -19,13 +22,27 @@ func TestRemoteExactCompletionAndFailurePriority(t *testing.T) {
 	} {
 		command := "show configuration | save scp://backup@192.0.2.9/site/config.conf"
 		d := transferDevice(t, "juniper", [][2]string{{command, "Password: "}, {"secret", tc.body + "\r\nsw#"}})
-		r, e := RemoteBackup(t.Context(), d, RemoteOptions{Server: "192.0.2.9", Path: "site/config.conf", Username: "backup", Password: "secret"})
+		r, e := RemoteBackup(t.Context(), vendors.NewBuiltinRegistry(), d, RemoteOptions{Server: "192.0.2.9", Path: "site/config.conf", Username: "backup", Password: "secret"})
 		if (e == nil) != tc.ok || r.Receipt.Reported() != tc.ok {
 			t.Fatal(r, e)
 		}
 		if strings.Contains(fmt.Sprintf("%#v %v", r, e), "secret") {
 			t.Fatal("secret disclosed")
 		}
+	}
+}
+
+func TestRemoteBackupRequiresDialectCapability(t *testing.T) {
+	declaration, err := vendors.NewBuiltinRegistry().Lookup("h3c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := connector.New(declaration.Profile(), connector.ConnectionConfig{Host: "192.0.2.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = RemoteBackup(t.Context(), vendors.NewBuiltinRegistry(), d, RemoteOptions{Server: "192.0.2.9", Path: "config.cfg", Username: "backup"}); err != ErrUnsupported {
+		t.Fatalf("remote backup error = %v, want unsupported", err)
 	}
 }
 func TestRemoteRejectsBeforeDeviceIO(t *testing.T) {

@@ -72,7 +72,7 @@ func (p *processTransport) Close() error {
 		if e != nil && !errors.Is(e, unix.ESRCH) {
 			signalFailure = errors.Join(signalFailure, fmt.Errorf("terminate process group: %w", e))
 		}
-		timer := time.NewTimer(200 * time.Millisecond)
+		timer := time.NewTimer(100 * time.Millisecond)
 		select {
 		case <-p.done:
 			timer.Stop()
@@ -85,7 +85,7 @@ func (p *processTransport) Close() error {
 			signalFailure = errors.Join(signalFailure, fmt.Errorf("kill process group: %w", e))
 		}
 		if !p.reaped {
-			timer = time.NewTimer(2 * time.Second)
+			timer = time.NewTimer(time.Second)
 			select {
 			case <-p.done:
 				timer.Stop()

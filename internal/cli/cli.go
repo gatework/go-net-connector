@@ -1,4 +1,4 @@
-// Package cli hosts the four command entrypoints without process-global state.
+// Package cli hosts the unified command tree without process-global state.
 package cli
 
 import (
@@ -9,21 +9,22 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/internal/bootstrap"
+	"github.com/gatework/go-net-connector/internal/display"
+	"github.com/gatework/go-net-connector/internal/progress"
+	"github.com/gatework/go-net-connector/internal/workflow"
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/netdisco"
-	"github.com/gatework/go-net-connector/storage"
 )
 
 type Runtime struct {
+	reporter           *progress.Reporter
 	Args               []string
 	Environment        map[string]string
 	Input              io.Reader
@@ -35,7 +36,7 @@ type Runtime struct {
 }
 
 func integerString(n int) string { return strconv.Itoa(n) }
-func (r Runtime) Run(ctx context.Context, program string) int {
+func (r Runtime) Run(ctx context.Context) int {
 	if r.Input == nil {
 		r.Input = os.Stdin
 	}
@@ -52,23 +53,53 @@ func (r Runtime) Run(ctx context.Context, program string) int {
 			r.Environment[k] = v
 		}
 	}
-	o, e := parse(r.Args, program, r.Output)
-	if e != nil {
-		return r.fail(program, e)
+	return r.runCommands(ctx)
+}
+func (r Runtime) executeSelected(ctx context.Context, o options) int {
+	const program = "netman"
+	var reporter *progress.Reporter
+	var stopUpdates func()
+	resumeSetup := func() {}
+	if !o.quiet && o.action != "init" && o.action != "show" && o.action != "check" && o.action != "export" {
+		reporter = progress.New(r.Error, o.verbose)
+		r.reporter = reporter
+		_ = reporter.Section(operationLabel(o))
+		_ = reporter.Phase("正在加载配置")
+		resumeSetup = reporter.Pause()
+		defer resumeSetup()
+		stopUpdates = reporter.RunUpdates(ctx)
+		defer stopUpdates()
 	}
-	if o.help {
-		return 0
+	if o.action == "export" {
+		return r.exportBatch(ctx, o.export, o.batch, o.output, o.json)
+	}
+	if o.action == "init" {
+		o.init = true
+	}
+	if o.action == "show" {
+		o.show = true
+	}
+	o.inventoryOnly = o.action == "inventory"
+	if o.action == "plan" && o.mode != "topology" || o.inventoryOnly {
+		o.plan = true
+	}
+	if o.mode == "topology" {
+		o.apply = o.action == "apply"
+		o.discover = o.action == "discover"
+		o.topologyMode = o.action
+		if o.inventoryOnly {
+			o.topologyMode = "plan"
+		}
 	}
 	overrides, e := config.FromEnvironment(o.public)
 	if e != nil {
 		return r.fail(program, e)
 	}
 	defaults := config.Defaults(o.mode)
-	if program == "net-backup" && !o.all && o.sample == 0 {
-		defaults["backup"].(map[string]any)["limit_per_vendor"] = 5
-	}
+
 	if o.all {
-		delete(defaults["backup"].(map[string]any), "limit_per_vendor")
+		o.public["NC_SAMPLE_PER_VENDOR"] = "0"
+		overrides, e = config.FromEnvironment(o.public)
 	}
 	name := "backup"
 	if o.mode == "topology" {
@@ -78,9 +109,16 @@ func (r Runtime) Run(ctx context.Context, program string) int {
 	if e != nil {
 		return r.fail(program, e)
 	}
+	o.policy, _ = policy.Value("backup.success_policy").(string)
+	if o.policy != "strict" && o.policy != "selected" && o.policy != "verified" {
+		return r.fail(program, &config.FieldError{Field: "backup.success_policy", Problem: "invalid"})
+	}
+	if !o.init && !o.show && o.policy == "verified" && o.mode != "tftp" {
+		return r.fail(program, &config.FieldError{Field: "backup.success_policy", Problem: "invalid"})
+	}
 	if o.init || o.interactive {
 		createConfig, createEnv := true, true
-		reader := bufio.NewReader(r.Input)
+		reader := bufio.NewReader(contextInput(ctx, r.Input))
 		if o.init {
 			configPath, envPath := policy.InitPaths()
 			createConfig, e = missingSetupFile(configPath)
@@ -115,50 +153,41 @@ func (r Runtime) Run(ctx context.Context, program string) int {
 				}
 			}
 			created, e := config.InitializeSelected(policy, name, createConfig, createEnv)
-			if e != nil {
+			return r.renderInitialization(created, o.mode, e, o.json)
+		}
+	}
+	if o.mode == "tftp" && (o.action == "check" || !o.show && !o.plan && !o.inventoryOnly) {
+		if e := bootstrap.ValidateTFTP(policy, o.policy); e != nil {
+			return r.fail(program, e)
+		}
+	}
+	if o.action == "check" {
+		if o.mode == "topology" {
+			mode, _ := policy.Value("topology.mode").(string)
+			if e := workflow.ValidateTopologyPolicy(policy, workflow.TopologyOptions{Mode: mode}); e != nil {
 				return r.fail(program, e)
 			}
-			for _, path := range created {
-				fmt.Fprintln(r.Error, "Initialized:", path)
-			}
-			fmt.Fprintln(r.Error, "Review configuration and run again; no inventory or devices were accessed.")
-			return 0
 		}
+		_, e := bootstrap.New(policy, nil)
+		if e != nil {
+			return r.fail(program, e)
+		}
+		return r.renderConfiguration(map[string]any{"valid": true, "scope": o.mode}, o.mode, true, o.json)
 	}
 	if o.show {
 		data := policy.Public()
 		data["sources"] = policy.Sources()
-		return r.print(data)
-	}
-	if o.export != "" {
-		directory, _ := policy.Value("backup.directory").(string)
-		if o.output != "" {
-			_, e = storage.ExportSaved(ctx, directory, o.export, o.output)
-			if e == nil {
-				return r.print(map[string]any{"host": o.export, "output": o.output})
-			}
-		} else {
-			var b []byte
-			b, e = storage.ReadSaved(ctx, directory, o.export)
-			if e == nil {
-				var n int
-				n, e = r.Output.Write(b)
-				if e == nil && n != len(b) {
-					e = io.ErrShortWrite
-				}
-			}
-		}
-		if e != nil {
-			return r.fail(program, e)
-		}
-		return 0
+		return r.renderConfiguration(data, o.mode, false, o.json)
 	}
 	if o.mode == "topology" {
-		if e := validateTopologyPolicy(policy, o); e != nil {
+		if e := workflow.ValidateTopologyPolicy(policy, topologyOptions(o)); e != nil {
 			return r.fail(program, e)
 		}
 	}
-	if e := r.passwords(&o); e != nil {
+	resume := reporter.Pause()
+	passwordErr := r.passwords(ctx, &o)
+	resume()
+	if e := passwordErr; e != nil {
 		return r.fail(program, e)
 	}
 	env := policy.Environment()
@@ -184,8 +213,11 @@ func (r Runtime) Run(ctx context.Context, program string) int {
 		}
 		env[key] = value
 	}
-	reader := bufio.NewReader(r.Input)
+	reader := bufio.NewReader(contextInput(ctx, r.Input))
 	if o.stdin {
+		if reporter != nil {
+			_ = reporter.Phase("等待标准输入凭据：请输入一行 JSON")
+		}
 		line, e := readLine(reader, 64<<10)
 		if e != nil {
 			return r.fail(program, e)
@@ -214,9 +246,12 @@ func (r Runtime) Run(ctx context.Context, program string) int {
 	if e != nil {
 		return r.fail(program, e)
 	}
-	defer services.Close()
 	if r.DeviceFactory != nil {
 		services = services.WithDeviceFactory(r.DeviceFactory)
+	}
+	resumeSetup()
+	if reporter != nil {
+		_ = reporter.Phase("正在读取设备清单")
 	}
 	var rows []inventory.Device
 	if r.Source != nil {
@@ -226,10 +261,10 @@ func (r Runtime) Run(ctx context.Context, program string) int {
 		result, e = services.Inventory(ctx, inventoryMode(policy, o))
 		rows = result.Rows
 		if result.RefreshErrorCode != "" {
-			fmt.Fprintln(r.Error, "Inventory refresh failed; validated cache used")
+			reporter.Warning("设备清单刷新失败，已使用校验通过的缓存")
 		}
 		if result.WriteErrorType != "" {
-			fmt.Fprintln(r.Error, "Inventory cache write failed; fresh inventory retained")
+			reporter.Warning("清单缓存写入失败，继续使用本次获取的清单")
 		}
 	}
 	if e != nil {
@@ -238,30 +273,86 @@ func (r Runtime) Run(ctx context.Context, program string) int {
 		}
 		return r.fail(program, e)
 	}
-	if o.mode == "topology" {
-		return r.runTopology(ctx, services, rows, o, reader)
+	if reporter != nil {
+		_ = reporter.Phase(fmt.Sprintf("设备清单读取完成：%d 台；正在生成计划", len(rows)))
 	}
-	if o.mode == "tftp" && !(o.plan && o.flags.Changed("inventory-only")) {
-		return r.runTFTP(ctx, services, rows, o, reader, program)
-	}
-	limit := services.Limit()
-	if o.all {
-		limit = 0
-	}
-	plan, e := fleet.NewPlan(rows, services.Rules(), fleet.PlanOptions{Mode: "backup", LimitPerVendor: limit})
-	if e != nil {
-		return r.fail(program, e)
-	}
-	if o.plan {
-		return r.preview(plan, planView(plan, program), o, program)
-	}
-	if o.stdin {
+	if o.stdin && !o.plan && (o.mode != "topology" || o.apply) {
+		if reporter != nil {
+			_ = reporter.Phase("等待执行确认：请输入 RUN")
+		}
+		resumeConfirm := reporter.Pause()
+		_ = reporter.Notice("等待执行确认：请输入 RUN")
 		line, e := readLine(reader, 64)
+		resumeConfirm()
 		if e != nil || strings.TrimSpace(line) != "RUN" {
 			return r.fail(program, config.ErrInvalid)
 		}
 	}
-	return r.backup(ctx, services, plan, o, program)
+	layout, _ := policy.Value("backup.layout").(string)
+	if layout == "" {
+		layout = "batch"
+	}
+	o.layout = layout
+	w := &workflow.Runner{Reporter: reporter}
+	if !o.quiet {
+		w.Progress = r.Error
+	}
+	workflowRun := workflowRuntime(services)
+	var result workflow.Result
+	if o.mode == "topology" {
+		var settings workflow.TopologySettings
+		settings, e = topologySettings(policy, services)
+		if e != nil {
+			return r.fail(program, e)
+		}
+		result, e = w.Topology(ctx, workflowRun, settings, rows, topologyOptions(o))
+	} else if o.mode == "tftp" && !o.inventoryOnly {
+		var settings workflow.TFTPSettings
+		settings, e = tftpSettings(services)
+		if e != nil {
+			return r.fail(program, e)
+		}
+		result, e = w.TFTP(ctx, workflowRun, settings, rows, workflow.TFTPOptions{BackupOptions: backupOptions(o), Plan: o.plan, All: o.all})
+	} else {
+		limit := services.Limit()
+		if o.all {
+			limit = 0
+		}
+		plan, err := fleet.NewPlan(rows, services.Rules(), fleet.PlanOptions{Mode: "backup", LimitPerVendor: limit})
+		if err != nil {
+			return r.fail(program, err)
+		}
+		if o.plan {
+			result = workflow.Preview(plan)
+		} else {
+			result, e = w.Backup(ctx, workflowRun, plan, backupOptions(o))
+		}
+	}
+	if stopUpdates != nil {
+		stopUpdates()
+	}
+	var progressErr error
+	if reporter != nil {
+		progressErr = reporter.Err()
+		workflow.RecordProgressFailure(ctx, &result, progressErr)
+	}
+	outputErr := r.renderResult(result, o, ctx.Err() != nil)
+	workflow.RecordOutputFailure(ctx, result, outputErr)
+	if ctx.Err() != nil {
+		return 130
+	}
+	if outputErr != nil {
+		return r.fail(program, outputErr)
+	}
+
+	if e != nil {
+		return r.fail(program, e)
+	}
+	if result.Success {
+		return 0
+	}
+	return 1
+
 }
 func inventoryMode(policy config.Snapshot, o options) string {
 	if o.refresh {
@@ -277,12 +368,12 @@ func inventoryMode(policy config.Snapshot, o options) string {
 	}
 	return ""
 }
-func readLine(r *bufio.Reader, limit int) (string, error) {
+func readLine(reader *bufio.Reader, limit int) (string, error) {
 	var b strings.Builder
 	for {
-		part, prefix, e := r.ReadLine()
+		part, prefix, e := reader.ReadLine()
 		if e != nil {
-			return "", config.ErrInvalid
+			return "", e
 		}
 		if b.Len()+len(part) > limit {
 			return "", config.ErrInvalid
@@ -297,7 +388,7 @@ func (r Runtime) print(v any) int {
 	enc := json.NewEncoder(r.Output)
 	enc.SetIndent("", "  ")
 	if e := enc.Encode(v); e != nil {
-		return r.fail("net-connector", e)
+		return r.fail("netman", e)
 	}
 	return 0
 }
@@ -305,148 +396,40 @@ func (r Runtime) fail(program string, e error) int {
 	if errors.Is(e, context.Canceled) {
 		return 130
 	}
-	fmt.Fprintln(r.Error, program+": operation failed (invalid input, unavailable source, or I/O error)")
+	message := "操作失败（输入无效、数据源不可用或 I/O 错误）"
+	var classified *connector.Error
+	if errors.As(e, &classified) {
+		message = display.Error(classified.Code)
+	}
+	var inventoryError *netdisco.InventoryError
+	if errors.As(e, &inventoryError) && inventoryError.Code == "cache_namespace_required" {
+		message = display.Error(inventoryError.Code)
+	}
+	if errors.Is(e, config.ErrInvalid) {
+		message = "配置或参数无效，请使用 --help 查看用法并检查配置文件"
+	}
+	var field *config.FieldError
+	if errors.As(e, &field) {
+		problem := "无效"
+		if field.Problem == "required" {
+			problem = "未设置"
+		}
+		message = "配置 " + display.Text(field.Field) + " " + problem + "；请通过配置文件、环境变量或对应选项设置"
+	}
+	if errors.Is(e, workflow.ErrTFTPArchivePreflight) {
+		message = "TFTP 归档预检失败：请检查归档服务器 SSH 认证、远端 tftp-archive 是否已安装且协议兼容，以及归档目录权限；本次尚未开始设备上传"
+	}
+	if r.reporter != nil {
+		_ = r.reporter.Warning(program + "：" + message)
+	} else {
+		fmt.Fprintln(r.Error, program+"："+message)
+	}
 	return 2
 }
-func planView(p fleet.Plan, program string) map[string]any {
-	ready := 0
-	skipped := map[string]int{}
-	issues := map[string]int{}
-	vendors := map[string]int{}
-	selected := []map[string]any{}
-	for _, e := range p.Entries() {
-		if e.Device.Issue == "" {
-			ready++
-		} else {
-			issues[e.Device.Issue]++
-		}
-		v := e.Device.Vendor
-		if v == "" {
-			v = "unmapped"
-		}
-		vendors[v]++
-		if e.Status != "ready" {
-			skipped[e.Status]++
-		}
-	}
-	for _, task := range p.Tasks() {
-		r := task.Device
-		style := "hostname_ip"
-		if program == "net-backup" {
-			style = "ip"
-		}
-		filename, _ := r.BackupFilename(style)
-		if p.Mode() == "tftp" {
-			filename = task.Target.Path
-		}
-		if program == "net-backup" {
-			selected = append(selected, map[string]any{"host": r.Host, "name": nullable(r.Name), "connector": r.Vendor, "filename": filename})
-		} else {
-			row := map[string]any{"host": r.Host, "name": nullable(r.Name), "vendor": r.Vendor, "backup_filename": filename}
-			if p.Mode() == "tftp" {
-				row["transfer"] = task.Target
-			}
-			selected = append(selected, row)
-		}
-	}
-	result := map[string]any{"total": len(p.Entries()), "ready": ready, "selected": selected}
-	if program == "net-backup" {
-		result["skipped"] = skipped
-	} else {
-		result["vendors"], result["issues"] = vendors, issues
-	}
-	return result
+
+func backupOptions(o options) workflow.BackupOptions {
+	return workflow.BackupOptions{Policy: o.policy, Layout: o.layout}
 }
-func nullable(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}
-func (r Runtime) backup(ctx context.Context, services *bootstrap.Services, plan fleet.Plan, o options, program string) int {
-	directory := services.Directory()
-	if program != "net-backup" {
-		var e error
-		directory, e = storage.CreateBatchDirectory(directory, time.Now())
-		if e != nil {
-			return r.fail(program, e)
-		}
-	} else if e := storage.PrepareDirectory(directory); e != nil {
-		return r.fail(program, e)
-	}
-	paths := map[int]string{}
-	for _, task := range plan.Tasks() {
-		style := "hostname_ip"
-		if program == "net-backup" {
-			style = "ip"
-		}
-		name, e := task.Device.BackupFilename(style)
-		if e != nil {
-			return r.fail(program, e)
-		}
-		path := filepath.Join(directory, name)
-		if info, e := os.Lstat(path); e == nil && !info.Mode().IsRegular() {
-			return r.fail(program, storage.ErrUnsafe)
-		} else if e != nil && !os.IsNotExist(e) {
-			return r.fail(program, e)
-		}
-		paths[task.Index] = path
-	}
-	data, _ := json.MarshalIndent(planView(plan, program), "", "  ")
-	if _, e := storage.Write(ctx, filepath.Join(directory, "plan.json"), data); e != nil {
-		return r.fail(program, e)
-	}
-	events, e := storage.OpenAppend(filepath.Join(directory, "events.jsonl"))
-	if e != nil {
-		return r.fail(program, e)
-	}
-	defer events.Close()
-	batch, runErr := fleet.Run(ctx, plan, fleet.RunOptions{Workers: services.Workers(), Run: func(ctx context.Context, task fleet.Task) (artifact fleet.Artifact, err error) {
-		device, closeDevice, e := openDevice(ctx, services, task.Device, services.LogDirectory(program, "backup", directory))
-		if e != nil {
-			return artifact, e
-		}
-		defer func() {
-			err = joinDeviceCleanup(err, closeDevice())
-		}()
-		receipt, e := device.Backup(ctx, connector.BackupOptions{Path: paths[task.Index], RejectSymlink: true, LockTimeout: 5 * time.Second})
-		if receipt.Path != "" {
-			artifact.Backup = &receipt
-		}
-		return artifact, e
-	}, OnOutcome: func(_ context.Context, out fleet.Outcome) error {
-		var progressErr error
-		if !o.quiet {
-			_, progressErr = fmt.Fprintf(r.Error, "%s: %s\n", out.Device.Host, out.Status)
-		}
-		eventErr := json.NewEncoder(events).Encode(map[string]any{"host": out.Device.Host, "vendor": out.Device.Vendor, "artifact": artifactView(out.Artifact), "status": out.Status, "duration_ms": out.Duration.Milliseconds(), "error_code": nullable(out.ErrorCode), "error_type": nullable(out.ErrorType)})
-		return errors.Join(progressErr, eventErr)
-	}})
-	report, e := fleet.NewReport(batch, o.policy)
-	report = report.WithLogDirectory(services.LogDirectory(program, "backup", directory))
-	if e != nil {
-		return r.fail(program, e)
-	}
-	if e = events.Sync(); e != nil {
-		report = report.WithReportError(e, "")
-	}
-	report = fleet.WriteReport(context.WithoutCancel(ctx), report, directory, plan, services.Workers())
-	outputErr := r.finishReport(report, directory, o, program, ctx.Err() != nil)
-	if outputErr != nil && report.Statistics()["report_error"] == nil {
-		location, _ := report.Statistics()["report_location"].(string)
-		report = fleet.WriteReport(context.WithoutCancel(ctx), report.WithReportError(outputErr, location), directory, plan, services.Workers())
-	}
-	if ctx.Err() != nil || errors.Is(runErr, context.Canceled) {
-		return 130
-	}
-	if outputErr != nil {
-		return 2
-	}
-	if runErr != nil {
-		return r.fail(program, runErr)
-	}
-	if report.Success() {
-		return 0
-	}
-	return 1
+func topologyOptions(o options) workflow.TopologyOptions {
+	return workflow.TopologyOptions{Mode: o.topologyMode, InventoryOnly: o.inventoryOnly, Limit: o.limit}
 }

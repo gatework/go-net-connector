@@ -1,0 +1,182 @@
+{
+  "BenchmarkCommandOutput/64KiB-10": {
+    "samples": 10,
+    "before": {
+      "ns/op": 5136885.5,
+      "B/op": 591586.5,
+      "allocs/op": 247.0
+    },
+    "after": {
+      "ns/op": 5123635.0,
+      "B/op": 555498.0,
+      "allocs/op": 235.0
+    },
+    "delta_percent": {
+      "ns/op": -0.25794812829680325,
+      "B/op": -6.10029133524852,
+      "allocs/op": -4.858299595141702
+    }
+  },
+  "BenchmarkCommandOutput/1024KiB-10": {
+    "samples": 10,
+    "before": {
+      "ns/op": 103221270.5,
+      "B/op": 12299228.0,
+      "allocs/op": 406.0
+    },
+    "after": {
+      "ns/op": 102175333.0,
+      "B/op": 7971524.0,
+      "allocs/op": 387.5
+    },
+    "delta_percent": {
+      "ns/op": -1.0132964794305699,
+      "B/op": -35.186793837792095,
+      "allocs/op": -4.556650246305416
+    }
+  },
+  "BenchmarkCommandOutput/8192KiB-10": {
+    "samples": 10,
+    "before": {
+      "ns/op": 832265041.5,
+      "B/op": 98988344.0,
+      "allocs/op": 1322.5
+    },
+    "after": {
+      "ns/op": 826882958.5,
+      "B/op": 63064096.0,
+      "allocs/op": 1289.5
+    },
+    "delta_percent": {
+      "ns/op": -0.646678970235226,
+      "B/op": -36.29139204510785,
+      "allocs/op": -2.4952741020793923
+    }
+  },
+  "BenchmarkCommandOutput/32768KiB-10": {
+    "samples": 10,
+    "before": {
+      "ns/op": 3323409770.5,
+      "B/op": 389394128.0,
+      "allocs/op": 4406.5
+    },
+    "after": {
+      "ns/op": 3303991083.0,
+      "B/op": 251857928.0,
+      "allocs/op": 4362.0
+    },
+    "delta_percent": {
+      "ns/op": -0.584300126706272,
+      "B/op": -35.32056343695044,
+      "allocs/op": -1.0098717803245227
+    }
+  },
+  "BenchmarkCommandPaged1000-10": {
+    "samples": 10,
+    "before": {
+      "ns/op": 5380886.0,
+      "B/op": 940980.0,
+      "allocs/op": 14663.0
+    },
+    "after": {
+      "ns/op": 5370090.5,
+      "B/op": 967862.0,
+      "allocs/op": 14719.5
+    },
+    "delta_percent": {
+      "ns/op": -0.20062681127234194,
+      "B/op": 2.8568088588492913,
+      "allocs/op": 0.38532360362817375
+    }
+  },
+  "BenchmarkCommandMultiline/1024KiB-10": {
+    "samples": 10,
+    "before": {
+      "ns/op": 125320208.5,
+      "B/op": 12340840.0,
+      "allocs/op": 409.0
+    },
+    "after": {
+      "ns/op": 124232937.5,
+      "B/op": 7971536.0,
+      "allocs/op": 386.0
+    },
+    "delta_percent": {
+      "ns/op": -0.867594311415465,
+      "B/op": -35.405239837806825,
+      "allocs/op": -5.623471882640585
+    }
+  },
+  "BenchmarkCommandMultiline/8192KiB-10": {
+    "samples": 10,
+    "before": {
+      "ns/op": 1017480625.0,
+      "B/op": 98947576.0,
+      "allocs/op": 1327.0
+    },
+    "after": {
+      "ns/op": 1011614750.0,
+      "B/op": 63031048.0,
+      "allocs/op": 1285.0
+    },
+    "delta_percent": {
+      "ns/op": -0.5765097492642646,
+      "B/op": -36.29854257369579,
+      "allocs/op": -3.1650339110776193
+    }
+  },
+  "BenchmarkCommandLogging/nil-10": {
+    "samples": 10,
+    "before": {
+      "ns/op": 8672.0,
+      "B/op": 4385.0,
+      "allocs/op": 69.0
+    },
+    "after": {
+      "ns/op": 8835.5,
+      "B/op": 5206.0,
+      "allocs/op": 70.0
+    },
+    "delta_percent": {
+      "ns/op": 1.8853782287822973,
+      "B/op": 18.72291904218928,
+      "allocs/op": 1.449275362318847
+    }
+  },
+  "BenchmarkCommandLogging/info-10": {
+    "samples": 10,
+    "before": {
+      "ns/op": 10901.0,
+      "B/op": 6599.5,
+      "allocs/op": 125.0
+    },
+    "after": {
+      "ns/op": 10990.5,
+      "B/op": 7365.0,
+      "allocs/op": 123.0
+    },
+    "delta_percent": {
+      "ns/op": 0.8210255939822053,
+      "B/op": 11.599363588150613,
+      "allocs/op": -1.6000000000000014
+    }
+  },
+  "BenchmarkCommandLogging/debug-10": {
+    "samples": 10,
+    "before": {
+      "ns/op": 13640.5,
+      "B/op": 12290.5,
+      "allocs/op": 240.0
+    },
+    "after": {
+      "ns/op": 13009.5,
+      "B/op": 10801.0,
+      "allocs/op": 210.0
+    },
+    "delta_percent": {
+      "ns/op": -4.625930134525857,
+      "B/op": -12.119116390708273,
+      "allocs/op": -12.5
+    }
+  }
+}

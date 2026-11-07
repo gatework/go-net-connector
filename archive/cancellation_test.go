@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -44,8 +45,10 @@ func TestProtocolBlockedIOPreservesCancellation(t *testing.T) {
 				case "expect":
 					_, err = p.Expect(ctx, "ready")
 				case "receive":
+					proof := Proof{Bytes: 1, SHA256: strings.Repeat("0", 64), ArchivePath: "/archive/config.cfg"}
 					p.phase = "archived"
-					_, err = p.Receive(ctx, Proof{Bytes: 1}, io.Discard)
+					p.last = frame{Phase: "archived", Bytes: proof.Bytes, SHA256: proof.SHA256, ArchivePath: proof.ArchivePath}
+					_, err = p.Receive(ctx, proof, io.Discard)
 				}
 				done <- err
 			}()

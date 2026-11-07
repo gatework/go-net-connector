@@ -4,14 +4,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/transfer"
 	"github.com/gatework/go-net-connector/vendors"
 )
 
 func TestPlanRulesSamplingAndDuplicates(t *testing.T) {
-	rules, e := NewRules(RuleOptions{}, vendors.Profile)
+	rules, e := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -34,9 +33,11 @@ func TestPlanRulesSamplingAndDuplicates(t *testing.T) {
 	}
 }
 func TestPlanTFTPCollisionBeforeCredentials(t *testing.T) {
-	rules, _ := NewRules(RuleOptions{}, vendors.Profile)
+	rules, _ := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 	rows := []inventory.Device{{IP: "192.0.2.1", Vendor: "Palo Alto"}, {IP: "192.0.2.2", Vendor: "Palo Alto"}}
-	target := func(Record) (Target, error) { return Target{Server: "192.0.2.9", Path: "running-config.xml"}, nil }
+	target := func(Record) (transfer.Target, error) {
+		return transfer.Target{TFTPOptions: transfer.TFTPOptions{Server: "192.0.2.9", Path: "running-config.xml"}}, nil
+	}
 	p, e := NewPlan(rows, rules, PlanOptions{Mode: "tftp", Target: target})
 	if e != nil {
 		t.Fatal(e)
@@ -48,23 +49,23 @@ func TestPlanTFTPCollisionBeforeCredentials(t *testing.T) {
 	if e != nil || len(p.Tasks()) != 2 {
 		t.Fatal(p, e)
 	}
-	if _, e = NewRules(RuleOptions{HostOverrides: map[string]string{"192.0.2.1": "unknown"}}, func(string) (connector.Profile, error) { return connector.Profile{}, connector.ErrUnsupported }); e == nil {
+	if _, e = NewRules(RuleOptions{HostOverrides: map[string]string{"192.0.2.1": "unknown"}}, profileRegistry{}); e == nil {
 		t.Fatal("bad override accepted")
 	}
 }
 
 func TestPlanSampledTFTPCollisionWinnerAndInventoryOrder(t *testing.T) {
-	rules, err := NewRules(RuleOptions{}, vendors.Profile)
+	rules, err := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 	if err != nil {
 		t.Fatal(err)
 	}
 	rows := []inventory.Device{{IP: "192.0.2.3", Vendor: "Palo Alto"}, {IP: "192.0.2.1", Vendor: "Palo Alto"}, {IP: "192.0.2.2", Vendor: "Palo Alto"}, {IP: "192.0.2.4", Vendor: "H3C"}}
-	target := func(r Record) (Target, error) {
+	target := func(r Record) (transfer.Target, error) {
 		path := "running-config.xml"
 		if r.Vendor == "h3c" {
 			path = "h3c.txt"
 		}
-		return Target{Server: "192.0.2.9", Path: path}, nil
+		return transfer.Target{TFTPOptions: transfer.TFTPOptions{Server: "192.0.2.9", Path: path}}, nil
 	}
 	for _, tc := range []struct {
 		name     string
@@ -97,5 +98,30 @@ func TestPlanSampledTFTPCollisionWinnerAndInventoryOrder(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPlanFreezesCompleteTransferTargetAndCollisionUsesRemotePath(t *testing.T) {
+	rules, _ := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
+	target := transfer.Target{TFTPOptions: transfer.TFTPOptions{Server: "192.0.2.9", Path: "config.cfg", SourceFile: "flash:/startup.cfg", SourceInterface: "management", VRF: "mgt"}, Root: "/archive"}
+	p, err := NewPlan([]inventory.Device{{IP: "192.0.2.1", Vendor: "H3C"}, {IP: "192.0.2.2", Vendor: "H3C"}}, rules, PlanOptions{Mode: "tftp", Target: func(r Record) (transfer.Target, error) {
+		copy := target
+		if r.Host == "192.0.2.2" {
+			copy.Root = "/different"
+			copy.VRF = "different"
+		}
+		return copy, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.Path = "changed.cfg"
+	tasks := p.Tasks()
+	if len(tasks) != 1 || tasks[0].Target.Path != "config.cfg" || tasks[0].Target.SourceFile != "flash:/startup.cfg" || tasks[0].Target.Root != "/archive" || p.Entries()[1].Status != "remote_filename_collision" {
+		t.Fatal(tasks, p.Entries())
+	}
+	tasks[0].Target.Path = "changed"
+	if p.Tasks()[0].Target.Path != "config.cfg" {
+		t.Fatal("plan target mutated")
 	}
 }

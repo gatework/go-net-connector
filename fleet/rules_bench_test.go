@@ -8,7 +8,7 @@ import (
 )
 
 func BenchmarkRulesResolve(b *testing.B) {
-	rules, err := NewRules(RuleOptions{}, vendors.Profile)
+	rules, err := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 	if err != nil {
 		b.Fatal(err)
 	}

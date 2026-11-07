@@ -171,8 +171,11 @@ func (r *Renderer) escape(b byte) error {
 	return nil
 }
 func (r *Renderer) emit(newline bool) error {
-	line := bytes.TrimRight(r.line, " \t")
-	if r.Encoding != "" && r.Encoding != "utf-8" {
+	line := r.line
+	if r.Encoding != "bytes" {
+		line = bytes.TrimRight(line, " \t")
+	}
+	if r.Encoding != "" && r.Encoding != "utf-8" && r.Encoding != "bytes" {
 		text, _, err := textcodec.Decode(string(line), r.Encoding)
 		if err == nil {
 			line = []byte(text)
@@ -180,7 +183,7 @@ func (r *Renderer) emit(newline bool) error {
 			return ErrEncoding
 		}
 	}
-	if !utf8.Valid(line) {
+	if r.Encoding != "bytes" && !utf8.Valid(line) {
 		if r.strict {
 			return ErrEncoding
 		}
@@ -202,7 +205,7 @@ func (r *Renderer) emit(newline bool) error {
 		return io.ErrShortWrite
 	}
 	if newline {
-		if n, e := r.target.Write([]byte{'\n'}); e != nil {
+		if n, e := io.WriteString(r.target, "\n"); e != nil {
 			return e
 		} else if n != 1 {
 			return io.ErrShortWrite

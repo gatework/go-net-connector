@@ -35,7 +35,7 @@ func TestProfileValidationIsPure(t *testing.T) {
 	if err := validateValue(t, p); err != nil {
 		t.Fatal(err)
 	}
-	if p.CommandTimeout != 0 || p.UsernamePrompt != nil || p.Pager != nil || p.LegacySSHArguments != nil {
+	if p.CommandTimeout != 0 || !p.UsernamePrompt.IsZero() || !p.Pager.IsZero() || p.LegacySSHArguments != nil {
 		t.Fatal("validation applied defaults to its input")
 	}
 	if p.ConfigCommands[:cap(p.ConfigCommands)][1] != "" {
@@ -49,8 +49,8 @@ func TestProfileValidationMatchesConstruction(t *testing.T) {
 		edit func(*Profile)
 	}{
 		{"missing name", func(p *Profile) { p.Name = "" }},
-		{"missing prompt", func(p *Profile) { p.CommandPrompt = nil }},
-		{"empty prompt match", func(p *Profile) { p.LoginPrompt = regexp.MustCompile(".*") }},
+		{"missing prompt", func(p *Profile) { p.CommandPrompt = testPatternZero() }},
+		{"empty prompt match", func(p *Profile) { p.LoginPrompt = testPattern(".*") }},
 		{"nil error pattern", func(p *Profile) { p.CommandErrors = []*regexp.Regexp{nil} }},
 		{"empty error match", func(p *Profile) { p.AuthenticationErrors = []*regexp.Regexp{regexp.MustCompile(".*")} }},
 		{"invalid privilege", func(p *Profile) { p.PrivilegeCommand = "enable" }},
@@ -135,10 +135,10 @@ func (*validationWriter) Write([]byte) (int, error) { panic("validation performe
 
 func TestNewSnapshotsValidatedConfiguration(t *testing.T) {
 	p := fixtureProfile()
-	p.CommandPrompt = regexp.MustCompile("a|ab")
-	p.Interactions = []Interaction{{Pattern: regexp.MustCompile("q|question"), Reply: "yes"}}
+	p.CommandPrompt = testPattern("a|ab")
+	p.Interactions = []Interaction{{Pattern: testPattern("q|question"), Reply: "yes"}}
 	p.LegacySSHArguments = []string{}
-	cfg := ConnectionConfig{Host: "fixture", Challenges: []Interaction{{Pattern: regexp.MustCompile("p|password"), Reply: "secret"}}, LegacySSHArguments: []string{"-1"}}
+	cfg := ConnectionConfig{Host: "fixture", Challenges: []Interaction{{Pattern: testPattern("p|password"), Reply: "secret"}}, LegacySSHArguments: []string{"-1"}}
 	opens := 0
 	d, err := New(p, cfg, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 		opens++
@@ -151,17 +151,17 @@ func TestNewSnapshotsValidatedConfiguration(t *testing.T) {
 	if opens != 0 {
 		t.Fatal("construction opened a device")
 	}
-	p.CommandPrompt.Longest()
-	p.Interactions[0].Pattern.Longest()
+	p.CommandPrompt = testPattern("changed")
+	p.Interactions[0].Pattern = testPattern("changed")
 	p.Interactions[0].Reply = "changed"
 	p.ConfigCommands[0] = "changed"
-	cfg.Challenges[0].Pattern.Longest()
+	cfg.Challenges[0].Pattern = testPattern("changed")
 	cfg.Challenges[0].Reply = "changed"
 	cfg.LegacySSHArguments[0] = "changed"
-	if d.profile.CommandPrompt.FindString("ab") != "a" || d.profile.Interactions[0].Pattern.FindString("question") != "q" || d.profile.Interactions[0].Reply != "yes" || d.profile.ConfigCommands[0] != "show config" {
+	if testMatchText(d.profile.CommandPrompt, "ab") != "a" || testMatchText(d.profile.Interactions[0].Pattern, "question") != "q" || d.profile.Interactions[0].Reply != "yes" || d.profile.ConfigCommands[0] != "show config" {
 		t.Fatal("profile snapshot follows caller mutation")
 	}
-	if d.config.Challenges[0].Pattern.FindString("password") != "p" || d.config.Challenges[0].Reply != "secret" || d.config.LegacySSHArguments[0] != "-1" {
+	if testMatchText(d.config.Challenges[0].Pattern, "password") != "p" || d.config.Challenges[0].Reply != "secret" || d.config.LegacySSHArguments[0] != "-1" {
 		t.Fatal("connection snapshot follows caller mutation")
 	}
 	if d.profile.LegacySSHArguments == nil || len(d.profile.LegacySSHArguments) != 0 || d.profile.CommandTimeout != 25*time.Second || d.config.CommandTimeout != 25*time.Second {

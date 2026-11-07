@@ -18,10 +18,7 @@ type exchange struct{ send, receive string }
 // Fixtures reproduce the frozen Ruby tests against a full connector session.
 func dialogue(t *testing.T, name, login string, events []exchange, configs ...connector.ConnectionConfig) (*connector.Device, func()) {
 	t.Helper()
-	p, e := Profile(name)
-	if e != nil {
-		t.Fatal(e)
-	}
+	p := profileForTest(t, name)
 	done := make(chan error, 1)
 	factory := func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
 		a, b := net.Pipe()
@@ -87,7 +84,7 @@ func TestCollectionDialectOutputsAndEchoOnly(t *testing.T) {
 	for name, prompt := range prompts {
 		for _, empty := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/empty=%v", name, empty), func(t *testing.T) {
-				p, _ := Profile(name)
+				p := profileForTest(t, name)
 				events := []exchange{}
 				last := ""
 				for i, c := range p.ConfigCommands {
@@ -148,10 +145,7 @@ func TestCollectionRejectsEchoOnlyWithRenderedPrompt(t *testing.T) {
 		{"h3c", "<core>\x00"},
 	} {
 		t.Run(fmt.Sprintf("%s/%q", fixture.name, fixture.prompt), func(t *testing.T) {
-			p, err := Profile(fixture.name)
-			if err != nil {
-				t.Fatal(err)
-			}
+			p := profileForTest(t, fixture.name)
 			var events []exchange
 			for _, command := range p.ConfigCommands {
 				events = append(events, exchange{command + "\n", command + "\r\n" + fixture.prompt})
@@ -230,7 +224,7 @@ func TestRadwareMenuIdentityPrivateKeysAndHA(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if i == 0 && !strings.Contains(r.Output(), "/c/l3") {
+		if i == 0 && !strings.Contains(testResultOutput(r), "/c/l3") {
 			t.Fatal("wrong identity completed collection")
 		}
 		if d.HAState() != "ACTIVE" {
@@ -248,13 +242,10 @@ func TestExplicitLifecycleValidatesBeforeConnect(t *testing.T) {
 		calls++
 		return nil, errors.New("fixture")
 	}
-	if _, e := Profile("unknown"); !errors.Is(e, connector.ErrUnsupported) || calls != 0 {
+	if _, e := NewBuiltinRegistry().Lookup("unknown"); !errors.Is(e, connector.ErrUnsupported) || calls != 0 {
 		t.Fatalf("unknown profile: %v", e)
 	}
-	p, e := Profile("h3c")
-	if e != nil {
-		t.Fatal(e)
-	}
+	p := profileForTest(t, "h3c")
 	d, e := connector.New(p, connector.ConnectionConfig{Host: "fixture"}, connector.WithTransportFactory(factory))
 	if e != nil {
 		t.Fatal(e)

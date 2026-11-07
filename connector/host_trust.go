@@ -76,7 +76,7 @@ func (t *hostTrust) keys(ctx context.Context, path string) ([]string, error) {
 		if ctx.Err() == nil && errors.As(e, &status) && status.ExitCode() == 1 {
 			return nil, nil
 		}
-		return nil, fail("host_key_lookup_failed", "login", Command{}, errors.Join(ctx.Err(), e))
+		return nil, newError("host_key_lookup_failed", "login", Command{}, errors.Join(ctx.Err(), e))
 	}
 	var keys []string
 	for _, line := range strings.Split(string(output), "\n") {
@@ -88,7 +88,7 @@ func (t *hostTrust) keys(ctx context.Context, path string) ([]string, error) {
 }
 func (t *hostTrust) remove(ctx context.Context, path string) error {
 	if e := exec.CommandContext(ctx, "ssh-keygen", "-R", t.host, "-f", path).Run(); e != nil {
-		return fail("host_key_update_failed", "login", Command{}, errors.Join(ctx.Err(), e))
+		return newError("host_key_update_failed", "login", Command{}, errors.Join(ctx.Err(), e))
 	}
 	return nil
 }

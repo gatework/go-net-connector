@@ -20,7 +20,7 @@ type Artifact struct {
 
 func (a Artifact) clone() Artifact {
 	if a.Backup != nil {
-		v := *a.Backup
+		v := a.Backup.Clone()
 		a.Backup = &v
 	}
 	if a.Transfer != nil {
@@ -44,21 +44,17 @@ type Outcome struct {
 	Diagnostic            Diagnostic
 }
 
-func (o Outcome) Success() bool { return o.Status == "backed_up" || o.Status == "reported_uploaded" }
-func (o Outcome) Partial() bool {
-	return o.Status == "saved_with_error" || o.Status == "reported_with_error"
-}
-func (o Outcome) Attempted() bool {
-	return o.Success() || o.Partial() || o.Status == "failed" || o.Status == "interrupted"
-}
-func (o Outcome) clone() Outcome { o.Artifact = o.Artifact.clone(); return o }
+func (o Outcome) Success() bool   { return outcomeStatus(o.Status).succeeded() }
+func (o Outcome) Partial() bool   { return outcomeStatus(o.Status).partiallySucceeded() }
+func (o Outcome) Attempted() bool { return outcomeStatus(o.Status).attempted() }
+func (o Outcome) clone() Outcome  { o.Artifact = o.Artifact.clone(); return o }
 
 type CallbackError struct {
 	Host      string `json:"host"`
 	ErrorType string `json:"error_type"`
 }
 type Batch struct {
-	mode                        string
+	mode                        mode
 	outcomes                    []Outcome
 	startedAt, finishedAt       time.Time
 	callbackErrors              []CallbackError
@@ -79,7 +75,7 @@ func (b Batch) CallbackErrors() []CallbackError {
 func (b Batch) Counts() map[string]int {
 	m := map[string]int{}
 	for _, o := range b.outcomes {
-		m[o.Status]++
+		m[string(outcomeStatus(o.Status))]++
 	}
 	return m
 }
@@ -96,15 +92,15 @@ func (b Batch) Success() bool {
 }
 func (b Batch) Status() string {
 	if b.interrupted {
-		return "interrupted"
+		return string(batchStatusInterrupted)
 	}
 	if len(b.outcomes) == 0 {
-		return "no_devices"
+		return string(batchStatusNoDevices)
 	}
 	if b.Success() {
-		return "succeeded"
+		return string(batchStatusSucceeded)
 	}
-	return "incomplete"
+	return string(batchStatusIncomplete)
 }
 
 type RunOptions struct {
@@ -117,8 +113,8 @@ type RunOptions struct {
 
 func Run(ctx context.Context, p Plan, o RunOptions) (Batch, error) {
 	b := Batch{mode: p.mode, startedAt: time.Now().UTC()}
-	if o.Run == nil || o.Workers < 0 || o.Workers > 500 || (p.mode != "backup" && p.mode != "tftp") {
-		return b, ErrPlan
+	if o.Run == nil || o.Workers < 0 || o.Workers > 500 || (p.mode != modeBackup && p.mode != modeTFTP) {
+		return b, ErrInvalidPlan
 	}
 	if o.Preflight != nil {
 		if e := o.Preflight(ctx, p); e != nil {
@@ -127,11 +123,11 @@ func Run(ctx context.Context, p Plan, o RunOptions) (Batch, error) {
 	}
 	b.outcomes = make([]Outcome, len(p.entries))
 	for i, entry := range p.entries {
-		status := entry.Status
-		if status == "ready" {
-			status = "not_started"
+		status := outcomeStatus(entry.Status)
+		if planStatus(entry.Status) == planStatusReady {
+			status = outcomeStatusNotStarted
 		}
-		b.outcomes[i] = Outcome{Device: entry.Device, Status: status}
+		b.outcomes[i] = Outcome{Device: entry.Device, Status: string(status)}
 	}
 	var callbacks sync.Mutex
 	_, err := parallel.Map(ctx, o.Workers, p.tasks, func(ctx context.Context, task Task) (struct{}, error) {
@@ -140,7 +136,7 @@ func Run(ctx context.Context, p Plan, o RunOptions) (Batch, error) {
 		runReturned := false
 		defer func() {
 			if !runReturned {
-				out.Status = "failed"
+				out.Status = string(outcomeStatusFailed)
 				out.FinishedAt = time.Now().UTC()
 				out.Duration = time.Since(start)
 				out.Diagnostic = Diagnostic{ErrorCode: "internal_error", ErrorType: "StandardError", Phase: "callback"}
@@ -156,27 +152,32 @@ func Run(ctx context.Context, p Plan, o RunOptions) (Batch, error) {
 		out.Duration = time.Since(start)
 		switch {
 		case errors.Is(e, ErrMissingCredentials):
-			out.Status = "missing_credentials"
+			out.Status = string(outcomeStatusMissingCredentials)
 			e = nil
-		case p.mode == "tftp" && a.Transfer != nil && a.Transfer.Reported():
-			out.Status = "reported_uploaded"
+		case p.mode == modeTFTP && a.Transfer != nil && a.Transfer.Reported():
+			out.Status = string(outcomeStatusReportedUploaded)
 			if e != nil {
-				out.Status = "reported_with_error"
+				out.Status = string(outcomeStatusReportedWithError)
 			}
-		case p.mode == "backup" && a.Backup != nil && (a.Backup.File.Committed() || a.Backup.DeviceCompleted && a.Backup.Change == "unchanged" && a.Backup.NoWriteVerified):
-			out.Status = "backed_up"
+		case p.mode == modeBackup && a.Backup != nil && (a.Backup.File.Committed() || a.Backup.DeviceCompleted && a.Backup.Change == "unchanged" && a.Backup.NoWriteVerified || a.Backup.Source != nil && a.Backup.Source.File.Committed()):
+			out.Status = string(outcomeStatusBackedUp)
+			if a.Backup.Source != nil && (!(a.Backup.File.Durable() || a.Backup.NoWriteVerified) || !(a.Backup.Source.File.Durable() || a.Backup.Source.NoWriteVerified)) {
+				if e == nil {
+					e = connector.ErrIncomplete
+				}
+			}
 			if e != nil {
-				out.Status = "saved_with_error"
+				out.Status = string(outcomeStatusSavedWithError)
 			}
 		case errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded) && ctx.Err() != nil:
-			out.Status = "interrupted"
+			out.Status = string(outcomeStatusInterrupted)
 		default:
-			out.Status = "failed"
+			out.Status = string(outcomeStatusFailed)
 			if e == nil {
 				e = connector.ErrIncomplete
 			}
 		}
-		out.Diagnostic = diagnose(e, a)
+		out.Diagnostic = diagnoseError(e, a)
 		out.ErrorCode, out.ErrorType = out.Diagnostic.ErrorCode, out.Diagnostic.ErrorType
 		b.outcomes[task.Index] = out
 		if o.OnOutcome != nil {
@@ -192,7 +193,7 @@ func Run(ctx context.Context, p Plan, o RunOptions) (Batch, error) {
 				callbackErr := o.OnOutcome(ctx, out.clone())
 				returned = true
 				if callbackErr != nil {
-					b.callbackErrors = append(b.callbackErrors, CallbackError{task.Device.Host, diagnose(callbackErr, Artifact{}).ErrorType})
+					b.callbackErrors = append(b.callbackErrors, CallbackError{task.Device.Host, diagnoseError(callbackErr, Artifact{}).ErrorType})
 				}
 			}()
 		}

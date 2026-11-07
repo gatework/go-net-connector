@@ -2,10 +2,15 @@
 
 ```mermaid
 flowchart TD
-  CLI[四个 CLI] --> Bootstrap[bootstrap: samber/do 组合根]
+  CLI[netman 命令树与组合入口] --> Bootstrap[bootstrap: 构造依赖]
+  CLI --> Workflow[具体业务工作流]
+  Bootstrap -. 注入消费端依赖 .-> Workflow
   Bootstrap --> Policy[不可变配置及纯规划]
   Bootstrap --> Source[HTTP / PostgreSQL / Cache]
+  Bootstrap --> DeviceFactory[设备工厂与厂商 Registry]
+  Bootstrap --> ArchiveFactory[归档池工厂]
   Policy --> Fleet[fleet: 有界并发和顺序结果]
+  Workflow --> Fleet
   Fleet --> Device[Device: 操作租约与回执]
   Device --> Profile[厂商档案及策略]
   Device --> Expect[go-expect: 匹配和 I/O]
@@ -17,16 +22,60 @@ flowchart TD
 
 Profile 只声明规则；Device 拥有当前会话和操作租约。transport 拥有进程组，expect 拥有单一输入泵。Topology 的发现、重验、修改、读回和保存共用一次租约。每次归档的目标锁覆盖旧文件保留、服务器时钟标记、设备上传、核验、双端持久化和清理。
 
+## 厂商方言与能力
+
+`vendors.NewBuiltinRegistry()` 是唯一内建平台目录。目录项是 `vendors/<family>` 家族包中的具体平台对象；每个对象返回独立的 `connector.Profile` 副本。`vendors/dialect` 只放 `Platform`、`Registry` 和跨包 DTO；`topology`、`transfer`、`fleet` 各自拥有消费端行为接口。家族对象只组合真实支持的接口，例如 Radware 提供描述读取和接口身份映射，不虚报邻居发现或描述写入。每个家族包集中组织 `dialect.go`、`inventory.go`、`configuration.go`、`topology.go` 和传输策略。H3C/H3C Wireless 与 Cisco IOS/NX-OS 共享家族实现，同时保留独立平台类型和平台覆盖。
+
+登录/命令提示符、分页、错误签名、交互回复、配置命令、保存签名和身份匹配都由家族包拥有。共享 `vendors/internal/driver` 提供稳定的 Profile、配置采集、拓扑委托、保存回执校验和 TFTP 骨架。配置采集策略负责平台模式切换、差异校验和文本清理；缺少已知正向签名时保存结果保持未确认。`vendors/internal/topology` 只执行通用 TextFSM 解析和结果校验；模板选择、记录计数和配置完整性规则与方言同包。接口名规范化由 `internal/ifname` 单一实现。TFTP 的命令、来源文件发现、完成证据及回执元数据也由家族包负责。内建身份匹配器由 Registry 私有拥有，并从同一有序方言清单生成键查找表与匹配顺序，fleet 仅依赖自己的 resolver 接口，保留用户覆盖优先顺序。
+
+`fleet.NewRules`、Topology 构造与纯计划函数、transfer API（包括 TFTP 和远程配置导出）都接收显式 `dialect.Registry`。Bootstrap 只在组合根创建一次目录并注入调用方，避免包级 Profile/Names 查询和全局运行时插件状态。扩展新平台时需同时声明能力、连接档案以及该平台实际支持的可选行为；没有证据的能力保持不支持。
+
+解析错误通过 `dialect.DiagnosticError` 携带稳定 code/phase，再由消费者转换为自己的领域错误。通用解析失败映射为 `unrecognized_output`；平台有明确证据时保留更具体的错误码，例如 Fortinet VDOM 不一致。诊断文本只包含元数据，不包含设备原始输出。
+
+新增平台的业务流程、文件职责、内建识别顺序和验收清单见 [`vendors/README.md`](../vendors/README.md)。
+
 命令回执必须已经匹配提示符且未被设备拒绝。回执在日志收尾、hook 和观察者回调之前登记。原文必须显式读取；默认格式化只显示安全元数据。敏感交互采用操作范围的脱敏规则，不把密码交给全局状态。
 
 本地备份的 `Change` 表示内容关系；`File.State` 表示本次写入是否提交/持久化。只有实际核验同一私有文件并跳过写入时才设置 `NoWriteVerified`。内容相同但替换失败不属于已保存文件。
 
-TFTP 的设备报告和服务器核验分开保存。远端正文写本地磁盘失败时仍按同一绝对期限读完并校验正文/尾帧，保留可确认哈希；不会重传。清理服务器暂存文件需要服务器归档和本地文件均已确认。失败或断线会保留尚未确认的暂存文件。
+TFTP 的设备报告和服务器核验分开保存。配置源文件发现和设备上传共享同一个上传期限；单条设备命令期限受该总期限约束。远端正文写本地磁盘失败时仍按同一绝对期限读完并校验正文/尾帧，保留可确认哈希；不会重传。清理服务器暂存文件需要服务器归档和本地文件均已确认。失败或断线会保留尚未确认的暂存文件。
+
+批次报告的持久化 schema 由 `internal/batchreport` 明确拥有，Fleet 写入时使用同一 schema 版本；`storage` 负责打开已选批次目录、锚定读取与文件哈希核验，不在存储实现中内嵌 Fleet 报告结构。
 
 Archive Pool 每个 SSH 主连接最多 4 个通道，总槽位不超过批次并发。Prepare 预检全部主连接、协议版本、能力和目录；Close 可以取消并加入正在预检的任务，随后回收已接纳任务及进程组。worker 的路径遍历使用固定目录 FD、openat/NOFOLLOW、所有者/权限/链接数/文件身份检查。目标锁使用 NFC 与 case-fold 规范化键，防止大小写或 Unicode 别名交错上传。
 
+```mermaid
+sequenceDiagram
+  participant Pool
+  participant Client
+  participant Master as SSH master
+  participant Protocol
+  participant Worker
+  participant Files as worker dirfd/files
+  Pool->>Master: prepare SSH control connection
+  Pool->>Client: probe protocol and preflight directory
+  Pool->>Pool: mark prepared
+  Pool->>Pool: admit upload and reserve client slot
+  Pool->>Client: Upload one target
+  Client->>Protocol: launch channel and send request
+  Protocol->>Worker: framed request over pipes
+  Worker->>Files: lock, preserve old target, receive device upload
+  Worker-->>Protocol: archived proof (bytes/hash/path)
+  Protocol->>Worker: verify and request archived bytes
+  Worker->>Files: stable read under same target lock
+  Worker-->>Protocol: body and delivered proof
+  Protocol-->>Client: verified server receipt
+  Client->>Worker: cleanup only after local commit and server verification
+  Worker-->>Client: complete
+  Pool->>Pool: Close stops admission, cancels and joins active work
+  Pool->>Client: close retained channels
+  Pool->>Master: terminate and reap SSH process group
+```
+
+Pool 唯一负责并发接纳、预检协调和批次关闭；Client 拥有一次目标事务及其通道清理；Protocol 拥有帧顺序与总期限；worker 拥有目录 FD、文件身份、目标锁和服务端目标回执。设备只报告传输完成时回执仍是 `device_reported`；只有归档 worker 返回的正文与尾帧都匹配字节数和 SHA-256 后才成为 `server_verified`。本地持久化或清理失败保留已获得的证据，但不会重新上传。
+
 HTTP/PG 来源拥有各自请求/连接，返回整份有效清单或错误；不交付半页结果。Cache 保存 schema1、身份双 SHA-256 和完整清单，来源失败时可显式使用已校验旧缓存。Fleet 在库存顺序输出结果，取消后停止接纳新任务并等待已接纳任务退出。
 
-配置和纯计划不打开设备，不查询设备凭据。批次预检覆盖所有有能力的设备，抽样不能隐藏无效策略。主机过滤以地址区间比较，不展开 IPv4/IPv6 网段。原始源码基线及兼容补丁独立保留，避免把并行工作区变化当成本次改动。
+配置和纯计划不打开设备，不查询设备凭据。批次预检覆盖所有有能力的设备，抽样不能隐藏无效策略。主机过滤以地址区间比较，不展开 IPv4/IPv6 网段。历史质量证据用于审计，不参与当前构建；go-expect 通过正式发布模块解析。
 
 响应处理区分原始字节、解码正文与可见文本；完成步骤复用不可变渲染结果。分页剥离首次发生时才分离正文缓冲。无回显日志仅保留预算计数与安全事件元数据。TextFSM 仅缓存内嵌模板的只读编译状态，每次解析复制 Values 并创建独立 ParserOutput；自定义模板不缓存。

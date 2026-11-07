@@ -15,6 +15,7 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 adapter = Path(sys.argv[1]).resolve()
+expect = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else None
 env = dict(os.environ, GOWORK="off", GOFLAGS="-mod=readonly")
 sources = {p.name: p.read_bytes() for p in adapter.iterdir() if p.is_file() and (p.suffix == ".go" or p.name in ("go.mod", "go.sum"))}
 manifest = {name: hashlib.sha256(data).hexdigest() for name, data in sources.items()}
@@ -27,22 +28,16 @@ with tempfile.TemporaryDirectory(prefix="nc-firemon-refinement-") as temporary:
         if not name.endswith(".go"):
             continue
         text = data.decode().replace('"github.com/gatework/firemon/adapter/netconnector"', '"github.com/gatework/go-net-connector/consumer/firemon"')
-        text = text.replace("func(op *connector.Operation) error", "func(ctx context.Context, op *connector.Operation) error")
-        if name == "read.go":
-            old = "text, prompt = attempts[i].Raw(), attempts[i].Prompt()"
-            if old not in text:
-                raise SystemExit("Firemon captureEvidence changed; review the migration fixture")
-            text = text.replace(old, """view := attempts[i].Response()
-                verified, conversionErr := view.Output()
-                prompt, _ = view.Prompt()
-                if conversionErr == nil {
-                    text = verified
-                } else {
-                    // Explicit incomplete evidence; never guess or re-decode.
-                    text, prompt = view.Raw(), view.RawPrompt()
-                }""")
-            text = text.replace("// pinned connector exposes only Raw for failed attempts; these bytes are kept\n// as incomplete evidence, without guessing encoding or terminal rendering.", "// source fixture uses verified text from completed failed attempts, with an\n// explicit raw fallback when conversion is unavailable or invalid.")
         (consumer / name).write_text(text)
+    if expect:
+        paired = package / "sourceexpect"
+        paired.mkdir()
+        for source in expect.glob("*.go"):
+            shutil.copy2(source, paired / source.name)
+        if (expect / "testdata").exists():
+            shutil.copytree(expect / "testdata", paired / "testdata")
+        for source in package.rglob("*.go"):
+            source.write_text(source.read_text().replace('"github.com/gatework/go-expect"', '"github.com/gatework/go-net-connector/sourceexpect"'))
     # Read the module requirements from the frozen bytes rather than re-reading
     # a potentially concurrent checkout during the test.
     frozen = Path(temporary) / "adapter"

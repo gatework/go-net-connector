@@ -2,27 +2,39 @@ package connector
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
-	"fmt"
+	"io"
 	"os"
 	"strings"
 	"syscall"
 	"time"
 
+	expect "github.com/gatework/go-expect"
+
 	"github.com/gatework/go-net-connector/internal/terminal"
+	"github.com/gatework/go-net-connector/internal/textcodec"
 	"github.com/gatework/go-net-connector/storage"
 )
 
 type renderedConfig struct{}
 
-func (renderedConfig) Prompt(_ string, current string) string                        { return current }
+type configTextMode uint8
+
+const (
+	configTextRendered configTextMode = iota
+	configTextBackupSource
+	configTextPreserveInvalid
+)
+
+func (renderedConfig) MatchPrompt(_ string, current string) (expect.Pattern, error) {
+	return expect.Line(current), nil
+}
 func (renderedConfig) Validate(context.Context, Command, StepResult, Executor) error { return nil }
 func (renderedConfig) Finish(_ context.Context, r Result) (string, error) {
 	if len(r.steps) == 0 {
 		return "", ErrIncomplete
 	}
-	return r.steps[len(r.steps)-1].Rendered()
+	return r.steps[len(r.steps)-1].Response().Rendered()
 }
 func (d *Device) RunningConfig(ctx context.Context) (Result, error) {
 	if e := d.acquire(); e != nil {
@@ -33,69 +45,78 @@ func (d *Device) RunningConfig(ctx context.Context) (Result, error) {
 	defer cancel()
 	return d.runningConfig(ctx)
 }
-func (d *Device) runningConfig(ctx context.Context) (result Result, err error) {
+func (d *Device) runningConfig(ctx context.Context) (Result, error) { return d.collectConfig(ctx) }
+func (d *Device) collectConfig(ctx context.Context) (Result, error) {
+	return d.collectConfigWithMode(ctx, configTextRendered)
+}
+func (d *Device) collectConfigWithMode(ctx context.Context, mode configTextMode) (result Result, err error) {
+	if mode > configTextPreserveInvalid {
+		return Result{}, ErrInvalid
+	}
+	if len(d.profile.ConfigCommands) == 0 {
+		return Result{}, newError("configuration_error", "collect", Command{}, ErrUnsupported)
+	}
 	returned := false
 	defer func() {
 		if !returned {
 			_ = d.closeResources()
-		}
-	}()
-	result, err = d.collectConfig(ctx)
-	returned = true
-	return
-}
-func (d *Device) collectConfig(ctx context.Context) (result Result, err error) {
-	if len(d.profile.ConfigCommands) == 0 {
-		return Result{}, fail("configuration_error", "collect", Command{}, ErrUnsupported)
-	}
-	defer func() {
-		if err != nil {
+		} else if err != nil {
 			err = joinCleanup(err, d.closeResources())
 		}
 	}()
-	commands := make([]Command, len(d.profile.ConfigCommands))
-	for i, text := range d.profile.ConfigCommands {
-		commands[i] = Command{Text: text, OutputSensitive: true}
-	}
-	var strategy ConfigStrategy = renderedConfig{}
-	if d.profile.ConfigStrategy != nil {
-		strategy = d.profile.ConfigStrategy()
-		if strategy == nil {
-			return Result{}, fail("configuration_error", "collect", Command{}, ErrInvalid)
+	result, err = func() (Result, error) {
+		commands := make([]Command, len(d.profile.ConfigCommands))
+		for i, text := range d.profile.ConfigCommands {
+			commands[i] = Command{Text: text, OutputSensitive: true}
 		}
-	}
-	result, e := d.execute(ctx, Script{Commands: commands}, ExecuteOptions{}, strategy)
-	if e != nil {
-		return result, e
-	}
-	config, e := strategy.Finish(ctx, result)
-	if e != nil {
-		return result, configurationFailure(Command{}, e)
-	}
-	if strings.TrimSpace(config) == "" {
-		return result, ErrIncomplete
-	}
-	hasBody := d.profile.ConfigStrategy != nil
-	for _, step := range result.steps[len(result.steps)-1:] {
-		body, e := step.Rendered()
+		var strategy ConfigStrategy = renderedConfig{}
+		if d.profile.ConfigStrategy != nil {
+			strategy = d.profile.ConfigStrategy()
+			if strategy == nil {
+				return Result{}, newError("configuration_error", "collect", Command{}, ErrInvalid)
+			}
+		}
+		result, e := d.execute(ctx, Script{Commands: commands}, ExecuteOptions{textMode: mode}, strategy)
 		if e != nil {
 			return result, e
 		}
-		prompt, _ := terminal.Render([]byte(step.Prompt()), true)
-		body = strings.TrimSuffix(strings.TrimSpace(body), strings.TrimSpace(prompt))
-		body = strings.TrimSpace(body)
-		if strings.HasPrefix(body, step.command.Text) {
-			body = strings.TrimSpace(strings.TrimPrefix(body, step.command.Text))
+		if len(result.steps) == 0 {
+			return result, newError("incomplete_configuration", "collect", Command{}, ErrIncomplete)
 		}
-		if body != "" {
-			hasBody = true
+		config, e := strategy.Finish(ctx, result)
+		if e != nil {
+			return result, configurationFailure(Command{}, e)
 		}
-	}
-	if !hasBody {
-		return result, fail("incomplete_configuration", "collect", Command{}, ErrIncomplete)
-	}
-	result.config = &config
-	return result, ctx.Err()
+		if strings.TrimSpace(config) == "" {
+			return result, ErrIncomplete
+		}
+		hasBody := d.profile.ConfigStrategy != nil
+		for _, step := range result.steps[len(result.steps)-1:] {
+			body, e := step.Response().Rendered()
+			if e != nil {
+				return result, e
+			}
+			prompt, e := step.Response().Prompt()
+			if e != nil {
+				return result, e
+			}
+			body = strings.TrimSuffix(strings.TrimSpace(body), strings.TrimSpace(prompt))
+			body = strings.TrimSpace(body)
+			if strings.HasPrefix(body, step.command.Text) {
+				body = strings.TrimSpace(strings.TrimPrefix(body, step.command.Text))
+			}
+			if body != "" {
+				hasBody = true
+			}
+		}
+		if !hasBody {
+			return result, newError("incomplete_configuration", "collect", Command{}, ErrIncomplete)
+		}
+		result.config = &config
+		return result, ctx.Err()
+	}()
+	returned = true
+	return
 }
 
 // SaveConfig distinguishes command completion from profile-confirmed persistence.
@@ -143,20 +164,28 @@ func (d *Device) save(ctx context.Context, opts ExecuteOptions) (result Result, 
 		return
 	}
 	if d.profile.ValidateSave == nil {
-		return result, fail("persistence_unconfirmed", "persist", Command{}, ErrUnconfirmed)
+		return result, newError("persistence_unconfirmed", "persist", Command{}, ErrUnconfirmed)
 	}
 	if err = d.profile.ValidateSave(ctx, result); err != nil {
-		return result, fail("persistence_unconfirmed", "persist", Command{}, err)
+		return result, newError("persistence_unconfirmed", "persist", Command{}, err)
 	}
 	return result, ctx.Err()
 }
 
 type BackupOptions struct {
+	// PreserveInvalidEncoding retains original configuration bytes with explicit warnings when strict decoding fails.
+	PreserveInvalidEncoding bool
+	// TextOnly publishes only strictly decoded configuration text; no raw sidecar.
+	TextOnly      bool
 	Path          string
 	LockTimeout   time.Duration
 	RejectSymlink bool
 }
 type BackupReceipt struct {
+	TextOnly        bool            `json:"text_only,omitempty"`
+	Source          *BackupSource   `json:"source,omitempty"`
+	Encoding        string          `json:"encoding,omitempty"`
+	TextWarning     *TextWarning    `json:"text_warning,omitempty"`
 	Path            string          `json:"path"`
 	Bytes           int             `json:"bytes"`
 	SHA256          string          `json:"sha256"`
@@ -181,19 +210,45 @@ func (d *Device) Backup(ctx context.Context, opts BackupOptions) (receipt Backup
 	}
 	defer func() {
 		if e := lock.Close(); e != nil {
-			err = joinFailures(err, fail("backup_finalize_failed", "backup", Command{}, e))
+			err = joinFailures(err, newError("backup_finalize_failed", "backup", Command{}, e))
 		}
 	}()
-	result, e := d.runningConfig(ctx)
+	mode := configTextRendered
+	if !opts.TextOnly {
+		mode = configTextBackupSource
+	} else if opts.PreserveInvalidEncoding {
+		mode = configTextPreserveInvalid
+	}
+	result, e := d.collectConfigWithMode(ctx, mode)
 	if e != nil {
 		return receipt, e
 	}
 	contents, _ := result.Config()
-	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(contents)))
-	receipt = BackupReceipt{Path: lock.Path(), Bytes: len(contents), SHA256: digest, CollectedAt: time.Now().UTC(), DeviceCompleted: true, File: storage.Receipt{Path: lock.Path(), State: "not_committed", Phase: "compare"}}
-	_, previous, e := storage.Read(ctx, lock.Path(), d.config.MaxOutputBytes)
+	digest := hashParts([]string{contents})
+	receipt = BackupReceipt{TextOnly: opts.TextOnly, Path: lock.Path(), Bytes: len(contents), SHA256: digest, CollectedAt: time.Now().UTC(), DeviceCompleted: true, File: storage.Receipt{Path: lock.Path(), State: "not_committed", Phase: "compare"}}
+	previous, e := storage.Inspect(ctx, lock.Path(), d.config.MaxOutputBytes)
 	if e != nil && !errors.Is(e, os.ErrNotExist) && !(errors.Is(e, syscall.ELOOP) && !opts.RejectSymlink) {
 		return receipt, e
+	}
+	if !opts.TextOnly {
+		raw, source, encoding, warning := backupSource(result)
+		receipt.Source, receipt.Encoding, receipt.TextWarning = source, encoding, warning
+		if e = persistBackupSource(ctx, source, raw, lock.Path()); e != nil {
+			return receipt, e
+		}
+	} else {
+		for _, step := range result.steps {
+			encoding := step.Response().Encoding()
+			if receipt.Encoding == "" {
+				receipt.Encoding = encoding
+			} else if receipt.Encoding != encoding {
+				receipt.Encoding = "mixed"
+			}
+		}
+	}
+	if opts.TextOnly && opts.PreserveInvalidEncoding {
+		_, _, count, offsets := textcodec.BackupViewSource(contents)
+		receipt.TextWarning = sourceWarning(contents, count, offsets)
 	}
 	receipt.PreviousSHA256 = previous.SHA256
 	switch {
@@ -208,17 +263,11 @@ func (d *Device) Backup(ctx context.Context, opts BackupOptions) (receipt Backup
 		receipt.NoWriteVerified = true
 		return receipt, nil
 	}
-	receipt.File, err = storage.Write(ctx, lock.Path(), []byte(contents))
-	if err != nil && receipt.File.Committed() {
-		code := "backup_persistence_unconfirmed"
-		if receipt.File.Durable() {
-			code = "backup_finalize_failed"
-		}
-		if receipt.File.Phase == "directory_sync" && (errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOSYS) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.EOPNOTSUPP)) {
-			code = "backup_durability_unsupported"
-		}
-		err = &BackupPersistenceError{failure: &Error{Code: code, Phase: "backup", cause: err}}
-	}
+	receipt.File, err = storage.WriteStream(ctx, lock.Path(), func(w io.Writer) error {
+		_, e := io.WriteString(w, contents)
+		return e
+	})
+	err = backupPersistenceFailure(receipt.File, err)
 	return
 }
 
@@ -238,10 +287,10 @@ func configurationFailure(c Command, err error) error {
 		return err
 	}
 	if errors.Is(err, ErrIncomplete) {
-		return fail("incomplete_configuration", "collect", c, err)
+		return newError("incomplete_configuration", "collect", c, err)
 	}
 	if errors.Is(err, terminal.ErrEncoding) {
-		return fail("invalid_output_encoding", "parse", c, err)
+		return newError("invalid_output_encoding", "parse", c, err)
 	}
-	return fail("configuration_error", "collect", c, err)
+	return newError("configuration_error", "collect", c, err)
 }

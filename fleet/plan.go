@@ -9,13 +9,15 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/transfer"
+
 	"github.com/gatework/go-net-connector/inventory"
+	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
-var ErrPlan = errors.New("netdisco: invalid plan")
+// ErrInvalidPlan identifies invalid rules, task plans, or report inputs.
+var ErrInvalidPlan = errors.New("netdisco: invalid plan")
 
-type ProfileLookup func(string) (connector.Profile, error)
 type Mapping struct {
 	Vendor, Connector string
 	OS, ModelPrefix   *string
@@ -26,66 +28,88 @@ type RuleOptions struct {
 	Mappings                       []Mapping
 }
 type Rules struct {
-	selection      inventory.Selection
-	vendors, hosts map[string]string
-	mappings       []Mapping
-	lookup         ProfileLookup
+	selection        inventory.Selection
+	vendors, hosts   map[string]string
+	mappings         []Mapping
+	registered       map[string]struct{}
+	platformResolver PlatformResolver
+	registry         dialect.Registry
+}
+
+// PlatformResolver belongs to Fleet, which consumes platform recognition.
+type PlatformResolver interface {
+	ResolvePlatform(dialect.InventoryIdentity) (platform string, found bool)
 }
 
 var labelChars = regexp.MustCompile(`[^a-z0-9]+`)
 
-func normalize(s string) string {
+func normalizeIdentityField(s string) string {
 	return strings.TrimSpace(labelChars.ReplaceAllString(strings.ToLower(s), " "))
 }
-func NewRules(o RuleOptions, lookup ProfileLookup) (*Rules, error) {
-	if lookup == nil {
-		return nil, ErrPlan
+func NewRules(o RuleOptions, registry dialect.Registry) (*Rules, error) {
+	if registry == nil {
+		return nil, ErrInvalidPlan
+	}
+	names := registry.Names()
+	if len(names) == 0 {
+		return nil, ErrInvalidPlan
 	}
 	s, e := inventory.NewSelection(o.Selection)
 	if e != nil {
 		return nil, e
 	}
-	r := &Rules{selection: s, vendors: map[string]string{}, hosts: map[string]string{}, lookup: lookup}
-	valid := func(v string) bool { _, e := lookup(v); return e == nil }
+	registered := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		registered[name] = struct{}{}
+	}
+	r := &Rules{
+		selection:        s,
+		vendors:          map[string]string{},
+		hosts:            map[string]string{},
+		registered:       registered,
+		platformResolver: platformResolver(registry),
+		registry:         registry,
+	}
+	valid := func(v string) bool { _, ok := registered[v]; return ok }
 	for _, list := range [][]string{o.Selection.IncludeVendors, o.Selection.ExcludeVendors} {
 		for _, v := range list {
 			if !valid(v) {
-				return nil, ErrPlan
+				return nil, ErrInvalidPlan
 			}
 		}
 	}
 	for k, v := range o.VendorOverrides {
-		k = normalize(k)
+		k = normalizeIdentityField(k)
 		if k == "" || !valid(v) {
-			return nil, ErrPlan
+			return nil, ErrInvalidPlan
 		}
 		if old, ok := r.vendors[k]; ok && old != v {
-			return nil, ErrPlan
+			return nil, ErrInvalidPlan
 		}
 		r.vendors[k] = v
 	}
 	for k, v := range o.HostOverrides {
 		a, e := netip.ParseAddr(k)
 		if e != nil || a.Zone() != "" || !valid(v) {
-			return nil, ErrPlan
+			return nil, ErrInvalidPlan
 		}
 		k = a.String()
 		if old, ok := r.hosts[k]; ok && old != v {
-			return nil, ErrPlan
+			return nil, ErrInvalidPlan
 		}
 		r.hosts[k] = v
 	}
 	for _, m := range o.Mappings {
-		m.Vendor = normalize(m.Vendor)
+		m.Vendor = normalizeIdentityField(m.Vendor)
 		if m.Vendor == "" || !valid(m.Connector) {
-			return nil, ErrPlan
+			return nil, ErrInvalidPlan
 		}
 		if m.OS != nil {
-			v := normalize(*m.OS)
+			v := normalizeIdentityField(*m.OS)
 			m.OS = &v
 		}
 		if m.ModelPrefix != nil {
-			v := normalize(*m.ModelPrefix)
+			v := normalizeIdentityField(*m.ModelPrefix)
 			m.ModelPrefix = &v
 		}
 		r.mappings = append(r.mappings, m)
@@ -93,27 +117,10 @@ func NewRules(o RuleOptions, lookup ProfileLookup) (*Rules, error) {
 	return r, nil
 }
 
-var (
-	wirelessOS       = regexp.MustCompile(`wireless|wlan`)
-	h3cWirelessModel = regexp.MustCompile(`^(h3c\s+)?(wx|ac)\s*\d`)
-	h3cModel         = regexp.MustCompile(`^h3c\s+\S`)
-	h3cLabel         = regexp.MustCompile(`\bh3c\b`)
-	ciscoLabel       = regexp.MustCompile(`\bcisco\b`)
-	nxOS             = regexp.MustCompile(`nx\s*os|nexus`)
-	nexusModel       = regexp.MustCompile(`\bnexus\b|\bn\s*[3579]k\b`)
-	iosOS            = regexp.MustCompile(`\bios\b|\bios\s*xe\b`)
-	radwareLabel     = regexp.MustCompile(`\bradware\b`)
-	paloAltoLabel    = regexp.MustCompile(`palo\s*alto|paloalto`)
-	huaweiLabel      = regexp.MustCompile(`\bhuawei\b`)
-	hillstoneLabel   = regexp.MustCompile(`\bhillstone\b`)
-	centecLabel      = regexp.MustCompile(`\bcentec\b`)
-	topsecLabel      = regexp.MustCompile(`\btopsec\b`)
-	fortinetLabel    = regexp.MustCompile(`\bfortinet\b|\bfortigate\b`)
-	fortigateLabel   = regexp.MustCompile(`\bfortigate\b`)
-	fortigateModel   = regexp.MustCompile(`^(fortigate|fgt)\s*\d`)
-	juniperLabel     = regexp.MustCompile(`\bjuniper\b`)
-	junosOS          = regexp.MustCompile(`\bjunos\b`)
-)
+func platformResolver(registry dialect.Registry) PlatformResolver {
+	resolver, _ := registry.(PlatformResolver)
+	return resolver
+}
 
 func (r *Rules) Resolve(d inventory.Device) string {
 	if a, e := netip.ParseAddr(d.IP); e == nil {
@@ -121,7 +128,7 @@ func (r *Rules) Resolve(d inventory.Device) string {
 			return v
 		}
 	}
-	label, os, model := normalize(d.Vendor), normalize(d.OS), normalize(d.Model)
+	label, os, model := normalizeIdentityField(d.Vendor), normalizeIdentityField(d.OS), normalizeIdentityField(d.Model)
 	for _, m := range r.mappings {
 		if m.Vendor == label && (m.OS == nil || *m.OS == os) && (m.ModelPrefix == nil || strings.HasPrefix(model, *m.ModelPrefix)) {
 			return m.Connector
@@ -130,47 +137,17 @@ func (r *Rules) Resolve(d inventory.Device) string {
 	if v := r.vendors[label]; v != "" {
 		return v
 	}
-	h3c := func() string {
-		if wirelessOS.MatchString(os) || h3cWirelessModel.MatchString(model) {
-			return "h3c_wireless"
-		}
-		return "h3c"
+	if r.platformResolver == nil {
+		return ""
 	}
-	if os == "comware" && h3cModel.MatchString(model) {
-		return h3c()
+	platform, found := r.platformResolver.ResolvePlatform(dialect.InventoryIdentity{Vendor: d.Vendor, OS: d.OS, Model: d.Model})
+	if !found {
+		return ""
 	}
-	switch {
-	case h3cLabel.MatchString(label):
-		return h3c()
-	case ciscoLabel.MatchString(label):
-		if nxOS.MatchString(os) || nexusModel.MatchString(model) {
-			return "cisco_nxos"
-		}
-		if iosOS.MatchString(os) {
-			return "cisco_ios"
-		}
-	case radwareLabel.MatchString(label):
-		return "radware"
-	case paloAltoLabel.MatchString(label):
-		return "palo_alto"
-	case huaweiLabel.MatchString(label):
-		return "huawei"
-	case hillstoneLabel.MatchString(label):
-		return "hillstone"
-	case centecLabel.MatchString(label):
-		return "centec"
-	case topsecLabel.MatchString(label):
-		return "topsec"
-	case fortinetLabel.MatchString(label):
-		if os == "fortios" || fortigateLabel.MatchString(label) || fortigateModel.MatchString(model) {
-			return "fortinet"
-		}
-	case juniperLabel.MatchString(label):
-		if junosOS.MatchString(os) {
-			return "juniper"
-		}
+	if _, registered := r.registered[platform]; !registered {
+		return ""
 	}
-	return ""
+	return platform
 }
 
 type Record struct{ Host, SourceIP, Name, Vendor, SourceVendor, Model, OS, OSVersion, Serial, Issue string }
@@ -182,30 +159,30 @@ func (r *Rules) Record(d inventory.Device) Record {
 	}
 	a, e := netip.ParseAddr(d.IP)
 	if e != nil || a.Zone() != "" {
-		v.Issue = "invalid_address"
+		v.Issue = string(planStatusInvalidAddress)
 	} else {
 		v.Host = a.String()
 	}
 	d.IP, d.Name, d.Vendor = v.Host, v.Name, v.Vendor
 	if v.Issue == "" && !r.selection.Evaluate(d).Selected() {
-		v.Issue = "filtered"
+		v.Issue = string(planStatusFiltered)
 	}
 	if v.Issue == "" && v.Vendor == "" {
-		v.Issue = "unsupported_vendor"
+		v.Issue = string(planStatusUnsupportedVendor)
 	}
 	return v
 }
 func (r Record) BackupFilename(style string) (string, error) {
 	a, e := netip.ParseAddr(r.Host)
 	if e != nil || a.Zone() != "" {
-		return "", ErrPlan
+		return "", ErrInvalidPlan
 	}
 	base := strings.ReplaceAll(a.String(), ":", "_") + ".txt"
 	if style == "" || style == "ip" {
 		return base, nil
 	}
 	if style != "hostname_ip" {
-		return "", ErrPlan
+		return "", ErrInvalidPlan
 	}
 	var b strings.Builder
 	dash := false
@@ -233,11 +210,10 @@ func (r Record) BackupFilename(style string) (string, error) {
 	return label + "-" + base, nil
 }
 
-type Target struct{ Server, Path string }
 type Task struct {
 	Index  int
 	Device Record
-	Target Target
+	Target transfer.Target
 }
 type PlanEntry struct {
 	Device Record
@@ -247,39 +223,42 @@ type PlanOptions struct {
 	Mode                string
 	LimitPerVendor      int
 	AllowFixedNameReuse bool
-	Target              func(Record) (Target, error)
+	Target              func(Record) (transfer.Target, error)
 }
 type Plan struct {
-	mode      string
+	mode      mode
 	entries   []PlanEntry
 	tasks     []Task
-	transfers map[int]Target
+	transfers map[int]transfer.Target
 }
 
-func (p Plan) Mode() string         { return p.mode }
+func (p Plan) Mode() string         { return string(p.mode) }
 func (p Plan) Entries() []PlanEntry { return append([]PlanEntry(nil), p.entries...) }
 func (p Plan) Tasks() []Task        { return append([]Task(nil), p.tasks...) }
-func (p Plan) Transfers() map[int]Target {
-	m := make(map[int]Target, len(p.transfers))
+func (p Plan) Transfers() map[int]transfer.Target {
+	m := make(map[int]transfer.Target, len(p.transfers))
 	for k, v := range p.transfers {
 		m[k] = v
 	}
 	return m
 }
 func NewPlan(rows []inventory.Device, rules *Rules, o PlanOptions) (Plan, error) {
-	p := Plan{mode: o.Mode, transfers: map[int]Target{}}
 	if rules == nil || (o.Mode != "backup" && o.Mode != "tftp") || o.LimitPerVendor < 0 || o.LimitPerVendor > 5 || (o.Mode == "tftp" && o.Target == nil) {
-		return Plan{}, ErrPlan
+		return Plan{}, ErrInvalidPlan
 	}
+	planMode := mode(o.Mode)
+	p := Plan{mode: planMode, transfers: map[int]transfer.Target{}}
 	counts := map[string]int{}
 	for _, d := range rows {
 		r := rules.Record(d)
-		p.entries = append(p.entries, PlanEntry{Device: r, Status: r.Issue})
+		p.entries = append(p.entries, PlanEntry{Device: r, Status: string(planStatus(r.Issue))})
 		if r.Host != "" {
 			counts[r.Host]++
 		}
 	}
-	type capability struct{ backup, tftp bool }
+	type capability struct {
+		backup, tftp, allowDestinationReuse bool
+	}
 	capabilities := make(map[string]capability)
 	groups := map[string][]int{}
 	groupOrder := []string{}
@@ -287,31 +266,38 @@ func NewPlan(rows []inventory.Device, rules *Rules, o PlanOptions) (Plan, error)
 		entry := &p.entries[i]
 		r := entry.Device
 		if counts[r.Host] > 1 && r.Host != "" {
-			entry.Status = "duplicate_host"
+			entry.Status = string(planStatusDuplicateHost)
 		}
-		if entry.Status != "" {
+		if planStatus(entry.Status) != "" {
 			continue
 		}
 		supported, ok := capabilities[r.Vendor]
 		if !ok {
-			profile, e := rules.lookup(r.Vendor)
+			declaration, e := rules.registry.Lookup(r.Vendor)
 			if e != nil {
-				return Plan{}, ErrPlan
+				return Plan{}, ErrInvalidPlan
 			}
-			supported = capability{backup: len(profile.ConfigCommands) > 0, tftp: profile.Capabilities.TFTP}
+			if planMode == modeBackup {
+				profile := declaration.Profile()
+				supported.backup = len(profile.ConfigCommands) > 0
+			} else {
+				tftpPolicy, hasTransfer := declaration.(transfer.TFTPPolicy)
+				supported.tftp = hasTransfer
+				supported.allowDestinationReuse = hasTransfer && tftpPolicy.AllowsConcurrentDestinationReuse()
+			}
 			capabilities[r.Vendor] = supported
 		}
-		if (o.Mode == "backup" && !supported.backup) || (o.Mode == "tftp" && !supported.tftp) {
-			entry.Status = "unsupported_operation"
+		if (planMode == modeBackup && !supported.backup) || (planMode == modeTFTP && !supported.tftp) {
+			entry.Status = string(planStatusUnsupportedOperation)
 			continue
 		}
-		if o.Mode == "tftp" {
+		if planMode == modeTFTP {
 			target, e := o.Target(r)
 			if e != nil {
 				return Plan{}, e
 			}
 			if target.Server == "" || target.Path == "" {
-				return Plan{}, ErrPlan
+				return Plan{}, ErrInvalidPlan
 			}
 			p.transfers[i] = target
 		}
@@ -328,7 +314,7 @@ func NewPlan(rows []inventory.Device, rules *Rules, o PlanOptions) (Plan, error)
 			sort.SliceStable(indices, func(i, j int) bool { return p.entries[indices[i]].Device.Host < p.entries[indices[j]].Device.Host })
 			for n, i := range indices {
 				if n >= o.LimitPerVendor {
-					p.entries[i].Status = "sample_limit"
+					p.entries[i].Status = string(planStatusSampleLimit)
 				} else {
 					arbitration = append(arbitration, i)
 				}
@@ -337,31 +323,32 @@ func NewPlan(rows []inventory.Device, rules *Rules, o PlanOptions) (Plan, error)
 	}
 	if o.LimitPerVendor == 0 {
 		for i, e := range p.entries {
-			if e.Status == "" {
+			if planStatus(e.Status) == "" {
 				arbitration = append(arbitration, i)
 			}
 		}
 	}
-	targets := map[Target]int{}
-	if o.Mode == "tftp" {
+	targets := map[[2]string]int{}
+	if planMode == modeTFTP {
 		for _, i := range arbitration {
 			target := p.transfers[i]
-			if _, exists := targets[target]; !exists {
-				targets[target] = i
+			if _, exists := targets[[2]string{target.Server, target.Path}]; !exists {
+				targets[[2]string{target.Server, target.Path}] = i
 			}
 		}
 	}
 	for i := range p.entries {
 		e := &p.entries[i]
-		if e.Status != "" {
+		if planStatus(e.Status) != "" {
 			continue
 		}
 		target := p.transfers[i]
-		if o.Mode == "tftp" && targets[target] != i && !(o.AllowFixedNameReuse && e.Device.Vendor == "palo_alto") {
-			e.Status = "remote_filename_collision"
+		reuseDestination := o.AllowFixedNameReuse && capabilities[e.Device.Vendor].allowDestinationReuse
+		if planMode == modeTFTP && targets[[2]string{target.Server, target.Path}] != i && !reuseDestination {
+			e.Status = string(planStatusRemoteFilenameCollision)
 			continue
 		}
-		e.Status = "ready"
+		e.Status = string(planStatusReady)
 		p.tasks = append(p.tasks, Task{Index: i, Device: e.Device, Target: target})
 	}
 	return p, nil

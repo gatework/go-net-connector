@@ -5,6 +5,34 @@ layer. Resolve the pinned GitHub dependency with GOWORK=off. Do not run the old
 workspace reconstruction scripts for current builds; retained baselines/patches
 are historical audit material.
 
+## 2026-11-07 Go naming cleanup
+
+The project uses package and capability context instead of repeating those
+words in identifiers. These source names were migrated directly; no forwarding
+aliases remain. CLI flags, configuration keys, report fields and protocol
+values are unchanged.
+
+| Previous API | Current API |
+| --- | --- |
+| `topology.ConfigurationInterface` | `topology.ConfigName` |
+| `topology.InterfaceDescriptionReader/Writer` | `topology.DescriptionReader/DescriptionWriter` |
+| `topology.TopologyWriteDenial` | `topology.WriteRestriction` |
+| `InterfaceIdentity.ConfigurationInterface` | `InterfaceIdentity.ConfigName` |
+| `DescriptionWriter.TopologyWriteMode` | `DescriptionWriter.WriteMode` |
+| `WriteRestriction.TopologyWriteUnavailableCode` | `WriteRestriction.UnavailableCode` |
+| `topology.Topology` | `topology.Client` |
+| `dialect.Dialect` | `dialect.Platform` |
+| `Platform.ConnectorProfile()` | `Platform.Profile()` |
+| `fleet.InventoryResolver.ResolveInventory` | `fleet.PlatformResolver.ResolvePlatform` |
+| `fleet.ErrPlan` | `fleet.ErrInvalidPlan` |
+| `driver.ProfileDialect` / `NewProfileDialect` | `driver.ProfiledPlatform` / `NewProfiledPlatform` |
+| `h3c.H3C()` | `h3c.New()` |
+| `driver.ConfigurationPolicy` / `NewConfigurationStrategy` | `driver.ConfigPolicy` / `driver.NewConfigStrategy` |
+| `driver.BaseConfigurationPolicy/Factory` | `driver.BaseConfigPolicy/BaseConfigFactory` |
+| `driver.InterfaceDescriptionPolicy/Writer` | `driver.DescriptionReader/DescriptionWriter` |
+| `driver.NewInterfaceDescriptionWriter` | `driver.NewDescriptionWriter` |
+| `driver.TopologyWriteDenialPolicy` | `driver.WriteRestriction` |
+
 | Previous API | Current API |
 | --- | --- |
 | Device.Name / Operation.Name | ProfileName (the profile key, not a hostname) |
@@ -37,9 +65,30 @@ patterns/slices; caller closures remain borrowed and must synchronize shared sta
 
 Profile.ValidateSave(ctx, result) supplies affirmative save evidence. SaveConfig
 and topology share it. Missing or negative evidence returns ErrUnconfirmed while
-retaining completed steps. Existing confirmed topology save policies moved into
-vendor profiles; unsupported firmware evidence is never guessed. Confirmation is
-not a claim about physical flash durability after power loss.
+retaining completed steps. Built-in profiles delegate to platform-owned save
+confirmation rules; unsupported firmware evidence is never guessed.
+Confirmation is not a claim about physical flash durability after power loss.
+
+## 2026-11-05 vendor dialect API
+
+The built-in catalog is `vendors.NewBuiltinRegistry()`. Resolve a platform with
+`Lookup`; the immutable `Platform` owns its CLI policy and returns a detached
+`connector.Profile` through `Profile`. `vendors/dialect` contains only
+the leaf `Platform`/`Registry` contracts and shared data types. Consumers own the
+optional behavior interfaces: topology owns neighbor discovery, description
+reading, interface identity and writing; transfer owns TFTP and remote-backup
+policies; fleet owns platform resolution. The built-in registry owns its
+inventory matcher and derives lookup and matching order from one platform list.
+`connector.Profile.Capabilities` and `Device.Capabilities()` have been removed;
+platform support is represented by the behavior method sets instead.
+Platform-specific TFTP source-file, verification-root and destination-reuse
+requirements travel with the matching policy. `fleet.NewRules`, `topology.New`,
+pure topology planning, TFTP, and remote-backup operations take an explicit registry.
+The package-level `vendors.Profile` and `vendors.Names` lookups have been
+removed. The built-in catalog is static; it has no runtime plugin loader.
+Vendor policies may return `dialect.DiagnosticError` to preserve a stable error
+code and phase across the consumer boundary; raw device output remains absent
+from formatted diagnostics.
 
 ConnectionConfig adds IdentityFile, KeyPassphrase and LineEnding (default LF).
 Key passphrases are sent only after an explicit matching prompt, are redacted,
@@ -55,10 +104,12 @@ and must not reenter their owning stream/log sink.
 
 ## 2026-10-29 quality changes
 
-- `vendors.Open` is removed. Use `vendors.Profile`, `connector.New`, register
-  `Close`, then call `Connect`. A connection error never transfers cleanup
-  responsibility away from the caller. Repeated `Close` retries failed cleanup;
-  successful cleanup is not repeated. Commands are never replayed.
+- `vendors.Open`, `vendors.Profile` and `vendors.Names` are removed. Resolve a
+  `Platform` through `Registry.Lookup`, then use its detached
+  `Profile` with `connector.New`, register `Close`, and call `Connect`.
+  A connection error never transfers cleanup responsibility away from the
+  caller. Repeated `Close` retries failed cleanup; successful cleanup is not
+  repeated. Commands are never replayed.
 - `Profile.Validate`, `ConnectionConfig.Validate` and `ValidateOptions` perform
   pure checks. The last checks reusable options without requiring a bound Host.
   Constructors validate, normalize defaults and detach mutable configuration.
@@ -121,10 +172,11 @@ shared; `Command()` still detaches mutable fields. Simultaneous operation, recei
 logging and cleanup failures remain discoverable with `errors.Is/As`, with the
 primary failure controlling fleet diagnostic classification. No command is replayed.
 
-`vendors.Profile` returns independent mutable declarations backed by a finite
-compiled catalog. Device snapshots and fixed matchers are private. `NewPlan`
-resolves capabilities once per vendor per plan; custom lookup state is not cached
-across plans. Each configuration collection still gets its own strategy instance.
+`Registry.Lookup` returns immutable dialect declarations; each
+`Profile` call returns independent mutable connector data. Device
+snapshots and fixed matchers are private. `NewPlan` resolves capabilities once
+per vendor per plan; custom lookup state is not cached across plans. Each
+configuration collection still gets its own strategy instance.
 
 Optional source probes are `scripts/verify-firemon-source.py ADAPTER_PATH` and
 `scripts/verify-expect-source.py EXPECT_PATH`. They migrate or rebind imports only
@@ -134,8 +186,10 @@ remain pinned; passing these probes does not establish published adoption.
 Example lifecycle (the deferred Close also runs on a failed Connect):
 
 ```go
-profile, err := vendors.Profile("cisco_ios")
+registry := vendors.NewBuiltinRegistry()
+declaration, err := registry.Lookup("cisco_ios")
 if err != nil { return err }
+profile := declaration.Profile()
 device, err := connector.New(profile, cfg)
 if err != nil { return err }
 defer device.Close()
@@ -189,3 +243,23 @@ API changes. HTTP keys and PG column names remain case-sensitive; optional nulls
 become empty strings and IP is required. PG byte budgets include ignored columns.
 Cancellation or validation failure returns no partial inventory. PG output owns
 its strings before the next driver row can reuse buffers.
+
+## 2026-11-03：源码候选接口收敛
+
+本节适用于隔离源码配对候选，尚未由正式固定的 go-expect v0.1.2 提供；不以源码验收冒充已发布依赖采纳。
+
+- Profile、Interaction、Command 的提示符/交互字段使用不可变 `expect.Pattern`。使用 `expect.Compile`、`FromRegexp` 或字节级 `Line`；可选声明用零值，连接前经 `ValidateText` 检查。固定匹配器不再通过可变 regexp 指针映射转换。
+- Device/Operation 使用 `RawPrompt()` 获取线缆字节，使用 `Prompt()` 检查解码结果。删除混合表示的 CurrentPrompt。ConfigStrategy 通过 MatchPrompt 返回 Pattern，精确终端提示符用 Line，不能将 GB18030 原文直接拼进 Go 正则。
+- StepResult/Attempt 的响应统一经 Response() 读取。原 Raw、Output、Prompt、Rendered、OutputEncoding 转发删除。Response.Output/Rendered/Prompt 的错误必须处理；Result.Config 用于配置正文，JoinedOutput 只连接已接受的命令文本，不自动替换为配置或原文字节。
+- BackupSource.Verified、BackupReceipt.HasSavedEvidence/Complete 集中判断双文件状态。原文单独提交不属于完整成功；迟到的文件或清理错误不抹除已经提交的证据。
+- transfer.Target 统一计划与执行目标，替代 Effective 和 fleet.Target。完整目标在落盘前冻结，固定文件名和碰撞策略维持原规则。
+- bootstrap 使用直接构造注入和每厂商的无秘密模板，移除空 Services.Close 生命周期；凭据仍在逐设备构造时解析。
+- go-expect 的 WithTranscript 重复别名移除，使用 WithOutput；Send、SendAll、Poll 的不同语义保留。
+
+本地消费者应直接迁移，不增加旧接口包装；发现无法保持原业务语义的历史借用会话接口时，必须保留失败边界并报告，不能删除测试或暗中改变恢复行为。
+
+## 2026-11-04 可观察阶段与纯文本备份
+
+`ConnectionConfig.OnSessionEvent` 接收不可变的 `SessionEvent{Host,Name,Status}`，同步在操作租约下调用，与日志级别独立；不包含命令或设备响应。观察回调应配合context，错误保留原原因及已有完成步骤。
+
+`BackupOptions.TextOnly` 严格采集解码后的配置并省略raw旁车；`BackupReceipt.TextOnly` 记录该模式，完成状态仍依据采集和持久化证据。库默认保真行为保留，CLI默认启用TextOnly。未知编码不会被猜测或转义成成功配置。显式设置 `PreserveInvalidEncoding` 后，严格解码失败的配置保留原字节、标记 `original-bytes` 和 `TextWarning`，仍不创建旁车；CLI 采用此模式。普通 `RunningConfig`、命令和结构化解析保持严格。

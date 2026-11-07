@@ -1,0 +1,36 @@
+{
+  "verified_at": "2026-11-04T06:49:50.421698+00:00",
+  "server": "10.132.12.51",
+  "worker": "/usr/local/bin/net-connector-archive",
+  "sha256": "e12203f6e93b02649696231acddd0e0bd48626de526ff28d15c4e9f5db7044ff",
+  "backup_worker": "/usr/local/bin/net-connector-archive.bak-20261104T064947Z",
+  "identity": "go-net-connector development local-paired source bbfcfc0739ecdba1",
+  "probe": {
+    "ok": true,
+    "phase": "ready",
+    "version": 1,
+    "capabilities": [
+      "target_lock",
+      "preserve_previous",
+      "stable_sha256",
+      "binary_delivery",
+      "confirmed_cleanup",
+      "daily_latest"
+    ]
+  },
+  "preflight": {
+    "ok": true,
+    "phase": "ready",
+    "version": 1,
+    "capabilities": [
+      "target_lock",
+      "preserve_previous",
+      "stable_sha256",
+      "binary_delivery",
+      "confirmed_cleanup",
+      "daily_latest"
+    ]
+  },
+  "server_archive_directory": "/srv/tftp/archive/2026-11-04",
+  "device_tasks_started": 0
+}

@@ -2,9 +2,11 @@
 
 以 Go 实现 Ruby net-connector 0.18.0 冻结工作区的设备连接、配置采集、原生上传、拓扑审计和批次执行模块。支持 Go 1.26+，目标平台为 Linux/macOS、amd64/arm64。
 
-底层直接依赖 GitHub 上的 `github.com/gatework/go-expect` 和系统 SSH/Telnet。依赖版本由 `go.mod` 固定，构建不使用本地 `replace` 或跨仓库 `go.work`。历史快照和补丁仅用于审计，不参与当前构建。
+底层直接依赖 GitHub 上的 `github.com/gatework/go-expect` 和系统 SSH/Telnet。依赖版本由 `go.mod` 固定，构建不使用本地 `replace` 或跨仓库 `go.work`。历史校验记录仅用于审计，不参与当前构建。
 
 ## 构建
+
+当前模块固定使用正式发布的 go-expect `v0.4.0`。本地构建和测试通过 Go 模块解析正式依赖，不需要候选源码或本地替换。
 
 ```sh
 GOWORK=off go mod download
@@ -12,36 +14,52 @@ GOWORK=off go test ./...
 GOWORK=off go build -o bin/ ./cmd/...
 ```
 
-公开 Go API 的变更见 [迁移说明](docs/api-migration.md)。CLI、配置文件、厂商命令及报告格式保持兼容。
+公开 Go API 的变更见 [迁移说明](docs/api-migration.md)。本次 CLI 直接迁移统一入口；配置发现、厂商命令及报告格式保持既有契约。
 
-系统需要 `ssh`；Telnet 连接另需系统 `telnet`。SSH 归档服务器需要管理员安装 `net-connector-archive`，默认路径 `/usr/local/bin/net-connector-archive`。客户端只探测协议版本和能力，不上传或安装 worker。
+系统需要 `ssh`；Telnet 连接另需系统 `telnet`。SSH 归档服务器需要管理员安装 `tftp-archive`，默认路径 `/usr/local/bin/tftp-archive`。客户端只探测协议版本和能力，不上传或安装 worker。
 
 ## 命令入口
 
-| 命令 | 默认行为 |
-| --- | --- |
-| `net-backup` | 根入口，strict 成功策略，每厂商抽样 5 台，直接写配置目录，JSON 结果 |
-| `net-backup-batch` | selected 策略，全量选择，创建批次目录 |
-| `net-backup-tftp` | 原生 TFTP 上传、可选本地/SSH 文件核验和归档 |
-| `net-topology` | 只读拓扑规划；修改必须显式 `--apply` |
-| `net-connector-archive` | 归档服务器上的标准输入/输出协议 worker |
+完整中文参数与示例见 [命令参考](docs/cli-reference.md)，由命令树生成并校验。
+
+统一运维入口为 `netman`，归档协议服务使用 `tftp-archive`。
 
 ```sh
-bin/net-backup --help
-bin/net-backup --init --non-interactive
-bin/net-backup --show-config
-bin/net-backup --plan --hosts 192.0.2.0/24
-bin/net-backup-batch --all --json
-bin/net-backup-tftp --tftp-server 192.0.2.9 --tftp-root /srv/tftp --success-policy verified --json
-bin/net-topology --inventory-only --json
-bin/net-topology --plan --hosts 192.0.2.1 --json
-bin/net-topology --apply --hosts 192.0.2.1 --json
-bin/net-backup --export 192.0.2.1 --directory ./backups --output ./saved.cfg
+bin/netman --help
+bin/netman config init --non-interactive
+bin/netman config show
+bin/netman inventory list --hosts 192.0.2.0/24
+bin/netman backup plan --method cli --json
+bin/netman backup run --json
+bin/netman backup tftp --tftp-server 192.0.2.9 --tftp-root /srv/tftp --success-policy verified --json
+bin/netman topology plan --hosts 192.0.2.1 --json
+bin/netman topology apply --hosts 192.0.2.1 --json
+bin/netman backup export 192.0.2.1 --batch ./backups/具体批次 --output ./saved.cfg
+bin/netman completion zsh
 ```
 
-这些执行命令会访问配置的清单和设备。帮助、初始化、公开配置查看、本地导出均可离线运行；`--inventory-only` 可读取清单，但不连接设备。
+备份默认全量选择和批次归档。配置采集默认 selected；TFTP 默认 verified，要求服务器核验并取回文件、本地保存成功。`--success-policy selected` 可显式选择以设备报告判断上传结果。文本文件统一为 `设备名称-IP.txt`；可使用 `--sample` 抽样、`--success-policy strict` 严格判定及 `--layout flat` 平铺。设备名缺失时使用 `unnamed`。CLI 不生成 `.raw` 旁车：正常编码转换为 UTF-8；设备配置本身无法无损解码时保留原编码字节并报告编码警告，不猜字、不丢字，也不伪装成有效 UTF-8。
 
-退出码：`0` 策略成功，`1` 已执行但不完整，`2` 参数/清单/基础 I/O 错误，`130` 中断。进度写 stderr；JSON 写 stdout。批次目录保留 `plan.json`、`events.jsonl`、`summary.json`、`summary.txt`；会话日志的位置与内容由日志策略决定。拓扑还保留逐设备报告、命令文件和 SHA-256。
+帮助、版本、补全、配置查看和初始化不访问设备或清单；清单预览和备份规划可访问清单但不连接设备。拓扑规划需要只读访问设备，应用前会重新核验。
+
+退出码：`0` 策略成功，`1` 不完整或没有可执行目标，`2` 参数、清单或 I/O 错误，`130` 中断。中文进度写 stderr，JSON 结果写 stdout。批次保留 `plan.json`、`events.jsonl`、`summary.json` 和 `summary.txt`。
+
+| 原用法 | 新用法 |
+| --- | --- |
+| net-backup / net-backup-batch | netman backup run |
+| net-backup-tftp | netman backup tftp |
+| --inventory-only | netman inventory list |
+| --show-config / --init | netman config show / init |
+| net-topology --discover / --plan / --apply | netman topology discover / plan / apply |
+| --export IP | netman backup export IP --batch 具体批次 |
+
+四个旧入口不再提供。初始化向导使用 `config init --interactive`，完成后重新运行业务命令。导出以指定批次报告定位并核验文件，不自动查找最新批次。TFTP 上传文件名继续遵守厂商约束，本地归档保留原生扩展名。
+
+## 运行进度
+
+运行后立即显示配置与清单读取阶段，随后显示选中/跳过数量、并发、批次目录、设备连接和采集状态、完成计数及耗时；等待期间定时刷新。失败显示受控原因，结束显示结果统计和报告位置。进度写 stderr，不包含密码、配置正文或设备原始回显。
+
+`--verbose` 在原地面板内显示更多连接和命令阶段详情；`--quiet` 隐藏进度。`--json --quiet` 适用于自动化。CLI 文本备份不写原文旁车，原生 TFTP 仍保留厂商文件格式。
 
 ## 配置和凭据
 
@@ -50,33 +68,28 @@ bin/net-backup --export 192.0.2.1 --directory ./backups --output ./saved.cfg
 ```yaml
 # backup.yml
 netdisco:
-  source: http
   url: https://netdisco.example.invalid
-  cache_mode: prefer
-  cache_directory: ./.cache/net-connector/inventory
-inventory:
-  include_hosts: [192.0.2.0/24]
-  name_match: contains
-ssh:
-  protocol: ssh
-  host_key_policy: accept_new
-  known_hosts: ./known_hosts
-  log_level: info
-  # log_directory: ./logs
-backup:
-  directory: ./backups
-  parallel: 4
 ```
 
-密码不放在 YAML。环境变量包括 `ND_USERNAME`、`ND_PASSWORD` 或 `ND_API_KEY`，以及 `NC_DEVICE_USERNAME`、`NC_DEVICE_PASSWORD`、`NC_ENABLE_PASSWORD`。设备凭据支持 `NC_<VENDOR>_USERNAME/PASSWORD/ENABLE_PASSWORD`，例如 `NC_H3C_PASSWORD`。显式通用 CLI 凭据覆盖对应厂商值。终端可用 `--ask-password`；自动化可用 `--stdin-credentials`，先发送一行凭据 JSON，执行备份或拓扑应用前再发送 `RUN`。
+起步配置只填写环境事实；并发、目录、筛选等按需覆盖。配置备份、TFTP 备份和拓扑任务共用 `backup.parallel`，需要时可用 `topology.parallel` 单独覆盖。初始化省略继承的默认值，明确设置的 false 和空筛选会保留。`config init --json` 返回实际创建的文件；`backup export --output 文件` 默认输出中文回执，可加 `--json` 获取元数据；直接导出到 stdout 始终只包含配置原文件。
 
-日志配置使用 `ssh.log_directory` / `NC_LOG_DIRECTORY` 与 `ssh.log_level` / `NC_LOG_LEVEL`。级别为 `debug`、`info`、`warn`、`error`；默认 `info`，只在 `debug` 记录完整脱敏回显。未指定日志目录时，普通根入口和批量备份不创建会话日志，批量 TFTP 与拓扑使用批次目录下的 `logs`；显式目录覆盖这些默认值。
+程序名为 `netman`，配置发现继续使用 `~/.config/net-connector/`、`net-connector.yml` 与 `backup.yml`，既有 `NC_`/`ND_` 环境变量继续有效。归档端部署与协议说明见 [tftp-archive](docs/tftp-archive.md)。
+
+密码不放在 YAML。环境变量包括 `ND_USERNAME`、`ND_PASSWORD` 或 `ND_API_KEY`，以及 `NC_DEVICE_USERNAME`、`NC_DEVICE_PASSWORD`、`NC_ENABLE_PASSWORD`。使用 API key 且启用清单缓存时，需提供非敏感账户标识 `ND_USERNAME` 或 `ND_CACHE_NAMESPACE`，避免不同账户复用同一份缓存。设备凭据支持 `NC_<VENDOR>_USERNAME/PASSWORD/ENABLE_PASSWORD`，例如 `NC_H3C_PASSWORD`。显式通用 CLI 凭据覆盖对应厂商值。终端可用 `--ask-password`；自动化可用 `--stdin-credentials`，先发送一行凭据 JSON，执行备份或拓扑应用前再发送 `RUN`。
+
+日志配置使用 `ssh.log_directory` / `NC_LOG_DIRECTORY` 与 `ssh.log_level` / `NC_LOG_LEVEL`。级别为 `debug`、`info`、`warn`、`error`；默认 `info`，只在 `debug` 记录完整脱敏回显。未指定日志目录时，普通配置备份不创建会话日志，TFTP 与拓扑使用批次目录下的 `logs`；显式目录覆盖这些默认值。
 
 主机密钥策略 `replace` 必须显式指定 `ssh.known_hosts`，不会隐式替换用户默认信任文件中的密钥。
 
-连接器自动检查命令响应的编码，并统一以 UTF-8 提供文本和保存备份；现有 Go API 调用与 CLI 无需增加编码参数。有效 UTF-8 原样保留，GBK/GB2312/GB18030 中文输出由 [chardet](https://github.com/saintfish/chardet) 提供候选，再由 `golang.org/x/text` 严格转换。检测在完整响应收齐后进行，分页和网络分包不会拆坏中文字符，终端退格/光标操作按原始字节处理后再转换。
+连接器自动检查命令响应的编码，对可无损识别的文本统一转换为 UTF-8；现有 Go API 调用与 CLI 无需增加编码参数。有效 UTF-8 原样保留，GBK/GB2312/GB18030 中文输出由 [chardet](https://github.com/saintfish/chardet) 提供候选，再由 `golang.org/x/text` 严格转换。检测在完整响应收齐后进行，分页和网络分包不会拆坏中文字符，终端退格/光标操作按原始字节处理后再转换。
 
-`StepResult.Raw()` 保留原始响应字节，`OutputEncoding()` 提供本次选择的编码作为诊断信息。备份的字节数和 SHA-256 基于 UTF-8 内容；转码后仍受 `MaxOutputBytes` 限制。无法识别或转换的输出返回 `invalid_output_encoding`，保留旧备份。自动识别是对 UTF-8 与 GB18030 家族的启发式判断，合法 UTF-8 优先，字节有效性校验不能消除所有歧义。会话日志按完整行转换，并在转换前后脱敏。发送命令、交互透传及原生 TFTP 上传文件仍按协议保留原始字节。
+`StepResult.Response().Raw()` 保留原始响应字节，`Response().Encoding()` 提供编码诊断。普通命令、`RunningConfig` 与拓扑解析仍严格拒绝不可解码输出。
+
+Go API 默认 `Backup` 另提供保真阅读视图（CLI 使用无旁车的原字节保留模式）：按完整终端行保留有效 UTF-8，旧编码仅在检测与逐字节往返验证通过后转换；无法确认的源字节显示为大写 `\xNN`，不会把整份正常中文转为转义或用 `�` 代替未知字节。这是阅读视图，不是可自动恢复到设备的配置脚本。编码识别仍有歧义，文件 UTF-8 合法并不证明文字语义正确。
+
+Go API 默认保真备份包含阅读文件与 `<备份路径>.<原文 SHA-256>.raw` 旁车，后者保留配置采集各步骤的原始响应，不包含认证对话。`BackupReceipt.source` 记录原文大小、哈希、步骤偏移及独立持久化回执；`encoding` 与 `text_warning` 记录编码及异常总数、最多 64 个原始字节位置（偏移从 0 开始，行/字节列从 1 开始）。原文先持久化，再原子保存阅读文件，两者权限均为 `0600`。采集完整、双文件持久化成功的编码异常计为成功并告警；截断、设备拒绝、超限和文件失败仍不能报成功。读取旧文件与未变化判断同样核验原文旁车。所有大小与转义膨胀仍受输出上限约束。
+
+帮助、交互、运行进度、文本报告和日志解释统一中文；命令参数、环境变量、JSON 字段及状态码保持兼容，归档 worker 的正常 stdout 仍仅用于协议。发送命令、交互透传和原生 TFTP 文件不作转码。
 
 PostgreSQL 使用 `netdisco.source: postgres`、`query`、`query_params`；身份来自 `ND_DB_HOST/NAME/USER/PASS`。查询通过参数绑定和只读游标执行。`cache_mode: only` 仅使用已校验缓存，禁止源查询。
 
@@ -113,7 +126,7 @@ _ = ok
 - `inventory` / `netdisco`：清单选择器、HTTP/PG 来源与缓存。
 - `fleet` / `parallel`：通用计划、批次、报告及有界并发。
 - `storage`：稳定路径锁、私有日志、原子写入与提交/持久化回执。
-- `config`：不可变配置快照；`internal/bootstrap` 是唯一 samber/do 组合根。
+- `config`：不可变配置快照；`internal/bootstrap` 是唯一显式依赖注入组合根。
 
 Go API 直接注入 `ConnectionConfig.Logger` 且不设置 `LogLevel` 时，保留底层脱敏回显写入行为；设置 `LogLevel` 后使用结构化事件，只有 `debug` 包含回显。CLI 始终使用配置中的日志级别。
 
@@ -134,3 +147,17 @@ python3 scripts/verify-linux.py
 ```
 
 来源和平台证据见 [验证记录](docs/verification.md)，模块和厂商对应关系见 [兼容矩阵](docs/compatibility.md)，所有权与失败边界见 [架构](docs/architecture.md)，实施中的兼容性与交付裁定见 [决策记录](docs/decisions.md)。本地假设备、PTY、HTTP/TLS、临时 PostgreSQL、localhost sshd 和安装后的 worker 是不同的证据层；这些结果不代表生产设备互通、远端 CI 或发布完成。
+
+### TFTP 等待上限与每日归档
+
+CLI 上传命令默认最多等待 180 秒，通过 `tftp.upload_timeout`（秒）或 `NC_TFTP_UPLOAD_TIMEOUT` 调整；不会在超时后自动重发上传命令。该默认与 Ruby TFTP 策略一致。Go API 的 `TFTPOptions.Timeout` 为零时同样沿用 180 秒，正值覆盖上传命令的等待上限。
+
+服务器按 UTC+8 日期归档，例如 `/srv/tftp/archive/2026-11-04/设备名-IP.cfg`。同一天多次备份在核验成功后原子更新当天文件；上传失败保留原版本，不创建随机 SSH 子目录。历史日期与此前批次目录保持原位。本机批次报告仍独立保存。worker 必须提供 `daily_latest` 能力，预检失败时不会执行设备上传。
+
+### 最小环境配置与统一结果展示
+
+`backup.yml` 只需保留本站 TFTP 服务器、归档根目录及设备例外；清单服务与本机目录等共享配置放在 `net-connector.yml` 一处。空筛选、空 hosts 映射、缓存默认值和重复 SSH 设置无需填写。CLI 备份与 TFTP 使用一致的分区展示，输出备份方式、目录、文本报告及 JSON 报告；自动化继续使用 `--json --quiet`。成功策略可用 `backup.success_policy`、`NC_BACKUP_SUCCESS_POLICY` 或 `--success-policy` 覆盖，优先级遵循统一约定。
+
+默认 H3C、Radware、Centec 采用 management 上传源，Huawei 默认源文件为 `flash:/startup.cfg`，NX-OS 默认 management VRF；环境不同仍可显式覆盖。Hillstone 路由域和逐设备例外保留为站点设置。
+
+CLI 文件备份的完整性与文本编码质量分别统计。设备原生配置中截断的 UTF-8 不会被误猜为 GBK；保存文件标记 `original-bytes`，`text_warning` 给出异常字节位置，正文可能不是合法 UTF-8。TFTP 文件通过 SHA-256 核验也不表示原生文本编码合法。CLI 当前配置与厂商原生启动文件具有不同范围，不能仅按状态名或文件哈希直接判定结果矛盾。

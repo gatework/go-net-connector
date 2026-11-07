@@ -25,7 +25,7 @@ func TestFrozenRubyReportAndPartialReceipts(t *testing.T) {
 		t.Fatal(e)
 	}
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	rules, e := NewRules(RuleOptions{}, vendors.Profile)
+	rules, e := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -57,6 +57,14 @@ func TestFrozenRubyReportAndPartialReceipts(t *testing.T) {
 	}
 	var got map[string]any
 	json.Unmarshal(b, &got)
+	// New encoding metadata is additive; compare the established Ruby fields unchanged.
+	delete(got, "text_warning_devices")
+	for _, value := range got["devices"].([]any) {
+		row := value.(map[string]any)
+		delete(row, "source")
+		delete(row, "encoding")
+		delete(row, "text_warning")
+	}
 	if !reflect.DeepEqual(got, fixture.Report) {
 		want, _ := json.MarshalIndent(fixture.Report, "", "  ")
 		t.Fatalf("report differs\nGo: %s\nRuby: %s", b, want)

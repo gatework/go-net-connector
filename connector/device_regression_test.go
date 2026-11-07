@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -112,7 +111,7 @@ func TestOperationExpiresAndDrainsAdmittedCall(t *testing.T) {
 func TestReviewInvalidProfileAllowsWrite(t *testing.T) {
 	p := fixtureProfile()
 	p.PrivilegeCommand = "enable\nwrite erase"
-	p.PrivilegePrompt = nil
+	p.PrivilegePrompt = testPatternZero()
 	if _, e := New(p, ConnectionConfig{Host: "fixture"}); e == nil {
 		t.Fatal("invalid privilege command/prompt accepted")
 	}
@@ -197,11 +196,11 @@ func TestPagerPreservesConsumedLineBoundaries(t *testing.T) {
 		t.Fatal(e)
 	}
 	step := r.Steps()[0]
-	if step.Raw() != "first\r\n--More--\nsecond\r\nsw#" {
-		t.Fatalf("raw=%q", step.Raw())
+	if step.Response().Raw() != "first\r\n--More--\nsecond\r\nsw#" {
+		t.Fatalf("raw=%q", step.Response().Raw())
 	}
-	if visible, _ := terminal.Render([]byte(step.Output()), true); !strings.Contains(visible, "first\n") || strings.Contains(step.Output(), "--More--") || strings.Contains(step.Output(), "firstsecond") {
-		t.Fatalf("output=%q", step.Output())
+	if visible, _ := terminal.Render([]byte(testStepOutput(step)), true); !strings.Contains(visible, "first\n") || strings.Contains(testStepOutput(step), "--More--") || strings.Contains(testStepOutput(step), "firstsecond") {
+		t.Fatalf("output=%q", testStepOutput(step))
 	}
 }
 func TestCompletionLogFailurePreservesReceipt(t *testing.T) {
@@ -226,9 +225,9 @@ func TestProfileAndChallengePreflight(t *testing.T) {
 			case "login_nil":
 				p.LoginInteractions = []Interaction{{}}
 			case "interaction_empty":
-				p.Interactions = []Interaction{{Pattern: regexp.MustCompile(`.*`)}}
+				p.Interactions = []Interaction{{Pattern: testPattern(`.*`)}}
 			case "interaction_negative":
-				p.Interactions = []Interaction{{Pattern: regexp.MustCompile(`yes`), Limit: -1}}
+				p.Interactions = []Interaction{{Pattern: testPattern(`yes`), Limit: -1}}
 			case "challenge_nil":
 				cfg.Challenges = []Interaction{{}}
 			}
@@ -247,7 +246,7 @@ func TestHookExpiresAndDrainsAdmittedCall(t *testing.T) {
 	p := fixtureProfile()
 	p.Prepare = func(ctx context.Context, c Command, x Executor) (Command, bool, error) {
 		go func() {
-			_, e := x.Execute(context.Background(), Command{Text: "query", Interactions: []Interaction{{Pattern: regexp.MustCompile(`Question:`), Respond: func(ctx context.Context, _ string) (string, error) {
+			_, e := x.Execute(context.Background(), Command{Text: "query", Interactions: []Interaction{{Pattern: testPattern(`Question:`), Respond: func(ctx context.Context, _ string) (string, error) {
 				close(entered)
 				<-ctx.Done()
 				close(cancelled)
@@ -465,8 +464,8 @@ func TestPagedRunningConfigPreservesEveryLine(t *testing.T) {
 	if !ok || !strings.Contains(config, "interface A\n") || !strings.Contains(config, " description B\n") || strings.Contains(config, "--More--") {
 		t.Fatalf("config=%q", config)
 	}
-	if r.Steps()[0].Raw() != "show config\r\ninterface A\r\n--More--\n description B\r\nsw#" {
-		t.Fatalf("raw=%q", r.Steps()[0].Raw())
+	if r.Steps()[0].Response().Raw() != "show config\r\ninterface A\r\n--More--\n description B\r\nsw#" {
+		t.Fatalf("raw=%q", r.Steps()[0].Response().Raw())
 	}
 }
 
@@ -502,7 +501,7 @@ func TestSensitiveInteractionProtectsEntireExchange(t *testing.T) {
 			var log bytes.Buffer
 			p := fixtureProfile()
 			c := Command{Text: "show"}
-			rule := Interaction{Pattern: regexp.MustCompile(`Question:`), Reply: "secret\n", Sensitive: true}
+			rule := Interaction{Pattern: testPattern(`Question:`), Reply: "secret\n", Sensitive: true}
 			if profileInteraction {
 				p.Interactions = []Interaction{rule}
 			} else {

@@ -21,7 +21,7 @@ type fixture struct {
 	mu                                              sync.Mutex
 	vendor                                          string
 	device                                          *connector.Device
-	topology                                        *Topology
+	topology                                        *Client
 	desc, neighbor, iface, mode, saveOutput, failOn string
 	mismatch, partial                               bool
 	writes                                          []string
@@ -29,6 +29,8 @@ type fixture struct {
 	done                                            chan struct{}
 	opens                                           int
 }
+
+var fixtureNeighborCommands = map[string]string{"h3c": "display lldp neighbor-information list", "h3c_wireless": "display lldp neighbor-information list", "huawei": "display lldp neighbor brief", "cisco_ios": "show cdp neighbors detail", "cisco_nxos": "show cdp neighbors detail", "hillstone": "show lldp neighbor-information", "palo_alto": "show lldp neighbors all", "juniper": "show lldp neighbors detail | no-more"}
 
 func newFixture(t *testing.T, vendor string) *fixture {
 	t.Helper()
@@ -47,10 +49,7 @@ func newFixture(t *testing.T, vendor string) *fixture {
 		f.neighbor = "Device ID: peer\nInterface: GigabitEthernet1/0/1, Port ID (outgoing port): GigabitEthernet1/0/2\n"
 		f.saveOutput = "[OK]"
 	}
-	p, e := vendors.Profile(vendor)
-	if e != nil {
-		t.Fatal(e)
-	}
+	p := platformProfile(vendor)
 	factory := func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
 		f.opens++
 		a, b := net.Pipe()
@@ -72,7 +71,7 @@ func newFixture(t *testing.T, vendor string) *fixture {
 				}
 				body := ""
 				switch {
-				case command == neighborCommands[vendor]:
+				case command == fixtureNeighborCommands[vendor]:
 					body = f.neighbor
 				case command == p.ConfigCommands[len(p.ConfigCommands)-1]:
 					ending := "!\nend"
@@ -112,11 +111,12 @@ func newFixture(t *testing.T, vendor string) *fixture {
 		}()
 		return a, nil
 	}
-	f.device, e = connector.New(p, connector.ConnectionConfig{Host: "fixture", CommandTimeout: time.Second, LoginTimeout: time.Second}, connector.WithTransportFactory(factory))
+	device, e := connector.New(p, connector.ConnectionConfig{Host: "fixture", CommandTimeout: time.Second, LoginTimeout: time.Second}, connector.WithTransportFactory(factory))
 	if e != nil {
 		t.Fatal(e)
 	}
-	f.topology, e = New(f.device)
+	f.device = device
+	f.topology, e = New(f.device, vendors.NewBuiltinRegistry())
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -131,6 +131,14 @@ func newFixture(t *testing.T, vendor string) *fixture {
 		}
 	})
 	return f
+}
+
+func platformProfile(vendor string) connector.Profile {
+	declaration, err := vendors.NewBuiltinRegistry().Lookup(vendor)
+	if err != nil {
+		panic(err)
+	}
+	return declaration.Profile()
 }
 func (f *fixture) prompt() string {
 	if f.vendor == "h3c" || f.vendor == "h3c_wireless" {
@@ -166,7 +174,7 @@ func TestApplyRevalidatesChangesReadsBackThenSaves(t *testing.T) {
 			if e != nil || !r.Persisted || !r.Verified {
 				t.Fatalf("%#v %v", r, e)
 			}
-			expected := append([]string{neighborCommands[vendor]}, f.device.ConfigCommands()...)
+			expected := append([]string{fixtureNeighborCommands[vendor]}, f.device.ConfigCommands()...)
 			expected = append(expected, p.Commands...)
 			if !reflect.DeepEqual(f.sent()[start:], expected) {
 				t.Fatalf("commands: %q want %q", f.sent()[start:], expected)
@@ -327,7 +335,7 @@ func TestPersistenceCallbackFailureRetainsPrimaryErrorAndCompletedSave(t *testin
 func TestReadOnlyAndUnsupportedOperationsAreOffline(t *testing.T) {
 	for _, vendor := range []string{"huawei", "fortinet", "juniper", "palo_alto", "radware", "topsec", "centec"} {
 		t.Run(vendor, func(t *testing.T) {
-			profile, _ := vendors.Profile(vendor)
+			profile := platformProfile(vendor)
 			opened := 0
 			d, e := connector.New(profile, connector.ConnectionConfig{Host: "fixture"}, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
 				opened++
@@ -336,7 +344,7 @@ func TestReadOnlyAndUnsupportedOperationsAreOffline(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			top, e := New(d)
+			top, e := New(d, vendors.NewBuiltinRegistry())
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -352,13 +360,43 @@ func TestReadOnlyAndUnsupportedOperationsAreOffline(t *testing.T) {
 		})
 	}
 }
+
+func TestTopologyRejectsBehaviorsNotDeclaredByPlatform(t *testing.T) {
+	profile := platformProfile("topsec")
+	opened := 0
+	device, err := connector.New(profile, connector.ConnectionConfig{Host: "fixture"}, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
+		opened++
+		return nil, errors.New("unsupported dialect must stay offline")
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	top, err := New(device, vendors.NewBuiltinRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = top.Neighbors(context.Background()); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("neighbors: %v", err)
+	}
+	if _, _, err = top.Descriptions(context.Background()); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("descriptions: %v", err)
+	}
+	if _, err = top.Discover(context.Background()); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("discover: %v", err)
+	}
+	if opened != 0 {
+		t.Fatalf("opened unsupported device %d times", opened)
+	}
+	_ = device.Close()
+}
+
 func TestFortinetVersionAndAuthorizedViewSelection(t *testing.T) {
 	for _, tc := range []struct {
 		version, view, statusView, command string
 		valid                              bool
 	}{{"7.6.2", "root", "root", "diagnose lldprx neighbor", true}, {"7.6.3", "root", "root", "diagnose lldp rx neighbor", true}, {"8.0.0", "tenant", "tenant", "diagnose lldp rx neighbor", true}, {"unknown", "root", "root", "", false}, {"7.6.3", "tenant", "other", "", false}} {
 		t.Run(tc.version+tc.view+tc.statusView, func(t *testing.T) {
-			profile, _ := vendors.Profile("fortinet")
+			profile := platformProfile("fortinet")
 			done := make(chan error, 1)
 			sent := []string{}
 			factory := func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
@@ -392,7 +430,7 @@ func TestFortinetVersionAndAuthorizedViewSelection(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			top, e := New(d)
+			top, e := New(d, vendors.NewBuiltinRegistry())
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -402,6 +440,16 @@ func TestFortinetVersionAndAuthorizedViewSelection(t *testing.T) {
 			}
 			if !tc.valid && (e == nil || len(r.Receipts) != 1) {
 				t.Fatalf("invalid version/context accepted: %v", e)
+			}
+			if !tc.valid {
+				var diagnostic *Error
+				want := "unrecognized_output"
+				if tc.version == "7.6.3" && tc.view == "tenant" {
+					want = "vdom_context_mismatch"
+				}
+				if !errors.As(e, &diagnostic) || diagnostic.Code != want || diagnostic.Phase != "discover" {
+					t.Fatalf("diagnostic = %#v, %v; want %q/discover", diagnostic, e, want)
+				}
 			}
 			d.Close()
 			select {
@@ -435,17 +483,11 @@ func TestAuditPlanRevalidatesOnlyVerifiedInterfaces(t *testing.T) {
 		t.Fatalf("scoped plan refused unrelated neighbor: %#v %v", r, e)
 	}
 }
-func TestDeviceCapabilityRestrictionsApplyToAuditAndCandidateErrorCode(t *testing.T) {
-	f := newFixture(t, "cisco_ios")
-	f.topology.profile.Capabilities.TopologyWrite = false
-	a, e := f.topology.Audit(context.Background(), FormatOptions{})
-	if e != nil || a.Plan != nil || !a.ManualRequired {
-		t.Fatalf("disabled write capability ignored: %#v %v", a, e)
-	}
+func TestReadOnlyPlatformCandidateErrorCode(t *testing.T) {
 	for _, v := range []string{"palo_alto", "juniper"} {
-		p, _ := vendors.Profile(v)
+		p := platformProfile(v)
 		d, _ := connector.New(p, connector.ConnectionConfig{Host: "fixture"})
-		top, _ := New(d)
+		top, _ := New(d, vendors.NewBuiltinRegistry())
 		_, e := top.Sync(context.Background(), FormatOptions{})
 		var domain *Error
 		if !errors.As(e, &domain) || domain.Code != "candidate_isolation_unavailable" {
@@ -464,7 +506,7 @@ func TestEveryWriteDialectStopsAtEachFailedStage(t *testing.T) {
 					t.Fatal(e)
 				}
 				start := len(f.sent())
-				stages, e := stagesFor(f.topology.profile, p.Changes)
+				stages, e := stagesFor(f.topology.profile, f.topology.identity, f.topology.writer, f.topology.writeDenial, p.Changes)
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -554,7 +596,7 @@ func TestAuditFormatterFailurePreservesCollectionReceipts(t *testing.T) {
 	if !errors.Is(err, primary) || len(a.Receipts) != 3 || a.Plan != nil {
 		t.Fatalf("audit failure lost evidence: %#v %v", a, err)
 	}
-	want := append([]string{neighborCommands["cisco_ios"]}, f.device.ConfigCommands()...)
+	want := append([]string{fixtureNeighborCommands["cisco_ios"]}, f.device.ConfigCommands()...)
 	for i, receipt := range a.Receipts {
 		if receipt.Command().Text != want[i] {
 			t.Fatalf("receipt %d: %v", i, receipt.Command())

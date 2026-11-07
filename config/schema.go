@@ -3,7 +3,11 @@ package config
 type Field struct{ Env, Kind string }
 
 var schema = map[string]Field{
+	"backup.success_policy":           {Env: "NC_BACKUP_SUCCESS_POLICY", Kind: "string"},
+	"tftp.upload_timeout":             {Env: "NC_TFTP_UPLOAD_TIMEOUT", Kind: "number"},
+	"backup.layout":                   {Env: "NC_BACKUP_LAYOUT", Kind: "string"},
 	"netdisco.cache_directory":        {Env: "ND_CACHE_DIRECTORY", Kind: "string"},
+	"netdisco.cache_namespace":        {Env: "ND_CACHE_NAMESPACE", Kind: "optional_string"},
 	"netdisco.cache_ttl":              {Env: "ND_CACHE_TTL", Kind: "number"},
 	"netdisco.cache_enabled":          {Env: "ND_CACHE_ENABLED", Kind: "boolean"},
 	"netdisco.cache_mode":             {Env: "ND_CACHE_MODE", Kind: "string"},
@@ -33,7 +37,7 @@ var schema = map[string]Field{
 	"topology.lowercase_ports":        {Env: "NC_TOPOLOGY_LOWERCASE", Kind: "boolean"},
 	"backup.directory":                {Env: "NC_BACKUP_DIRECTORY", Kind: "string"},
 	"backup.parallel":                 {Env: "NC_PARALLEL", Kind: "integer"},
-	"backup.limit_per_vendor":         {Env: "NC_SAMPLE_PER_VENDOR", Kind: "integer"},
+	"backup.limit_per_vendor":         {Env: "NC_SAMPLE_PER_VENDOR", Kind: "optional_integer"},
 	"inventory.include_hosts":         {Env: "NC_INCLUDE_HOSTS", Kind: "list"},
 	"inventory.exclude_hosts":         {Env: "NC_EXCLUDE_HOSTS", Kind: "list"},
 	"inventory.include_names":         {Env: "NC_INCLUDE_NAMES", Kind: "list"},

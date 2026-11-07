@@ -1,6 +1,8 @@
 package connector
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -34,14 +36,11 @@ func (l *logWriter) event(name, level string, c Command, status string) error {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if err := l.finishLocked(); err != nil {
-		return err
-	}
-	if err := l.startLocked(l.secrets, l.paused); err != nil {
-		return err
-	}
 	if logPriority(level) < logPriority(l.level) {
 		return nil
+	}
+	if err := l.flushLocked(); err != nil {
+		return err
 	}
 	text := c.Text
 	if c.Sensitive {
@@ -52,18 +51,18 @@ func (l *logWriter) event(name, level string, c Command, status string) error {
 	message := name
 	switch name {
 	case "connect":
-		message = "Connecting to " + l.safeEventText(l.host)
+		message = "正在连接 " + l.safeEventText(l.host)
 	case "login_complete":
-		message = "Login succeeded"
+		message = "登录成功"
 	case "command_start":
-		message = "Sending command: " + text
+		message = "正在发送命令：" + text
 	case "command_complete":
-		message = "Command output complete; device prompt received"
+		message = "命令输出接收完成，已收到设备提示符"
 	case "operation_complete":
-		message = "Device script complete"
+		message = "设备脚本执行完成"
 	}
 	if status == "failed" {
-		message = "Device operation failed"
+		message = "设备操作失败"
 	}
 	fields := "event=" + name
 	if c.Text != "" {
@@ -107,7 +106,7 @@ func (l *logWriter) writeTarget(p []byte) error {
 		err = io.ErrShortWrite
 	}
 	if err != nil {
-		return fail("log_error", "logging", Command{}, err)
+		return newError("log_error", "logging", Command{}, err)
 	}
 	return nil
 }
@@ -117,5 +116,20 @@ func (l *logWriter) flushLine() error {
 	}
 	line := l.line.String()
 	l.line.Reset()
-	return l.writeRecord("debug", "Device output:  | event=device_output output="+strconv.Quote(line))
+	return l.writeRecord("debug", "设备输出： | event=device_output output="+strconv.Quote(line))
+}
+
+// sessionEvent keeps progress observation independent of log level and raw sinks.
+func (d *Device) sessionEvent(ctx context.Context, name, level string, command Command, status string) error {
+	var observed error
+	if observer := d.config.OnSessionEvent; observer != nil {
+		if err := observer(ctx, SessionEvent{Host: d.config.Host, Name: name, Status: status}); err != nil {
+			observed = newError("session_observer_failed", "progress", Command{}, err)
+		}
+	}
+	logged := d.log.event(name, level, command, status)
+	if observed == nil {
+		return logged
+	}
+	return errors.Join(observed, logged)
 }

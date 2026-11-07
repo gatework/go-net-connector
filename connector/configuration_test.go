@@ -22,10 +22,10 @@ func TestRunningConfigAutomaticallyDecodesGBK(t *testing.T) {
 	wire := "show config\r\n description \xd6\xd0\xce\xc4\r\nsw#"
 	d, _ := fixtureDevice(t, fixtureProfile(), []string{wire})
 	r, err := d.RunningConfig(t.Context())
-	if err != nil || r.Output() != "show config\n description 中文\nsw#" {
+	if err != nil || testResultOutput(r) != "show config\n description 中文\nsw#" {
 		t.Fatalf("automatic decode: %v, %v", r, err)
 	}
-	if r.Steps()[0].Raw() != wire || r.Steps()[0].OutputEncoding() != "gb18030" {
+	if r.Steps()[0].Response().Raw() != wire || r.Steps()[0].Response().Encoding() != "gb18030" {
 		t.Fatal("original bytes or encoding lost")
 	}
 }

@@ -32,17 +32,17 @@ func reapGroup(pid int, done chan error) error {
 	if e := syscall.Kill(-pid, syscall.SIGTERM); e != nil && !errors.Is(e, syscall.ESRCH) {
 		signalErr = errors.Join(signalErr, e)
 	}
-	wait(200 * time.Millisecond)
+	wait(100 * time.Millisecond)
 	// Always signal the group again after reaping the leader: children can
 	// survive TERM or the leader can have exited before cleanup began.
 	if e := syscall.Kill(-pid, syscall.SIGKILL); e != nil && !errors.Is(e, syscall.ESRCH) {
 		signalErr = errors.Join(signalErr, e)
 	}
-	wait(2 * time.Second)
+	wait(750 * time.Millisecond)
 	if !reaped {
 		waitErr = ErrArchive
 	}
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(500 * time.Millisecond)
 	for {
 		e := syscall.Kill(-pid, 0)
 		if errors.Is(e, syscall.ESRCH) {
@@ -72,7 +72,7 @@ func commandLauncher(executable string, args []string, reap func(int, chan error
 	return func(ctx context.Context) (Channel, error) {
 		cmd := exec.CommandContext(ctx, executable, args...)
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		cmd.WaitDelay = 2 * time.Second
+		cmd.WaitDelay = 750 * time.Millisecond
 		cmd.Cancel = func() error {
 			if cmd.Process == nil {
 				return os.ErrProcessDone

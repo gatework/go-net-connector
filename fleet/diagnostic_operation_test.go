@@ -10,11 +10,11 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	expect "github.com/gatework/go-expect"
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/vendors"
@@ -26,7 +26,9 @@ func (diagnosticSink) Write([]byte) (int, error) { return 0, errors.New("SECRET_
 
 type brokenConfiguration struct{}
 
-func (brokenConfiguration) Prompt(_, current string) string { return current }
+func (brokenConfiguration) MatchPrompt(_, current string) (expect.Pattern, error) {
+	return expect.Compile(current)
+}
 func (brokenConfiguration) Validate(context.Context, connector.Command, connector.StepResult, connector.Executor) error {
 	return errors.New("SECRET_CAUSE")
 }
@@ -66,7 +68,7 @@ func TestDeviceFailuresReachFleetVocabulary(t *testing.T) {
 		{"finish", "configuration_error", "ConfigurationError", "collect", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := connector.Profile{Name: "fixture", LoginPrompt: regexp.MustCompile(`sw#$`), CommandPrompt: regexp.MustCompile(`sw#$`), ConfigCommands: []string{"show config"}}
+			p := connector.Profile{Name: "fixture", LoginPrompt: testPattern(`sw#$`), CommandPrompt: testPattern(`sw#$`), ConfigCommands: []string{"show config"}}
 			if tc.name == "validation" {
 				p.ConfigStrategy = func() connector.ConfigStrategy { return brokenConfiguration{} }
 			}
@@ -126,7 +128,7 @@ func TestDeviceFailuresReachFleetVocabulary(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer d.Close()
-			rules, _ := NewRules(RuleOptions{}, vendors.Profile)
+			rules, _ := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 			plan, _ := NewPlan([]inventory.Device{{IP: "192.0.2.1", Vendor: "h3c"}}, rules, PlanOptions{Mode: "backup"})
 			var result connector.Result
 			batch, err := Run(t.Context(), plan, RunOptions{Workers: 1, Run: func(ctx context.Context, _ Task) (Artifact, error) {
@@ -137,7 +139,7 @@ func TestDeviceFailuresReachFleetVocabulary(t *testing.T) {
 
 				c := connector.Command{Text: "show"}
 				if tc.name == "prompt" {
-					c.Prompt = regexp.MustCompile(`never#$`)
+					c.Prompt = testPattern(`never#$`)
 				}
 				result, err = d.ExecuteCommand(ctx, c, connector.ExecuteOptions{})
 				return Artifact{}, err
@@ -170,7 +172,7 @@ func TestDeviceFailuresReachFleetVocabulary(t *testing.T) {
 }
 
 func TestCallbackDeadlineRemainsGeneric(t *testing.T) {
-	got := diagnose(fmt.Errorf("SECRET_CAUSE: %w", context.DeadlineExceeded), Artifact{})
+	got := diagnoseError(fmt.Errorf("SECRET_CAUSE: %w", context.DeadlineExceeded), Artifact{})
 	if got.ErrorType != "Timeout::Error" {
 		t.Fatal(got)
 	}
@@ -193,7 +195,7 @@ func TestBackupWriteFailuresRespectCommitBoundary(t *testing.T) {
 			path := filepath.Join(directory, "config")
 			// The lock is acquired first. Mode 0500 forbids creating the temporary file;
 			// 0300 allows create and rename, then denies the directory's read-only open.
-			p := connector.Profile{Name: "fixture", LoginPrompt: regexp.MustCompile(`sw#$`), CommandPrompt: regexp.MustCompile(`sw#$`), ConfigCommands: []string{"show config"}, AfterCommand: func(context.Context, connector.Command, connector.StepResult, connector.Executor) error {
+			p := connector.Profile{Name: "fixture", LoginPrompt: testPattern(`sw#$`), CommandPrompt: testPattern(`sw#$`), ConfigCommands: []string{"show config"}, AfterCommand: func(context.Context, connector.Command, connector.StepResult, connector.Executor) error {
 				return os.Chmod(directory, tc.mode)
 			}}
 			defer os.Chmod(directory, 0700)
@@ -213,7 +215,7 @@ func TestBackupWriteFailuresRespectCommitBoundary(t *testing.T) {
 				t.Fatal(e)
 			}
 			defer d.Close()
-			rules, _ := NewRules(RuleOptions{}, vendors.Profile)
+			rules, _ := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 			plan, _ := NewPlan([]inventory.Device{{IP: "192.0.2.1", Vendor: "h3c"}}, rules, PlanOptions{Mode: "backup"})
 			batch, e := Run(t.Context(), plan, RunOptions{Run: func(ctx context.Context, _ Task) (Artifact, error) {
 				receipt, err := d.Backup(ctx, connector.BackupOptions{Path: path})
@@ -230,7 +232,13 @@ func TestBackupWriteFailuresRespectCommitBoundary(t *testing.T) {
 			if err := os.Chmod(directory, 0700); err != nil {
 				t.Fatal(err)
 			}
-			data, err := os.ReadFile(path)
+			// Raw source is published before the reading view. A source postcommit
+			// failure must retain its artifact without manufacturing a text commit.
+			contentPath := path
+			if tc.state == "committed" {
+				contentPath = out.Artifact.Backup.Source.Path
+			}
+			data, err := os.ReadFile(contentPath)
 			if tc.state == "committed" {
 				if err != nil || !strings.Contains(string(data), "PRIVATE_CONFIG") {
 					t.Fatal("committed content missing", err)
@@ -251,7 +259,7 @@ func TestBackupWriteFailuresRespectCommitBoundary(t *testing.T) {
 func TestInvalidConfigurationStrategyIsClassifiedBeforeConnection(t *testing.T) {
 	for _, missing := range []bool{true, false} {
 		t.Run(fmt.Sprint(missing), func(t *testing.T) {
-			p := connector.Profile{Name: "fixture", LoginPrompt: regexp.MustCompile(`sw#$`), CommandPrompt: regexp.MustCompile(`sw#$`)}
+			p := connector.Profile{Name: "fixture", LoginPrompt: testPattern(`sw#$`), CommandPrompt: testPattern(`sw#$`)}
 			if !missing {
 				p.ConfigCommands = []string{"show config"}
 				p.ConfigStrategy = func() connector.ConfigStrategy { return nil }
@@ -263,7 +271,7 @@ func TestInvalidConfigurationStrategyIsClassifiedBeforeConnection(t *testing.T) 
 			if e != nil {
 				t.Fatal(e)
 			}
-			rules, _ := NewRules(RuleOptions{}, vendors.Profile)
+			rules, _ := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 			plan, _ := NewPlan([]inventory.Device{{IP: "192.0.2.1", Vendor: "h3c"}}, rules, PlanOptions{Mode: "backup"})
 			batch, e := Run(t.Context(), plan, RunOptions{Run: func(ctx context.Context, _ Task) (Artifact, error) {
 				_, e := d.RunningConfig(ctx)

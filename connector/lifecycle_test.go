@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"regexp"
 	"runtime"
 	"testing"
 	"time"
@@ -53,7 +52,7 @@ func TestAbnormalCallbackExitRetiresSession(t *testing.T) {
 						t.Error("panic swallowed")
 					}
 				}()
-				_, _ = d.ExecuteCommand(t.Context(), Command{Text: "change", Interactions: []Interaction{{Pattern: regexp.MustCompile("Question:"), Respond: func(context.Context, string) (string, error) {
+				_, _ = d.ExecuteCommand(t.Context(), Command{Text: "change", Interactions: []Interaction{{Pattern: testPattern("Question:"), Respond: func(context.Context, string) (string, error) {
 					if which == "panic" {
 						panic("callback")
 					}
@@ -131,7 +130,7 @@ func TestTypedNilFactoryStreamRejected(t *testing.T) {
 
 func TestInteractionZeroLimitRepliesOnlyOnce(t *testing.T) {
 	d, writes := fixtureDevice(t, fixtureProfile(), []string{"Question:", "Question:"})
-	_, err := d.ExecuteCommand(t.Context(), Command{Text: "change", Interactions: []Interaction{{Pattern: regexp.MustCompile("Question:"), Reply: "yes\n"}}}, ExecuteOptions{})
+	_, err := d.ExecuteCommand(t.Context(), Command{Text: "change", Interactions: []Interaction{{Pattern: testPattern("Question:"), Reply: "yes\n"}}}, ExecuteOptions{})
 	if !errors.Is(err, ErrResponseLimit) {
 		t.Fatalf("second default response accepted: %v", err)
 	}
@@ -142,11 +141,11 @@ func TestInteractionZeroLimitRepliesOnlyOnce(t *testing.T) {
 }
 
 func TestExplicitUnlimitedRepliesAndPollValidation(t *testing.T) {
-	if err := validateInteractions([]Interaction{{Pattern: regexp.MustCompile("Question:"), Limit: 2, Unlimited: true}}); err == nil {
+	if err := validateInteractions([]Interaction{{Pattern: testPattern("Question:"), Limit: 2, Unlimited: true}}); err == nil {
 		t.Fatal("ambiguous response limit accepted")
 	}
 	d, _ := fixtureDevice(t, fixtureProfile(), []string{"Question:", "Question:", "done\nsw#"})
-	_, err := d.ExecuteCommand(t.Context(), Command{Text: "change", Interactions: []Interaction{{Pattern: regexp.MustCompile("Question:"), Reply: "yes\n", Unlimited: true}}}, ExecuteOptions{})
+	_, err := d.ExecuteCommand(t.Context(), Command{Text: "change", Interactions: []Interaction{{Pattern: testPattern("Question:"), Reply: "yes\n", Unlimited: true}}}, ExecuteOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -19,13 +19,14 @@ func TestBackupAutomaticallyDecodesDeviceOutput(t *testing.T) {
 	for _, tc := range []struct{ name, wire, want string }{
 		{"ascii", "uplink", "uplink"},
 		{"utf8", "中文", "中文"},
+		{"native-truncated", "中文\xe2", "中文\xe2"},
 		{"gbk", "\xd6\xd0\xce\xc4", "中文"},
 		{"gb18030", "\x95\x34\xb2\x35", "𠮷"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, out, errout := fixtureRuntime(t)
 			dir := filepath.Join(r.CWD, "backups")
-			r.Args = []string{"--all", "--directory", dir, "--username", "user", "--password", "secret"}
+			r.Args = []string{"backup", "run", "--layout", "flat", "--all", "--directory", dir, "--username", "user", "--password", "secret"}
 			r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) {
 				return []inventory.Device{{IP: "192.0.2.1", Vendor: "h3c"}}, nil
 			})
@@ -62,7 +63,7 @@ func TestBackupAutomaticallyDecodesDeviceOutput(t *testing.T) {
 					return a, nil
 				}))
 			}
-			if code := r.Run(t.Context(), "net-backup"); code != 0 {
+			if code := r.Run(t.Context()); code != 0 {
 				t.Fatalf("exit %d: %s %s", code, out.String(), errout.String())
 			}
 			select {
@@ -73,7 +74,7 @@ func TestBackupAutomaticallyDecodesDeviceOutput(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("fixture did not exit")
 			}
-			files, err := filepath.Glob(filepath.Join(dir, "192.0.2.1.*"))
+			files, err := filepath.Glob(filepath.Join(dir, "unnamed-192.0.2.1.txt"))
 			if err != nil || len(files) != 1 {
 				t.Fatalf("backup files %v, %v", files, err)
 			}

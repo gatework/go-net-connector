@@ -28,7 +28,7 @@ type Snapshot struct {
 	applicable          bool
 }
 
-func (s Snapshot) Public() map[string]any { return clone(s.data).(map[string]any) }
+func (s Snapshot) Public() map[string]any { return cloneValue(s.data).(map[string]any) }
 func (s Snapshot) Value(path string) any {
 	var v any = s.data
 	for _, key := range strings.Split(path, ".") {
@@ -38,7 +38,7 @@ func (s Snapshot) Value(path string) any {
 		}
 		v = m[key]
 	}
-	return clone(v)
+	return cloneValue(v)
 }
 func (s Snapshot) Secret(key string) string { return s.environment[key] }
 func (s Snapshot) Environment() map[string]string {
@@ -63,7 +63,7 @@ func (s Snapshot) MarshalJSON() ([]byte, error) { return json.Marshal(s.data) }
 
 var pathFields = map[string]bool{"netdisco.cache_directory": true, "netdisco.db_sslrootcert": true, "backup.directory": true, "topology.directory": true, "ssh.known_hosts": true, "ssh.log_directory": true, "tftp.verification_root": true}
 
-func absolute(path, base, home string) string {
+func absolutePath(path, base, home string) string {
 	if path == "~" {
 		return home
 	}
@@ -82,7 +82,7 @@ func pathValue(v, base, home string) (string, error) {
 	if strings.Contains(v, "://") {
 		return v, nil
 	}
-	return absolute(v, base, home), nil
+	return absolutePath(v, base, home), nil
 }
 func resolvePaths(m map[string]any, base, home, prefix string) error {
 	for k, v := range m {
@@ -109,7 +109,7 @@ func resolvePaths(m map[string]any, base, home, prefix string) error {
 	}
 	return nil
 }
-func envPaths(m map[string]string, base, home string) error {
+func resolveEnvironmentPaths(m map[string]string, base, home string) error {
 	for path, f := range schema {
 		if !pathFields[path] {
 			continue
@@ -136,7 +136,7 @@ func envPaths(m map[string]string, base, home string) error {
 	}
 	return nil
 }
-func unique(paths []string, last string) []string {
+func uniquePaths(paths []string, last string) []string {
 	seen := map[string]bool{}
 	out := []string{}
 	for _, p := range paths {
@@ -150,11 +150,11 @@ func unique(paths []string, last string) []string {
 	}
 	return out
 }
-func read(path string, required, allowMissing bool) ([]byte, bool, error) {
+func readFile(path string, missingOK bool) ([]byte, bool, error) {
 	// Configuration follows readable symlinks, unlike private backup storage.
 	// NONBLOCK lets us inspect and reject FIFOs without waiting for a writer.
 	fd, e := unix.Open(path, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
-	if errors.Is(e, os.ErrNotExist) && (!required || allowMissing) {
+	if errors.Is(e, os.ErrNotExist) && missingOK {
 		return nil, false, nil
 	}
 	if e != nil {
@@ -184,6 +184,7 @@ func Load(o Options) (Snapshot, error) {
 			return s, e
 		}
 		*layer = owned.(map[string]any)
+		normalizeSourceFiles(*layer)
 	}
 	actualCWD, e := os.Getwd()
 	if e != nil {
@@ -195,48 +196,50 @@ func Load(o Options) (Snapshot, error) {
 			return s, e
 		}
 	}
-	o.Home = absolute(o.Home, actualCWD, o.Home)
+	o.Home = absolutePath(o.Home, actualCWD, o.Home)
 	if !filepath.IsAbs(o.Home) {
 		return s, ErrInvalid
 	}
 	if o.CWD == "" {
 		o.CWD = actualCWD
 	}
-	o.CWD = absolute(o.CWD, actualCWD, o.Home)
+	o.CWD = absolutePath(o.CWD, actualCWD, o.Home)
 	process := map[string]string{}
 	for k, v := range o.Environment {
 		process[k] = v
 	}
-	if e := envPaths(process, o.CWD, o.Home); e != nil {
+	if e := resolveEnvironmentPaths(process, o.CWD, o.Home); e != nil {
 		return s, e
 	}
 	user := process["XDG_CONFIG_HOME"]
 	if user == "" {
 		user = filepath.Join(o.Home, ".config")
 	}
-	user = filepath.Join(absolute(user, o.CWD, o.Home), "net-connector")
+	user = filepath.Join(absolutePath(user, o.CWD, o.Home), "net-connector")
 	dirs := append([]string{}, o.Directories...)
 	if o.Directories == nil {
 		program := o.Program
 		if program == "" {
 			program = os.Args[0]
 		}
-		dirs = []string{"/etc/net-connector", "/usr/local/etc/net-connector", user, filepath.Dir(absolute(program, o.CWD, o.Home)), o.CWD}
+		dirs = []string{"/etc/net-connector", "/usr/local/etc/net-connector", user, filepath.Dir(absolutePath(program, o.CWD, o.Home)), o.CWD}
 	}
 	for i, d := range dirs {
-		dirs[i] = absolute(d, o.CWD, o.Home)
+		dirs[i] = absolutePath(d, o.CWD, o.Home)
 	}
-	dirs = unique(dirs, "")
+	dirs = uniquePaths(dirs, "")
 	envFile := ""
 	if o.EnvFile != "" {
-		envFile = absolute(o.EnvFile, o.CWD, o.Home)
+		envFile = absolutePath(o.EnvFile, o.CWD, o.Home)
 	}
 	envPathsList := []string{}
+	envOrigins := map[string]string{}
 	for _, dir := range dirs {
 		envPathsList = append(envPathsList, filepath.Join(dir, ".env"))
 	}
-	for _, path := range unique(envPathsList, envFile) {
-		b, ok, e := read(path, path == envFile, o.AllowMissing)
+	for _, path := range uniquePaths(envPathsList, envFile) {
+		missingOK := path != envFile || o.AllowMissing
+		b, ok, e := readFile(path, missingOK)
 		if e != nil {
 			return s, e
 		}
@@ -247,11 +250,12 @@ func Load(o Options) (Snapshot, error) {
 		if e != nil {
 			return s, e
 		}
-		if e = envPaths(m, filepath.Dir(path), o.Home); e != nil {
+		if e = resolveEnvironmentPaths(m, filepath.Dir(path), o.Home); e != nil {
 			return s, e
 		}
 		for k, v := range m {
 			s.environment[k] = v
+			envOrigins[k] = path
 		}
 		s.envFiles = append(s.envFiles, path)
 	}
@@ -263,22 +267,30 @@ func Load(o Options) (Snapshot, error) {
 		}
 	}
 	if selected != "" {
-		selected = absolute(selected, o.CWD, o.Home)
+		selected = absolutePath(selected, o.CWD, o.Home)
 	}
 	paths := []string{}
 	for _, dir := range dirs {
-		paths = append(paths, filepath.Join(dir, "net-connector.yml"), filepath.Join(dir, o.Name+".yml"))
+		paths = append(paths, filepath.Join(dir, "net-connector.yml"))
+		if o.Name == "topology" {
+			// Batch concurrency is shared with backup.yml. Only parallel is
+			// imported from this scope; topology-specific policy stays isolated.
+			paths = append(paths, filepath.Join(dir, "backup.yml"))
+		}
+		paths = append(paths, filepath.Join(dir, o.Name+".yml"))
 	}
 	apply := func(m map[string]any, source string) error {
+		normalizeSourceFiles(m)
 		if e := resolvePaths(m, filepath.Dir(source), o.Home, ""); e != nil {
 			return e
 		}
 		recordFields(s.fields, s.data, m, source, "")
-		merge(s.data, m)
+		mergeValues(s.data, m)
 		return nil
 	}
-	for _, path := range unique(paths, selected) {
-		b, ok, e := read(path, path == selected, o.AllowMissing)
+	for _, path := range uniquePaths(paths, selected) {
+		missingOK := path != selected || o.AllowMissing
+		b, ok, e := readFile(path, missingOK)
 		if e != nil {
 			return s, e
 		}
@@ -288,6 +300,16 @@ func Load(o Options) (Snapshot, error) {
 		m, e := ParseYAML(b)
 		if e != nil {
 			return s, e
+		}
+		if o.Name == "topology" && filepath.Base(path) == "backup.yml" && path != selected {
+			used, importErr := applySharedBatchParallel(apply, m, path)
+			if importErr != nil {
+				return s, importErr
+			}
+			if used {
+				s.files = append(s.files, path)
+			}
+			continue
 		}
 		if filepath.Base(path) == "net-connector.yml" {
 			for k := range m {
@@ -306,6 +328,11 @@ func Load(o Options) (Snapshot, error) {
 					}
 				}
 				if e = apply(common, path); e != nil {
+					return s, e
+				}
+			}
+			if o.Name == "topology" {
+				if _, e = applySharedBatchParallel(apply, m, path); e != nil {
 					return s, e
 				}
 			}
@@ -331,54 +358,69 @@ func Load(o Options) (Snapshot, error) {
 	processPresence := map[string]any{}
 	for path, f := range schema {
 		if _, ok := process[f.Env]; ok {
-			set(processPresence, path, true)
+			setPath(processPresence, canonicalPath(path), true)
 		}
 	}
 	s.data = map[string]any{}
-	merge(s.data, o.Defaults)
+	mergeValues(s.data, o.Defaults)
 	if e := resolvePaths(s.data, o.CWD, o.Home, ""); e != nil {
 		return s, e
+	}
+	defaultFields := map[string]string{}
+	recordFields(defaultFields, map[string]any{}, s.data, "default", "")
+	for key, source := range defaultFields {
+		if _, exists := s.fields[key]; !exists {
+			s.fields[key] = source
+		}
 	}
 	// Higher layers mask invalid lower values before environment decoding.
 	for _, layer := range []struct {
 		env    map[string]string
 		higher map[string]any
 		source string
-	}{{s.environment, merged(merged(yamlData, processPresence), o.Overrides), ".env"}, {process, o.Overrides, "environment"}} {
+	}{{s.environment, mergeMaps(mergeMaps(yamlData, processPresence), o.Overrides), ".env"}, {process, o.Overrides, "environment"}} {
 		m := map[string]any{}
 		for path, f := range schema {
 			value, ok := layer.env[f.Env]
-			if !ok || has(layer.higher, path) {
+			if !ok || hasPath(layer.higher, canonicalPath(path)) {
 				continue
 			}
 			v, e := decodeEnv(value, f.Kind)
 			if e != nil {
 				return s, ErrInvalid
 			}
-			set(m, path, v)
+			setPath(m, path, v)
 		}
+		normalizeSourceFiles(m)
 		if layer.source == ".env" {
-			merge(s.data, m)
-			merge(s.data, yamlData)
+			for path, f := range schema {
+				if origin := envOrigins[f.Env]; origin != "" && hasPath(m, canonicalPath(path)) {
+					part := map[string]any{}
+					setPath(part, canonicalPath(path), valueAtPath(m, canonicalPath(path)))
+					recordFields(s.fields, s.data, part, origin, "")
+				}
+			}
+			mergeValues(s.data, m)
+			mergeValues(s.data, yamlData)
 		} else {
 			recordFields(s.fields, s.data, m, layer.source, "")
-			merge(s.data, m)
+			mergeValues(s.data, m)
 		}
 	}
-	overrides := clone(o.Overrides)
+	overrides := cloneValue(o.Overrides)
 	if overrides != nil {
 		m := overrides.(map[string]any)
 		if e := resolvePaths(m, o.CWD, o.Home, ""); e != nil {
 			return s, e
 		}
 		recordFields(s.fields, s.data, m, "cli", "")
-		merge(s.data, m)
+		mergeValues(s.data, m)
 	}
 	// Layer merging can exceed a budget even when each layer fits independently.
 	if _, e := copyPlain(s.data); e != nil {
 		return s, e
 	}
-	if e := validate(s.data); e != nil {
+	if e := validateValues(s.data); e != nil {
 		return s, e
 	}
 	for k, v := range process {
@@ -397,9 +439,27 @@ func Load(o Options) (Snapshot, error) {
 	}
 	return s, nil
 }
-func has(m map[string]any, path string) bool {
+
+// applySharedBatchParallel imports only backup.parallel into topology policy.
+// A combined file nests a mode beneath its root key; backup.yml contains the
+// mode object directly. Any explicit topology.parallel remains independent.
+func applySharedBatchParallel(apply func(map[string]any, string) error, document map[string]any, source string) (bool, error) {
+	section, ok := document["backup"].(map[string]any)
+	if !ok {
+		return false, nil
+	}
+	if nested, ok := section["backup"].(map[string]any); ok {
+		section = nested
+	}
+	parallel, ok := section["parallel"]
+	if !ok {
+		return false, nil
+	}
+	return true, apply(map[string]any{"backup": map[string]any{"parallel": parallel}}, source)
+}
+func hasPath(values map[string]any, path string) bool {
 	parts := strings.SplitN(path, ".", 2)
-	v, ok := m[parts[0]]
+	v, ok := values[parts[0]]
 	if !ok {
 		return false
 	}
@@ -410,25 +470,25 @@ func has(m map[string]any, path string) bool {
 	if !ok {
 		return true
 	}
-	return has(child, parts[1])
+	return hasPath(child, parts[1])
 }
-func set(m map[string]any, path string, v any) {
+func setPath(values map[string]any, path string, value any) {
 	parts := strings.SplitN(path, ".", 2)
 	if len(parts) == 1 {
-		m[path] = v
+		values[path] = value
 		return
 	}
-	child, ok := m[parts[0]].(map[string]any)
+	child, ok := values[parts[0]].(map[string]any)
 	if !ok {
 		child = map[string]any{}
-		m[parts[0]] = child
+		values[parts[0]] = child
 	}
-	set(child, parts[1], v)
+	setPath(child, parts[1], value)
 }
-func merged(a, b map[string]any) map[string]any {
+func mergeMaps(base, overrides map[string]any) map[string]any {
 	m := map[string]any{}
-	merge(m, a)
-	merge(m, b)
+	mergeValues(m, base)
+	mergeValues(m, overrides)
 	return m
 }
 func decodeJSON(s string) (any, error) {
@@ -443,8 +503,8 @@ func decodeJSON(s string) (any, error) {
 	}
 	return v, nil
 }
-func validate(m map[string]any) error {
-	for section, v := range m {
+func validateValues(values map[string]any) error {
+	for section, v := range values {
 		values, ok := v.(map[string]any)
 		if !ok {
 			return ErrInvalid
@@ -466,15 +526,18 @@ func validate(m map[string]any) error {
 			}
 			valid := false
 			switch f.Kind {
-			case "string":
+			case "string", "optional_string":
 				s, ok := v.(string)
-				valid = ok && strings.TrimSpace(s) != ""
+				valid = ok && (f.Kind == "optional_string" || strings.TrimSpace(s) != "")
+				if section == "backup" && key == "success_policy" && s != "strict" && s != "selected" && s != "verified" {
+					return &FieldError{Field: "backup.success_policy", Problem: "invalid"}
+				}
 			case "integer", "optional_integer":
-				n, ok := integer(v)
-				valid = ok && n > 0 || v == nil && f.Kind == "optional_integer"
+				n, ok := integerValue(v)
+				valid = ok && (n > 0 || section == "backup" && key == "limit_per_vendor" && n == 0) || v == nil && f.Kind == "optional_integer"
 			case "number":
 				n, ok := v.(float64)
-				if i, iok := integer(v); iok {
+				if i, iok := integerValue(v); iok {
 					n = float64(i)
 					ok = true
 				}

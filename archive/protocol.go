@@ -28,6 +28,8 @@ type Protocol struct {
 	phase    string
 }
 
+var archiveHashPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+
 func NewProtocol(input io.Writer, output io.Reader, timeout time.Duration) *Protocol {
 	if timeout <= 0 {
 		timeout = 280 * time.Second
@@ -111,20 +113,28 @@ func (p *Protocol) readPhase(ctx context.Context, phase string) (Proof, error) {
 	if json.Unmarshal(line, &f) != nil || !f.OK || f.Phase != phase {
 		return Proof{}, ErrArchive
 	}
-	p.phase = phase
-	p.last = f
 	proof := Proof{Bytes: f.Bytes, SHA256: f.SHA256, ArchivePath: f.ArchivePath}
-	if phase == "archived" && (proof.Bytes < 1 || proof.Bytes > PayloadLimit || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(proof.SHA256)) {
+	if phase == "archived" && (proof.Bytes < 1 || proof.Bytes > PayloadLimit || proof.ArchivePath == "" || !archiveHashPattern.MatchString(proof.SHA256)) {
 		return Proof{}, ErrArchive
 	}
+	p.phase = phase
+	p.last = f
 	return proof, nil
 }
 
 // Receive drains the full body and validates server delivery even after a local sink fails.
 // A verified proof survives local persistence errors; callers must not replay upload.
 func (p *Protocol) Receive(ctx context.Context, proof Proof, sink io.Writer) (Proof, error) {
-	if p.phase != "archived" || proof.Bytes < 1 || proof.Bytes > PayloadLimit || sink == nil {
+	proof.Verified = false
+	if p.phase != "archived" || p.last.Phase != "archived" || proof.Bytes < 1 || proof.Bytes > PayloadLimit || sink == nil || proof.Bytes != p.last.Bytes || proof.SHA256 != p.last.SHA256 || proof.ArchivePath != p.last.ArchivePath {
 		return proof, ErrArchive
+	}
+	archivedFrame := p.last
+	p.phase = "receiving"
+	fail := func(err error) (Proof, error) {
+		p.phase = "failed"
+		proof.Verified = false
+		return proof, err
 	}
 	digest := sha256.New()
 	remaining := proof.Bytes
@@ -133,13 +143,13 @@ func (p *Protocol) Receive(ctx context.Context, proof Proof, sink io.Writer) (Pr
 	for remaining > 0 {
 		stop, e := p.bounded(ctx, true)
 		if e != nil {
-			return proof, errors.Join(e, sinkError)
+			return fail(errors.Join(e, sinkError))
 		}
 		size := min(int64(len(buffer)), remaining)
 		n, e := io.ReadFull(p.reader, buffer[:size])
 		stop()
 		if e != nil {
-			return proof, protocolFailure(ctx, errors.Join(e, sinkError))
+			return fail(protocolFailure(ctx, errors.Join(e, sinkError)))
 		}
 		digest.Write(buffer[:n])
 		remaining -= int64(n)
@@ -148,10 +158,11 @@ func (p *Protocol) Receive(ctx context.Context, proof Proof, sink io.Writer) (Pr
 		}
 	}
 	if _, e := p.readPhase(ctx, "delivered"); e != nil {
-		return proof, errors.Join(e, sinkError)
+		return fail(errors.Join(e, sinkError))
 	}
 	if hex.EncodeToString(digest.Sum(nil)) != proof.SHA256 {
-		return proof, errors.Join(ErrArchive, sinkError)
+		p.last = archivedFrame
+		return fail(errors.Join(ErrArchive, sinkError))
 	}
 	proof.Verified = true
 	return proof, sinkError

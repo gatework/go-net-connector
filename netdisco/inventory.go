@@ -29,10 +29,10 @@ type InventoryError struct {
 	cause error
 }
 
-func (e *InventoryError) Error() string    { return "netdisco: " + e.Code }
-func (e *InventoryError) GoString() string { return e.Error() }
-func (e *InventoryError) Unwrap() error    { return e.cause }
-func invError(code string, e error) error  { return &InventoryError{code, e} }
+func (e *InventoryError) Error() string            { return "netdisco: " + e.Code }
+func (e *InventoryError) GoString() string         { return e.Error() }
+func (e *InventoryError) Unwrap() error            { return e.cause }
+func newInventoryError(code string, e error) error { return &InventoryError{code, e} }
 
 type Limits struct {
 	PageSize, MaxPages, MaxDevices      int
@@ -42,7 +42,7 @@ type Limits struct {
 
 func (l Limits) normalize() (Limits, error) {
 	if l.PageSize < 0 || l.MaxPages < 0 || l.MaxDevices < 0 || l.MaxResponseBytes < 0 || l.MaxInventoryBytes < 0 || l.Timeout < 0 {
-		return l, invError("invalid_limits", nil)
+		return l, newInventoryError("invalid_limits", nil)
 	}
 	if l.PageSize == 0 {
 		l.PageSize = 500
@@ -81,13 +81,13 @@ type HTTP struct {
 func NewHTTP(o HTTPOptions) (*HTTP, error) {
 	u, e := url.Parse(o.URL)
 	if e != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (o.RequireHTTPS && u.Scheme != "https") {
-		return nil, invError("invalid_url", nil)
+		return nil, newInventoryError("invalid_url", nil)
 	}
 	if strings.ContainsAny(o.APIKey, "\r\n\x00") || strings.ContainsAny(o.Username, "\r\n\x00:") {
-		return nil, invError("invalid_credentials", nil)
+		return nil, newInventoryError("invalid_credentials", nil)
 	}
 	if o.APIKey == "" && (o.Username == "" || o.Password == "") {
-		return nil, invError("missing_credentials", nil)
+		return nil, newInventoryError("missing_credentials", nil)
 	}
 	limits, e := o.Limits.normalize()
 	if e != nil {
@@ -114,7 +114,7 @@ func (h *HTTP) Devices(parent context.Context) ([]inventory.Device, error) {
 		u.RawQuery = query.Encode()
 		req, e := http.NewRequestWithContext(ctx, method, u.String(), nil)
 		if e != nil {
-			return nil, 0, invError("request_failed", e)
+			return nil, 0, newInventoryError("request_failed", e)
 		}
 		req.Header.Set("Accept", "application/json")
 		if key != "" {
@@ -124,23 +124,23 @@ func (h *HTTP) Devices(parent context.Context) ([]inventory.Device, error) {
 		}
 		resp, e := h.client.Do(req)
 		if e != nil {
-			return nil, 0, invError("connection_failed", e)
+			return nil, 0, newInventoryError("connection_failed", e)
 		}
 		defer resp.Body.Close()
 		limit := min(h.limits.MaxResponseBytes, h.limits.MaxInventoryBytes-total)
 		b, e := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 		if e != nil {
-			return nil, resp.StatusCode, invError("connection_failed", e)
+			return nil, resp.StatusCode, newInventoryError("connection_failed", e)
 		}
 		total += int64(len(b))
 		if total > h.limits.MaxInventoryBytes {
-			return nil, resp.StatusCode, invError("max_inventory_bytes", nil)
+			return nil, resp.StatusCode, newInventoryError("max_inventory_bytes", nil)
 		}
 		if int64(len(b)) > h.limits.MaxResponseBytes {
-			return nil, resp.StatusCode, invError("max_response_bytes", nil)
+			return nil, resp.StatusCode, newInventoryError("max_response_bytes", nil)
 		}
 		if e = ctx.Err(); e != nil {
-			return nil, 0, invError("inventory_timeout", e)
+			return nil, 0, newInventoryError("inventory_timeout", e)
 		}
 		return b, resp.StatusCode, nil
 	}
@@ -151,13 +151,13 @@ func (h *HTTP) Devices(parent context.Context) ([]inventory.Device, error) {
 			return nil, e
 		}
 		if status < 200 || status >= 300 {
-			return nil, invError("request_failed", nil)
+			return nil, newInventoryError("request_failed", nil)
 		}
 		var data struct {
 			APIKey string `json:"api_key"`
 		}
 		if e = json.Unmarshal(b, &data); e != nil || data.APIKey == "" || strings.ContainsAny(data.APIKey, "\r\n\x00") {
-			return nil, invError("authentication_failed", nil)
+			return nil, newInventoryError("authentication_failed", nil)
 		}
 		key = data.APIKey
 	}
@@ -181,7 +181,7 @@ func (h *HTTP) Devices(parent context.Context) ([]inventory.Device, error) {
 					return nil, e
 				}
 				if status < 200 || status >= 300 {
-					return nil, invError("request_failed", nil)
+					return nil, newInventoryError("request_failed", nil)
 				}
 				data, e := decodeHTTPInventory(ctx, body, h.limits.MaxDevices, &count)
 				if e != nil {
@@ -191,7 +191,7 @@ func (h *HTTP) Devices(parent context.Context) ([]inventory.Device, error) {
 			}
 		}
 		if status < 200 || status >= 300 {
-			return nil, invError("request_failed", fmt.Errorf("HTTP %d", status))
+			return nil, newInventoryError("request_failed", fmt.Errorf("HTTP %d", status))
 		}
 		data, e := decodeHTTPInventory(ctx, body, h.limits.MaxDevices, &count)
 		if e != nil {
@@ -199,14 +199,14 @@ func (h *HTTP) Devices(parent context.Context) ([]inventory.Device, error) {
 		}
 		if len(data) == 0 {
 			if e := ctx.Err(); e != nil {
-				return nil, invError("inventory_timeout", e)
+				return nil, newInventoryError("inventory_timeout", e)
 			}
 			return rows, nil
 		}
 		advances := false
 		for _, row := range data {
 			if e := ctx.Err(); e != nil {
-				return nil, invError("inventory_timeout", e)
+				return nil, newInventoryError("inventory_timeout", e)
 			}
 			if !seen[row.IP] {
 				advances = true
@@ -218,17 +218,17 @@ func (h *HTTP) Devices(parent context.Context) ([]inventory.Device, error) {
 			}
 		}
 		if !advances {
-			return nil, invError("pagination_stalled", nil)
+			return nil, newInventoryError("pagination_stalled", nil)
 		}
 	}
-	return nil, invError("max_pages", nil)
+	return nil, newInventoryError("max_pages", nil)
 }
 func dedupContext(ctx context.Context, rows []inventory.Device) ([]inventory.Device, error) {
 	seen := make(map[inventory.Device]bool)
 	out := make([]inventory.Device, 0, len(rows))
 	for _, r := range rows {
 		if e := ctx.Err(); e != nil {
-			return nil, invError("inventory_timeout", e)
+			return nil, newInventoryError("inventory_timeout", e)
 		}
 		if !seen[r] {
 			out = append(out, r)
@@ -236,7 +236,7 @@ func dedupContext(ctx context.Context, rows []inventory.Device) ([]inventory.Dev
 		}
 	}
 	if e := ctx.Err(); e != nil {
-		return nil, invError("inventory_timeout", e)
+		return nil, newInventoryError("inventory_timeout", e)
 	}
 	return out, nil
 }
@@ -249,35 +249,35 @@ func inventoryFields(d *inventory.Device) [8]*string {
 
 func decodeHTTPInventory(ctx context.Context, b []byte, maxDevices int, count *int) ([]inventory.Device, error) {
 	if e := ctx.Err(); e != nil {
-		return nil, invError("inventory_timeout", e)
+		return nil, newInventoryError("inventory_timeout", e)
 	}
 	if len(strings.TrimSpace(string(b))) == 0 {
 		return []inventory.Device{}, nil
 	}
 	if !utf8.Valid(b) {
-		return nil, invError("invalid_json", nil)
+		return nil, newInventoryError("invalid_json", nil)
 	}
 	// Raw-message maps keep acceptance case-sensitive and retain JSON's last-key-wins behavior.
 	var data []map[string]json.RawMessage
 	if e := json.Unmarshal(b, &data); e != nil || data == nil {
-		return nil, invError("invalid_inventory", e)
+		return nil, newInventoryError("invalid_inventory", e)
 	}
 	*count += len(data)
 	if *count > maxDevices {
-		return nil, invError("max_devices", nil)
+		return nil, newInventoryError("max_devices", nil)
 	}
 	rows := make([]inventory.Device, len(data))
 	for i, row := range data {
 		if e := ctx.Err(); e != nil {
-			return nil, invError("inventory_timeout", e)
+			return nil, newInventoryError("inventory_timeout", e)
 		}
 		if row == nil {
-			return nil, invError("invalid_inventory", nil)
+			return nil, newInventoryError("invalid_inventory", nil)
 		}
 		fields := inventoryFields(&rows[i])
 		for j, name := range inventoryFieldNames {
 			if e := ctx.Err(); e != nil {
-				return nil, invError("inventory_timeout", e)
+				return nil, newInventoryError("inventory_timeout", e)
 			}
 			value, ok := row[name]
 			if !ok {
@@ -285,15 +285,15 @@ func decodeHTTPInventory(ctx context.Context, b []byte, maxDevices int, count *i
 			}
 			// Unmarshaling null into an empty string preserves optional null-as-empty fields.
 			if e := json.Unmarshal(value, fields[j]); e != nil {
-				return nil, invError("invalid_inventory", nil)
+				return nil, newInventoryError("invalid_inventory", nil)
 			}
 		}
 		if strings.TrimSpace(rows[i].IP) == "" {
-			return nil, invError("invalid_inventory", nil)
+			return nil, newInventoryError("invalid_inventory", nil)
 		}
 	}
 	if e := ctx.Err(); e != nil {
-		return nil, invError("inventory_timeout", e)
+		return nil, newInventoryError("inventory_timeout", e)
 	}
 	return rows, nil
 }

@@ -19,24 +19,25 @@ import (
 
 func TestCLILogPolicyExecution(t *testing.T) {
 	for _, tc := range []struct {
-		name, program, level  string
+		name, layout, level   string
 		custom, enabled, tftp bool
 	}{
-		{"root_tftp_default", "net-backup", "info", false, false, true},
-		{"batch_tftp_default", "net-backup-tftp", "info", false, true, true},
-		{"custom_tftp", "net-backup-tftp", "debug", true, true, true},
-		{"root_default", "net-backup", "", false, false, false},
-		{"batch_default", "net-backup-batch", "", false, false, false},
-		{"explicit_info", "net-backup", "info", true, true, false},
-		{"explicit_debug", "net-backup-batch", "debug", true, true, false},
-		{"explicit_warn", "net-backup", "warn", true, true, false},
-		{"explicit_error", "net-backup", "error", true, true, false},
+		{"flat_tftp_default", "flat", "info", false, true, true},
+		{"batch_tftp_default", "batch", "info", false, true, true},
+		{"custom_tftp", "batch", "debug", true, true, true},
+		{"root_default", "flat", "", false, false, false},
+		{"batch_default", "batch", "", false, false, false},
+		{"explicit_info", "flat", "info", true, true, false},
+		{"explicit_debug", "batch", "debug", true, true, false},
+		{"explicit_warn", "flat", "warn", true, true, false},
+		{"explicit_error", "flat", "error", true, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, _, errout := fixtureRuntime(t)
-			r.Args = []string{"--all", "--non-interactive", "--json", "--username", "user", "--password", "PRIVATE_PASSWORD"}
+			r.Args = []string{"backup", "run", "--layout", tc.layout, "--all", "--non-interactive", "--json", "--username", "user", "--password", "PRIVATE_PASSWORD"}
 			if tc.tftp {
-				r.Args = append(r.Args, "--tftp", "--tftp-server", "192.0.2.9")
+				r.Args[1] = "tftp"
+				r.Args = append(r.Args, "--tftp-server", "192.0.2.9", "--success-policy", "selected")
 			}
 			logs := filepath.Join(r.CWD, "custom-logs")
 			if tc.custom {
@@ -49,7 +50,7 @@ func TestCLILogPolicyExecution(t *testing.T) {
 				return []inventory.Device{{IP: "192.0.2.1", Vendor: "cisco", OS: "nxos"}}, nil
 			})
 			r.DeviceFactory = func(_ connector.Profile, c connector.ConnectionConfig) (*connector.Device, error) {
-				p := connector.Profile{Name: "cisco_nxos", LoginPrompt: regexp.MustCompile(`sw#$`), CommandPrompt: regexp.MustCompile(`sw#$`), ConfigCommands: []string{"show config"}, Prepare: func(ctx context.Context, c connector.Command, e connector.Executor) (connector.Command, bool, error) {
+				p := connector.Profile{Name: "cisco_nxos", LoginPrompt: testPattern(`sw#$`), CommandPrompt: testPattern(`sw#$`), ConfigCommands: []string{"show config"}, Prepare: func(ctx context.Context, c connector.Command, e connector.Executor) (connector.Command, bool, error) {
 					_, err := e.Execute(ctx, connector.Command{Text: "show visible"})
 					return c, false, err
 				}}
@@ -73,11 +74,11 @@ func TestCLILogPolicyExecution(t *testing.T) {
 					return a, nil
 				}))
 			}
-			if code := r.Run(t.Context(), tc.program); code != 0 {
+			if code := r.Run(t.Context()); code != 0 {
 				t.Fatal(code, errout.String())
 			}
 			reportPath := filepath.Join(r.CWD, "backups", "summary.json")
-			if tc.program != "net-backup" {
+			if tc.layout != "flat" {
 				entries, err := os.ReadDir(filepath.Dir(reportPath))
 				if err != nil || len(entries) != 1 {
 					t.Fatal(entries, err)
@@ -138,11 +139,11 @@ func TestCLILogPolicyExecution(t *testing.T) {
 }
 func TestInvalidLogLevelIsOffline(t *testing.T) {
 	r, _, _ := fixtureRuntime(t)
-	r.Args = []string{"--all", "--non-interactive"}
+	r.Args = []string{"backup", "run", "--all", "--non-interactive"}
 	r.Environment["NC_LOG_LEVEL"] = "trace"
 	calls := 0
 	r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) { calls++; return nil, nil })
-	if code := r.Run(t.Context(), "net-backup"); code != 2 || calls != 0 {
+	if code := r.Run(t.Context()); code != 2 || calls != 0 {
 		t.Fatalf("code=%d inventory=%d", code, calls)
 	}
 }

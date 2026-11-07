@@ -17,7 +17,7 @@ func TestFailedAttemptRetainsPartialResponse(t *testing.T) {
 		t.Fatalf("steps=%d err=%v", len(r.Steps()), err)
 	}
 	attempts := r.Attempts()
-	if len(attempts) != 1 || attempts[0].Complete() || attempts[0].Written() != len("show\n") || attempts[0].Raw() != "private-prefix" || !errors.Is(attempts[0].Err(), context.DeadlineExceeded) {
+	if len(attempts) != 1 || attempts[0].Complete() || attempts[0].Written() != len("show\n") || attempts[0].Response().Raw() != "private-prefix" || !errors.Is(attempts[0].Err(), context.DeadlineExceeded) {
 		t.Fatalf("attempt evidence: %v", attempts)
 	}
 	if strings.Contains(fmt.Sprintf("%+v %#v", r, attempts), "private-prefix") {
@@ -30,7 +30,7 @@ func TestRejectedAttemptIsNotSuccessfulStep(t *testing.T) {
 	if !errors.Is(err, ErrDevice) || len(r.Steps()) != 0 || len(r.Attempts()) != 1 || !r.Attempts()[0].Complete() {
 		t.Fatalf("steps=%d attempts=%v err=%v", len(r.Steps()), r.Attempts(), err)
 	}
-	if !strings.Contains(r.Attempts()[0].Raw(), "Invalid") {
+	if !strings.Contains(r.Attempts()[0].Response().Raw(), "Invalid") {
 		t.Fatal("rejection evidence lost")
 	}
 }

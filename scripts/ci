@@ -15,7 +15,7 @@ git diff --exit-code -- go.mod go.sum
 ci_tmp=$(mktemp -d)
 trap 'rm -rf "$ci_tmp"' EXIT
 go build -o "$ci_tmp/bin/" ./cmd/...
-export NC_TEST_ARCHIVE_WORKER="$ci_tmp/bin/net-connector-archive"
+export NC_TEST_ARCHIVE_WORKER="$ci_tmp/bin/tftp-archive"
 if [[ -z "${NC_TEST_POSTGRES_BIN:-}" ]]; then
   ci_pg_candidates=()
   if command -v pg_config >/dev/null 2>&1; then
@@ -35,7 +35,7 @@ if [[ -n "${NC_TEST_POSTGRES_BIN:-}" ]]; then
 else
   echo 'PostgreSQL integration SKIPPED: initdb and pg_ctl unavailable; unit/fake tests still run.'
 fi
-for ci_binary in net-backup net-backup-batch net-backup-tftp net-topology net-connector-archive; do
+for ci_binary in netman tftp-archive; do
   "$ci_tmp/bin/$ci_binary" --version
 done
 go test -race -shuffle=on -count=1 -v ./...

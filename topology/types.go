@@ -6,12 +6,13 @@ import (
 	"fmt"
 
 	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
 var (
 	ErrInvalid      = errors.New("topology: invalid plan")
 	ErrUnsupported  = errors.New("topology: unsupported operation")
-	ErrParse        = errors.New("topology: unrecognized output")
+	ErrParse        = dialect.ErrParse
 	ErrStale        = errors.New("topology: stale plan")
 	ErrConfirmation = errors.New("topology: confirmation required")
 	ErrVerification = errors.New("topology: description unconfirmed")
@@ -24,18 +25,12 @@ type Error struct {
 	cause       error
 }
 
-func (e *Error) Error() string                      { return "topology: " + e.Code + " (" + e.Phase + ")" }
-func (e *Error) GoString() string                   { return e.Error() }
-func (e *Error) Unwrap() error                      { return e.cause }
-func failure(code, phase string, cause error) error { return &Error{code, phase, cause} }
+func (e *Error) Error() string                       { return "topology: " + e.Code + " (" + e.Phase + ")" }
+func (e *Error) GoString() string                    { return e.Error() }
+func (e *Error) Unwrap() error                       { return e.cause }
+func newError(code, phase string, cause error) error { return &Error{code, phase, cause} }
 
-type Neighbor struct {
-	LocalInterface    string `json:"local_interface"`
-	NeighborName      string `json:"neighbor_name"`
-	NeighborInterface string `json:"neighbor_interface"`
-	ChassisID         string `json:"chassis_id"`
-	Protocol          string `json:"protocol"`
-}
+type Neighbor = dialect.Neighbor
 type Change struct {
 	Interface      string   `json:"interface"`
 	OldDescription string   `json:"old_description"`

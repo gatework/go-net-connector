@@ -47,7 +47,7 @@ exec cat
 	t.Setenv("NC_TEST_SSH_LOG", log)
 	t.Setenv("NC_TEST_SSH_ARGS", argsLog)
 	u, _ := url.Parse("ssh://archive@example.test:2222/var/tftp")
-	m := &sshMaster{endpoint: u, worker: "/usr/local/bin/net-connector-archive", password: "private password"}
+	m := &sshMaster{endpoint: u, worker: "/usr/local/bin/tftp-archive", password: "private password"}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := m.prepare(ctx); err != nil {
@@ -82,7 +82,7 @@ exec cat
 		t.Fatal(err)
 	}
 	allArgs, err := os.ReadFile(argsLog)
-	if err != nil || !strings.Contains(string(allArgs), "example.test\nexec '/usr/local/bin/net-connector-archive'") || strings.Contains(string(allArgs), m.password) {
+	if err != nil || !strings.Contains(string(allArgs), "example.test\nexec '/usr/local/bin/tftp-archive'") || strings.Contains(string(allArgs), m.password) {
 		t.Fatalf("session argv: %q, %v", allArgs, err)
 	}
 	dir := m.dir

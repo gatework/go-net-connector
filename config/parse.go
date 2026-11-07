@@ -38,8 +38,8 @@ func ParseYAML(data []byte) (map[string]any, error) {
 		return nil, ErrInvalid
 	}
 	remaining := maxNodes
-	var parse func(*yaml.Node, int) (any, error)
-	parse = func(n *yaml.Node, depth int) (any, error) {
+	var parseNode func(*yaml.Node, int) (any, error)
+	parseNode = func(n *yaml.Node, depth int) (any, error) {
 		remaining--
 		if depth > maxDepth || remaining < 0 || n.Kind == yaml.AliasNode || n.Anchor != "" {
 			return nil, ErrInvalid
@@ -49,7 +49,7 @@ func ParseYAML(data []byte) (map[string]any, error) {
 			if len(n.Content) != 1 {
 				return nil, ErrInvalid
 			}
-			return parse(n.Content[0], depth+1)
+			return parseNode(n.Content[0], depth+1)
 		case yaml.MappingNode:
 			if n.Tag != "!!map" {
 				return nil, ErrInvalid
@@ -64,7 +64,7 @@ func ParseYAML(data []byte) (map[string]any, error) {
 				if _, ok := m[k.Value]; ok {
 					return nil, ErrInvalid
 				}
-				v, e := parse(n.Content[i+1], depth+1)
+				v, e := parseNode(n.Content[i+1], depth+1)
 				if e != nil {
 					return nil, e
 				}
@@ -77,7 +77,7 @@ func ParseYAML(data []byte) (map[string]any, error) {
 			}
 			a := make([]any, 0, len(n.Content))
 			for _, c := range n.Content {
-				v, e := parse(c, depth+1)
+				v, e := parseNode(c, depth+1)
 				if e != nil {
 					return nil, e
 				}
@@ -113,7 +113,7 @@ func ParseYAML(data []byte) (map[string]any, error) {
 		}
 		return nil, ErrInvalid
 	}
-	v, e := parse(&root, 0)
+	v, e := parseNode(&root, 0)
 	if e != nil {
 		return nil, e
 	}
@@ -126,11 +126,11 @@ func ParseYAML(data []byte) (map[string]any, error) {
 	}
 	return m, nil
 }
-func envKey(s string) bool {
-	if s == "" {
+func validEnvironmentKey(key string) bool {
+	if key == "" {
 		return false
 	}
-	for i, c := range s {
+	for i, c := range key {
 		if !(c == '_' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || i > 0 && c >= '0' && c <= '9') {
 			return false
 		}
@@ -175,7 +175,7 @@ func ParseEnvironment(text string, inherited, process map[string]string) (map[st
 			return nil, ErrInvalid
 		}
 		key := strings.TrimSpace(text[:equal])
-		if !envKey(key) {
+		if !validEnvironmentKey(key) {
 			return nil, ErrInvalid
 		}
 		text = strings.TrimLeft(text[equal+1:], " \t")
@@ -261,7 +261,7 @@ func ParseEnvironment(text string, inherited, process map[string]string) (map[st
 					}
 					name = text[1:end]
 					text = text[end+1:]
-					if !envKey(name) {
+					if !validEnvironmentKey(name) {
 						return nil, ErrInvalid
 					}
 				} else {
@@ -391,24 +391,24 @@ func copyPlain(v any) (any, error) {
 	return copyValue(v, 0)
 }
 
-// clone is only used after inputs and the complete snapshot passed copyPlain.
-func clone(v any) any {
+// cloneValue is only used after inputs and the complete snapshot passed copyPlain.
+func cloneValue(v any) any {
 	value, _ := copyPlain(v)
 	return value
 }
-func merge(dst, src map[string]any) {
-	for k, v := range src {
-		a, aok := dst[k].(map[string]any)
-		b, bok := v.(map[string]any)
-		if aok && bok {
-			merge(a, b)
+func mergeValues(destination, source map[string]any) {
+	for key, value := range source {
+		existing, existingIsMap := destination[key].(map[string]any)
+		incoming, incomingIsMap := value.(map[string]any)
+		if existingIsMap && incomingIsMap {
+			mergeValues(existing, incoming)
 		} else {
-			dst[k] = clone(v)
+			destination[key] = cloneValue(value)
 		}
 	}
 }
-func integer(v any) (int, bool) {
-	switch n := v.(type) {
+func integerValue(value any) (int, bool) {
+	switch n := value.(type) {
 	case int:
 		return n, true
 	case int8:

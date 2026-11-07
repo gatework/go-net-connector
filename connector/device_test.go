@@ -16,7 +16,7 @@ import (
 )
 
 func fixtureProfile() Profile {
-	return Profile{Name: "fixture", LoginPrompt: regexp.MustCompile(`(?m)(?:^|[\r\n])sw#\s*$`), CommandPrompt: regexp.MustCompile(`(?m)(?:^|[\r\n])sw#\s*$`), CommandErrors: []*regexp.Regexp{regexp.MustCompile(`(?mi)^% Invalid`)}, ConfigCommands: []string{"show config"}}
+	return Profile{Name: "fixture", LoginPrompt: testPattern(`(?m)(?:^|[\r\n])sw#\s*$`), CommandPrompt: testPattern(`(?m)(?:^|[\r\n])sw#\s*$`), CommandErrors: []*regexp.Regexp{regexp.MustCompile(`(?mi)^% Invalid`)}, ConfigCommands: []string{"show config"}}
 }
 func fixtureDevice(t *testing.T, p Profile, responses []string) (*Device, *[]string) {
 	t.Helper()
@@ -94,15 +94,15 @@ func TestDeviceRejectionProducesNoReceipt(t *testing.T) {
 }
 func TestPagingAccumulatesRawAndExcludesMarker(t *testing.T) {
 	p := fixtureProfile()
-	p.Pager = regexp.MustCompile(`--More--`)
+	p.Pager = testPattern(`--More--`)
 	p.PagerResponse = "\n"
 	d, w := fixtureDevice(t, p, []string{"one\n--More--", "two\n--More--", "three\nsw#"})
 	r, e := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{})
 	if e != nil {
 		t.Fatal(e)
 	}
-	if !strings.Contains(r.Steps()[0].Raw(), "--More--") || strings.Contains(r.Output(), "--More--") || !strings.Contains(r.Output(), "three") {
-		t.Fatalf("raw=%q out=%q", r.Steps()[0].Raw(), r.Output())
+	if !strings.Contains(r.Steps()[0].Response().Raw(), "--More--") || strings.Contains(testResultOutput(r), "--More--") || !strings.Contains(testResultOutput(r), "three") {
+		t.Fatalf("raw=%q out=%q", r.Steps()[0].Response().Raw(), testResultOutput(r))
 	}
 	d.Close()
 	if len(*w) != 3 {
@@ -123,7 +123,7 @@ func TestObserverReentryBusyAndInputSnapshot(t *testing.T) {
 	}
 	steps := r.Steps()
 	steps[0] = StepResult{}
-	if r.Steps()[0].Output() == "" {
+	if testStepOutput(r.Steps()[0]) == "" {
 		t.Fatal("result mutated")
 	}
 }
