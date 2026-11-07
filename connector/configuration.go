@@ -61,7 +61,7 @@ func (d *Device) collectConfigWithMode(ctx context.Context, mode configTextMode)
 		if !returned {
 			_ = d.closeResources()
 		} else if err != nil {
-			err = joinCleanup(err, d.closeResources())
+			err = d.retireFailure(err)
 		}
 	}()
 	result, err = func() (Result, error) {
@@ -124,7 +124,7 @@ func (d *Device) SaveConfig(ctx context.Context, opts ExecuteOptions) (Result, e
 	if len(d.profile.SaveCommands) == 0 {
 		return Result{}, ErrUnsupported
 	}
-	if opts.MaxOutputBytes < 0 {
+	if opts.MaxOutputBytes < 0 || opts.PreserveSessionOnRejection {
 		return Result{}, ErrInvalid
 	}
 	if err := d.acquire(); err != nil {
@@ -139,7 +139,7 @@ func (d *Device) saveConfig(ctx context.Context, opts ExecuteOptions) (result Re
 	if len(d.profile.SaveCommands) == 0 {
 		return result, ErrUnsupported
 	}
-	if opts.MaxOutputBytes < 0 {
+	if opts.MaxOutputBytes < 0 || opts.PreserveSessionOnRejection {
 		return result, ErrInvalid
 	}
 	returned := false
@@ -147,7 +147,7 @@ func (d *Device) saveConfig(ctx context.Context, opts ExecuteOptions) (result Re
 		if !returned {
 			_ = d.closeResources()
 		} else if err != nil {
-			err = joinCleanup(err, d.closeResources())
+			err = d.retireFailure(err)
 		}
 	}()
 	result, err = d.save(ctx, opts)

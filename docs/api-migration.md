@@ -5,6 +5,60 @@ layer. Resolve the pinned GitHub dependency with GOWORK=off. Do not run the old
 workspace reconstruction scripts for current builds; retained baselines/patches
 are historical audit material.
 
+## Borrowed session operations
+
+`Device.WithBorrowedOperation` holds the device lease across a sequential callback
+and requires a session established by an earlier successful `Connect`. It never
+connects, reconnects or replays commands, including through `RunningConfig` and
+`SaveConfig`. Use the callback's context for all nested work:
+
+```go
+operationErr, cleanupErr := device.WithBorrowedOperation(ctx,
+    func(ctx context.Context, op *connector.Operation) error {
+        result, err := op.ExecuteCommand(ctx, command, connector.ExecuteOptions{
+            PreserveSessionOnRejection: true,
+        })
+        if errors.Is(err, connector.ErrDevice) && op.Connected() {
+            // A complete, verified rejection is evidence, not an accepted step.
+            response := result.Attempts()[0].Response()
+            output, textErr := response.Output()
+            if textErr != nil { return textErr }
+            _ = output // Inspect explicitly; normal diagnostics omit raw output.
+            return nil // The caller has handled the rejection.
+        }
+        return err
+    })
+// Always inspect both results. Cleanup can fail even when operationErr is nil.
+return errors.Join(operationErr, cleanupErr)
+```
+
+`PreserveSessionOnRejection` is opt-in and only accepted by a borrowed operation
+executing one command. Ordinary `Device`/`WithOperation` command calls and empty
+or multi-command scripts reject it before I/O with `ErrInvalid`; configuration
+save does not accept it. Preservation requires exactly one attempted command,
+a complete prompt, valid decoded/rendered text, intact output budgets and a live
+context. The final error must be only the device rejection after all command and
+operation observers and logging have finished. Any other failure retires the
+session. Rejected commands remain in `Attempts`, never `Steps`; receipt and step
+callbacks run only for accepted responses. A handled rejection can be followed by
+an explicit recovery command in the same lease. Returning an error from the
+borrowed callback retires the session even if the individual rejection was safe.
+
+`Operation.Retire` explicitly retires the session while leaving the `Device`
+available for a later explicit `Connect`. It works after cancellation, rejects
+observer reentry with `ErrBusy`, and rejects a retired or expired operation with
+`ErrScope`. `Operation.Connected` is a snapshot and becomes false after retirement
+or scope expiry. An operation cannot execute more commands or collect/save
+configuration after retirement. Commands are never retried implicitly.
+
+The borrowed scope returns operation and cleanup errors separately. The first
+cleanup error survives callback cancellation, admitted-call draining and ignored
+`Retire` errors, including a callback that returns nil. Scope exit never retries
+retirement. `Device.Close` remains terminal, cancels active I/O without waiting
+for application callbacks, and can explicitly retry a failed transport cleanup
+after the scope returns. Ordinary execution and `WithOperation` retain their
+existing default failure and connection behavior.
+
 ## Archive v2 and one configuration document
 
 - `archive.ClientOptions.Timeout` becomes `Timeouts`; `PoolOptions` also accepts the same `archive.Timeouts`. `archive.DefaultTimeouts()` supplies the only archive defaults, also used by config output. Zero option fields select defaults; explicit configuration values must be positive and representable.

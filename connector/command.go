@@ -20,7 +20,7 @@ func (d *Device) ExecuteScript(ctx context.Context, script Script, opts ExecuteO
 	if e != nil {
 		return Result{}, e
 	}
-	if opts.MaxOutputBytes < 0 {
+	if opts.MaxOutputBytes < 0 || opts.PreserveSessionOnRejection {
 		return Result{}, ErrInvalid
 	}
 	if e = d.acquire(); e != nil {
@@ -42,6 +42,7 @@ type execution struct {
 	valuesMu     sync.Mutex
 	bytes, limit int64
 	strategy     ConfigStrategy
+	rejection    *Response
 }
 
 type hookExecutor struct {
@@ -81,6 +82,7 @@ func (x *execution) hook(ctx context.Context, run func(Executor) error) (err err
 }
 func (d *Device) execute(ctx context.Context, script Script, opts ExecuteOptions, strategy ConfigStrategy) (result Result, err error) {
 	returned := false
+	var rejection *Response
 	defer func() {
 		if !returned {
 			_ = d.closeResources()
@@ -97,22 +99,36 @@ func (d *Device) execute(ctx context.Context, script Script, opts ExecuteOptions
 			err = joinFailures(err, e)
 		}
 		if err != nil {
-			err = joinCleanup(err, d.closeResources())
+			if opts.PreserveSessionOnRejection && rejection != nil && ctx.Err() == nil && d.Connected() && pureDeviceRejection(err) {
+				d.setPrompt(*rejection)
+			} else {
+				err = d.retireFailure(err)
+			}
 		}
 	}()
-	result, err = d.runScript(ctx, script, opts, strategy)
+	result, rejection, err = d.runScript(ctx, script, opts, strategy)
 	returned = true
 	return
 }
-func (d *Device) runScript(ctx context.Context, script Script, opts ExecuteOptions, strategy ConfigStrategy) (result Result, err error) {
+func pureDeviceRejection(err error) bool {
+	e, ok := err.(*Error)
+	return ok && e.Code == "device_error" && e.cause == ErrDevice
+}
+
+func (d *Device) runScript(ctx context.Context, script Script, opts ExecuteOptions, strategy ConfigStrategy) (result Result, rejection *Response, err error) {
 	if len(script.Commands) == 0 {
-		return result, ctx.Err()
+		return result, nil, ctx.Err()
 	}
 	if err = d.connect(ctx); err != nil {
 		return
 	}
 	x := &execution{textMode: opts.textMode, device: d, values: make(map[string]string), limit: d.config.MaxScriptOutputBytes, strategy: strategy}
-	defer func() { result.attempts = append([]Attempt(nil), x.attempts...) }()
+	defer func() {
+		result.attempts = append([]Attempt(nil), x.attempts...)
+		if len(x.attempts) == 1 {
+			rejection = x.rejection
+		}
+	}()
 	if opts.MaxOutputBytes > 0 {
 		x.limit = opts.MaxOutputBytes
 	}
@@ -319,6 +335,9 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 	rendered, _ := response.Rendered()
 	for _, pattern := range d.profile.CommandErrors {
 		if pattern.MatchString(diagnostic) || pattern.MatchString(rendered) {
+			if cc.Err() == nil && (x.limit <= 0 || x.bytes <= x.limit) {
+				x.rejection = &response
+			}
 			return StepResult{}, newError("device_error", "command", c, ErrDevice)
 		}
 	}

@@ -35,6 +35,7 @@ type Device struct {
 	transport  io.ReadWriteCloser
 	owner      *closeOwner
 	log        *logWriter
+	operation  *Operation // Accessed only by the holder of lease.
 }
 
 func New(profile Profile, cfg ConnectionConfig, opts ...Option) (*Device, error) {
@@ -171,6 +172,12 @@ func (d *Device) connect(parent context.Context) error {
 	}
 	if d.retired.Load() {
 		return ErrNotConnected
+	}
+	if d.operation != nil && d.operation.borrowed {
+		if !d.connected.Load() {
+			return ErrNotConnected
+		}
+		return nil
 	}
 	if d.connected.Load() {
 		return parent.Err()
@@ -375,6 +382,21 @@ func (d *Device) Close() error {
 }
 
 func (d *Device) closeResources() error {
+	if o := d.operation; o != nil && (o.borrowed || o.retired.Load()) {
+		return o.retire()
+	}
+	return d.closeOwnedResources()
+}
+
+func (d *Device) retireFailure(err error) error {
+	cleanupErr := d.closeResources()
+	if d.operation != nil && d.operation.borrowed {
+		return err
+	}
+	return joinCleanup(err, cleanupErr)
+}
+
+func (d *Device) closeOwnedResources() error {
 	d.retired.Store(true)
 	d.connected.Store(false)
 	d.privileged.Store(false)

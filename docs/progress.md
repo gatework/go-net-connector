@@ -1,5 +1,13 @@
 # Implementation progress
 
+## 2026-11-07：借用会话与清理所有权
+
+新增 `WithBorrowedOperation`，在已连接设备上持有完整回调租约，禁止隐式连接、重连或命令重放。`Operation.Retire` 在取消后仍可清理，拒绝重入、重复及过期使用；`Connected` 限定为活动作用域的会话快照。借用作用域分别返回操作错误和首次清理错误，回调忽略清理失败或返回 nil、作用域退出取消并等待已接纳调用时都保留清理证据；退出不自动重试清理，后续显式 `Device.Close` 可以重试失败的 transport owner。
+
+单命令 `PreserveSessionOnRejection` 仅在借用作用域写前校验通过、完整严格解码响应和提示符、预算未越界、context 未取消、所有 observer/logger 完成后只剩纯设备拒绝时保活。失败响应只进入 `Attempts`，不会变成已接受 `Steps` 或触发 receipt/step 回调。原有普通 Device、WithOperation 和终止式 Close 语义保留。
+
+初步验证：`GOWORK=off go test ./connector -run 'TestBorrowed' -count=1` 通过。真实 `net.Pipe` 回归覆盖完整拒绝后的显式恢复命令、未连接零打开、多命令零写入、无效编码/部分输出/输出预算、晚 observer/logger/取消、清理失败的独立错误树、重入/过期/取消后 retirement、活动 callback 中终止 Close，以及 scope 退出时取消并等待调用。本地 fixture 证据不代表实机或发布验证。
+
 The latest local quality pass is complete; see [2026-10-29 verification](2026-10-29-quality-verification.md). The following delivery notes are historical and do not authorize publication of the new work.
 
 Implementation and final scoped review are complete. The user authorized a private GitHub commit/push and first release on 2026-10-26. Release preparation is in progress; deployment remains outside scope.

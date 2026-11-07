@@ -242,7 +242,11 @@ func (r Result) MarshalJSON() ([]byte, error) {
 }
 
 type ExecuteOptions struct {
-	textMode configTextMode
+	// PreserveSessionOnRejection keeps a borrowed session after one command's
+	// complete, valid device rejection. It requires WithBorrowedOperation and a
+	// single command; every other failure still retires the session.
+	PreserveSessionOnRejection bool
+	textMode                   configTextMode
 	// SkipPrivilege preserves the current view for native upload operations.
 	SkipPrivilege  bool
 	OnReceipt      func(context.Context, StepResult) error
