@@ -31,11 +31,11 @@ The single CI artifact is named `release-FULL_SHA-RUN_ATTEMPT` and contains eigh
 
 The manifest records version, SHA, compiler and every platform payload's file sizes, modes and SHA-256 digests. `SHA256SUMS` covers all other files, including the manifest. Tar entries have deterministic ordering, ownership and timestamps; gzip records no local filename and uses a zero timestamp. Go builds use `CGO_ENABLED=0`, `-trimpath`, no build ID and an embedded version/SHA identity. Reproducibility means the same tree and toolchain; changing a compiler patch can change binaries. Verification checks the source bytes and modes against Git, the exact archive/asset file sets, checksums, payload manifests, embedded identity and Go command/platform/toolchain metadata. It does not trust a rewritten checksum list alone.
 
-The package job runs all five Linux archive binaries' `--version`, uses the archive's installed worker in its pipe integration test, then tests the extracted source with published dependencies. Fixture tests cross-build all twenty binaries twice and cover rehashed corruption, missing/extra payloads, wrong identity, dirty source, placeholders, replacements, unsafe links and refusal to overwrite artifacts.
+The package job runs both Linux archive binaries' `--version`, uses the archive's installed worker in its pipe integration test, then tests the extracted source with published dependencies. Fixture tests cross-build all eight platform binaries twice and cover rehashed corruption, missing/extra payloads, wrong identity, dirty source, placeholders, replacements, unsafe links and refusal to overwrite artifacts.
 
 ## Manual publication by the release owner
 
-1. Verify the private repository and intended release scope. Commit and push the reviewed source and dependency pin. Wait for a successful `Go` run whose `headSha` is the intended commit and whose matrix, quality and package jobs all passed. A different SHA's green run does not authorize this release.
+1. Verify the repository identity, current visibility and intended release scope. Preserve its visibility. Commit and push the reviewed source and dependency pin. Wait for a successful `Go` run whose `headSha` is the intended commit and whose matrix, quality and package jobs all passed. A different SHA's green run does not authorize this release.
 2. Record the workflow run ID, run attempt and immutable upload-artifact ID. Download **that run's** `release-FULL_SHA-RUN_ATTEMPT` artifact to a fresh directory. Do not build publication bytes locally and do not substitute an artifact from a later run.
 3. Check out the same SHA in a clean release checkout and run the verifier against the downloaded directory. Inspect `MANIFEST.json`, source correspondence, dependency notices and the platform archives. Retain the artifact ID and GitHub-reported artifact digest alongside the release evidence.
 4. Confirm the intended tag and release do not already exist. Create the tag at the verified full SHA, then create the GitHub release with all eight downloaded files. For example, after filling in the recorded values:
@@ -50,7 +50,7 @@ git push origin "refs/tags/$release_version"
 gh release create "$release_version" "$release_download"/* --verify-tag --title "$release_version" --notes-file "$release_notes"
 ```
 
-5. Read back the remote tag target, release state, all asset names/bytes/checksums and private visibility. Download the release assets to a second fresh directory and run the same verifier. Test installed binaries and an extracted-source consumer independently; record local, CI, consumer and publication evidence separately.
+5. Read back the remote tag target, release state, all asset names/bytes/checksums and unchanged visibility. Download the release assets to a second fresh directory and run the same verifier. Test installed binaries and an extracted-source consumer independently; record local, CI, consumer and publication evidence separately.
 
 Never force a tag, clobber existing assets or rebuild for an upload retry. If a tag/release already exists, compare its target and assets before deciding how to recover. Artifact retention is 30 days; download and retain the reviewed CI bytes before they expire.
 
