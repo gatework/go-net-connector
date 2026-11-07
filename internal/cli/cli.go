@@ -95,16 +95,15 @@ func (r Runtime) executeSelected(ctx context.Context, o options) int {
 			o.topologyMode = "plan"
 		}
 	}
+	if o.all {
+		o.public["NC_SAMPLE_PER_VENDOR"] = "0"
+	}
 	overrides, e := config.FromEnvironment(o.public)
 	if e != nil {
 		return r.fail(program, e)
 	}
 	defaults := config.Defaults(o.mode)
 
-	if o.all {
-		o.public["NC_SAMPLE_PER_VENDOR"] = "0"
-		overrides, e = config.FromEnvironment(o.public)
-	}
 	name := "backup"
 	if o.mode == "topology" {
 		name = "topology"

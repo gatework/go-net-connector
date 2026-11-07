@@ -141,7 +141,6 @@ func (r Runtime) configure(snapshot config.Snapshot, o options, name string, rea
 	for key, value := range o.public {
 		values[key] = value
 	}
-	result := snapshot
 	ask := func(key, label, defaultValue string, valid func(string) bool) error {
 		for {
 			value, err := answer(label, defaultValue)
@@ -207,7 +206,7 @@ func (r Runtime) configure(snapshot config.Snapshot, o options, name string, rea
 	if e != nil {
 		return snapshot, e
 	}
-	result, e = config.Load(config.Options{Name: name, CWD: r.CWD, Home: r.Home, Program: r.Program, Directories: r.Directories, ConfigFile: o.config, EnvFile: o.envFile, Defaults: snapshot.Public(), Overrides: overrides, Environment: r.Environment, AllowMissing: true})
+	result, e := config.Load(config.Options{Name: name, CWD: r.CWD, Home: r.Home, Program: r.Program, Directories: r.Directories, ConfigFile: o.config, EnvFile: o.envFile, Defaults: snapshot.Public(), Overrides: overrides, Environment: r.Environment, AllowMissing: true})
 	if e == nil {
 		_, e = bootstrap.New(result, nil)
 	}

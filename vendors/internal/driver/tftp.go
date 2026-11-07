@@ -48,8 +48,6 @@ var (
 	deviceInterfacePattern = regexp.MustCompile(`^([A-Za-z][A-Za-z-]*) ?([0-9][0-9/.:]*)$`)
 	deviceVRFPattern       = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*$`)
 	deviceFilenameAddress  = regexp.MustCompile(`[^A-Za-z0-9._-]`)
-	startupNext            = regexp.MustCompile(`(?mi)^\s*Next main startup saved-configuration file:\s*(\S+)`)
-	startupCurrent         = regexp.MustCompile(`(?mi)^\s*Current startup saved-configuration file:\s*(\S+)`)
 	fileCompletion         = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)^(?:File\s+)?(?:transfer(?:red)?|upload(?:ed)?)(?:\s+(?:is|was))?\s+(?:success(?:ful(?:ly)?)?|succeeded|complete(?:d)?(?:\s+successfully)?)[.!]?$`),
 		regexp.MustCompile(`(?i)^(?:TFTP:\s*)?[1-9]\d*\s+bytes?\s+sent(?:\s+in\s+[\d.]+\s+(?:secs?|seconds?|second\(s\)))?[.!]?$`),

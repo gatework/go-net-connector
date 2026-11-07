@@ -9,20 +9,6 @@ import (
 	"github.com/gatework/go-net-connector/connector"
 )
 
-func testPattern(expression string) expect.Pattern {
-	p, e := expect.Compile(expression)
-	if e != nil {
-		panic(e)
-	}
-	return p
-}
-func testStepOutput(s connector.StepResult) string {
-	v, e := s.Response().Output()
-	if e != nil {
-		panic(e)
-	}
-	return v
-}
 func testResultOutput(r connector.Result) string {
 	if v, ok := r.Config(); ok {
 		return v

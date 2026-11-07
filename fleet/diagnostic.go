@@ -269,7 +269,3 @@ func trustedCauseType(err error) string {
 		return "StandardError"
 	}
 }
-func (d Diagnostic) summary() map[string]any {
-	d = d.sanitized()
-	return map[string]any{"phase": nullableString(d.Phase), "underlying_type": nullableString(d.UnderlyingType), "artifact_state": nullableString(d.ArtifactState), "artifact_phase": nullableString(d.ArtifactPhase), "verification": nullableString(d.Verification)}
-}
