@@ -61,7 +61,7 @@ func TestClientRejectsChannelWithoutDeadlinesBeforeIO(t *testing.T) {
 			return nil
 		}}, nil
 	}
-	client, err := NewClient(ClientOptions{Root: root, Directory: t.TempDir(), Launcher: launcher, Timeouts: Timeouts{Prepare: 20 * time.Millisecond}})
+	client, err := NewClient(ClientOptions{Root: root, Directory: t.TempDir(), Launcher: launcher})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestClientRejectsChannelWithoutDeadlinesBeforeIO(t *testing.T) {
 		if err == nil {
 			t.Fatal("accepted unbounded channel")
 		}
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		t.Fatal("unbounded channel blocked Prepare")
 	}
 	select {

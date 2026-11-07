@@ -9,9 +9,9 @@ type options struct {
 	inventoryOnly                       bool
 	verbose                             bool
 
-	init, interactive, nonInteractive, show, plan, json, quiet, all, stdin, refresh, tftp, apply, discover, fullPorts, lowercase bool
-	sample, parallel, limit                                                                                                      int
-	config, envFile, directory, export, output, policy, mode, description                                                        string
-	public, secrets                                                                                                              map[string]string
-	flags                                                                                                                        *pflag.FlagSet
+	init, interactive, nonInteractive, show, plan, json, quiet, all, stdin, refresh, apply, discover, fullPorts, lowercase bool
+	sample, parallel, limit                                                                                                int
+	config, envFile, directory, export, output, policy, mode, description                                                  string
+	public, secrets                                                                                                        map[string]string
+	flags                                                                                                                  *pflag.FlagSet
 }

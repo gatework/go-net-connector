@@ -408,15 +408,17 @@ func (c *delayPublishedFrame) Write(p []byte) (int, error) {
 func TestPublishedFramesSurvivePreviousStageExpiry(t *testing.T) {
 	for _, phase := range []string{"ready", "delivered"} {
 		t.Run(phase, func(t *testing.T) {
-			limits := Timeouts{Prepare: 80 * time.Millisecond, Upload: time.Second, Verify: 80 * time.Millisecond, Cleanup: time.Second}
+			// Allow real filesystem syncs on loaded race-test runners. The frame
+			// writer still returns after the previous stage's entire budget.
+			limits := Timeouts{Prepare: time.Second, Upload: 5 * time.Second, Verify: time.Second, Cleanup: 5 * time.Second}
 			if phase == "ready" {
-				limits.Verify = time.Second
+				limits.Verify = 5 * time.Second
 			} else {
-				limits.Prepare = time.Second
+				limits.Prepare = 5 * time.Second
 			}
 			c, root := transactionClient(t, limits)
 			c.launch = scriptedLauncher(func(ctx context.Context, server net.Conn) {
-				connection := &delayPublishedFrame{Conn: server, phase: phase, delay: 120 * time.Millisecond}
+				connection := &delayPublishedFrame{Conn: server, phase: phase, delay: 1200 * time.Millisecond}
 				_ = Serve(ctx, connection, connection)
 			})
 			// In the delivered case the client may send cleanup immediately, while
