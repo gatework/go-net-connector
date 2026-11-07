@@ -16,6 +16,8 @@ var ErrUnsupported = errors.New("transfer: unsupported operation")
 var ErrUnconfirmed = errors.New("transfer: completion unconfirmed")
 var ErrSourceFileRequired = errors.New("transfer: source file required")
 
+const DefaultUploadTimeout = 180 * time.Second
+
 type Error struct {
 	Code, Phase string
 	cause       error
@@ -59,7 +61,7 @@ func TFTP(ctx context.Context, registry dialect.Registry, d *connector.Device, o
 	explicitPath := options.Path != ""
 	explicitSource := options.SourceFile != ""
 	if options.Timeout == 0 {
-		options.Timeout = 180 * time.Second
+		options.Timeout = DefaultUploadTimeout
 	}
 	ctx, cancel := context.WithTimeout(ctx, options.Timeout)
 	defer cancel()

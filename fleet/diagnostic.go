@@ -31,10 +31,10 @@ Errno::EOPNOTSUPP Errno::ETIMEDOUT Errno::ECONNREFUSED Errno::ECONNRESET
 Net::Connector::RemoteBackup::CompletionError Net::Connector::Storage::AtomicFile::WriteError Net::Connector::Storage::AtomicFile::PersistenceError Net::Connector::Storage::AtomicFile::DirectorySyncUnsupported
 Net::Connector::Netdisco::Tftp::Archive::Unavailable Net::Connector::Netdisco::Tftp::Archive::Failure`)
 var knownCodes = stringSet(`error connection_error authentication_error login_timeout command_timeout write_timeout prompt_error connection_closed transport_error device_error configuration_error script_error internal_error output_limit_exceeded script_output_limit_exceeded session_busy unsupported_operation log_error parsing_error backup_busy backup_persistence_error backup_finalize_error tftp_completion_error authentication_failed connection_failed connection_refused no_route connection_reset connection_timeout host_key_changed host_key_untrusted known_hosts_busy known_hosts_unsafe known_hosts_inherited rsa_too_small unsupported_cipher ambiguous_description ambiguous_neighbor confirmation_required description_stages_unsupported description_unconfirmed description_unsupported incomplete_configuration interface_missing neighbor_discovery_unsupported parse_failed invalid_output_encoding persistence_unconfirmed stale_plan startup_config_missing template_invalid template_missing template_unreadable evidence_limit_exceeded transfer_failed transfer_finalize_failed transfer_path_mismatch transfer_path_unconfirmed transfer_unconfirmed uncommitted_configuration unrecognized_output unsupported_configuration_format verification_plan_changed candidate_isolation_unavailable backup_durability_unsupported backup_finalize_failed backup_persistence_unconfirmed file_finalize_failed file_persistence_unconfirmed file_write_failed directory_sync_unsupported tftp_history_unavailable tftp_archive_failed`)
-var knownPhases = stringSet(`connect login enable command script read write close logging backup collect discover parse plan apply verify persist save interact tftp_backup remote_backup report callback`)
+var knownPhases = stringSet(`connect login enable command script read write close logging backup collect discover parse plan apply prepare upload verify cleanup persist save interact tftp_backup remote_backup report callback`)
 var knownArtifactStates = stringSet(`not_committed committed durable reported_uploaded`)
 var knownArtifactPhases = stringSet(`resolve_parent temporary_file write file_sync rename directory_open directory_sync cleanup complete path finalize`)
-var knownVerifications = stringSet(`device_reported`)
+var knownVerifications = stringSet(`device_reported server_verified`)
 
 func stringSet(s string) map[string]bool {
 	m := map[string]bool{}
@@ -70,6 +70,7 @@ func diagnoseError(e error, a Artifact) Diagnostic {
 	if e == nil {
 		return Diagnostic{}
 	}
+	original := e
 	e = primaryDiagnosticError(e)
 	d := Diagnostic{ErrorType: trustedCauseType(e)}
 	var ce *connector.Error
@@ -151,16 +152,33 @@ func diagnoseError(e error, a Artifact) Diagnostic {
 				d.ErrorType = "Net::Connector::RemoteBackup::CompletionError"
 			}
 		}
-	} else if errors.Is(e, archive.ErrArchive) && ce == nil {
+	} else if errors.Is(original, archive.ErrArchive) && ce == nil && se == nil {
 		d.ErrorCode, d.Phase, d.ErrorType = "tftp_archive_failed", "tftp_backup", "Net::Connector::Netdisco::Tftp::Archive::Failure"
+		d.UnderlyingType = trustedCauseType(e)
 	} else if errors.Is(e, transfer.ErrInvalid) {
 		d.ErrorType = "ArgumentError"
 	} else if errors.Is(e, transfer.ErrUnsupported) {
 		d.ErrorCode, d.ErrorType = "unsupported_operation", "Net::Connector::UnsupportedOperation"
 	}
 	if a.Transfer != nil && a.Transfer.Reported() {
-		d.ArtifactState = "reported_uploaded"
+		if d.ArtifactState == "" {
+			d.ArtifactState = "reported_uploaded"
+		}
 		d.Verification = "device_reported"
+	}
+	if a.Archive != nil {
+		d.ArtifactState, d.ArtifactPhase = string(a.Archive.Local.State), a.Archive.Local.Phase
+		if a.Archive.Verified() {
+			d.Verification = "server_verified"
+		}
+	}
+	var ae *archive.Error
+	if errors.As(original, &ae) && ae.Phase != "" && ce == nil && te == nil {
+		d.Phase = ae.Phase
+		if se == nil {
+			d.ErrorCode, d.ErrorType = "tftp_archive_failed", "Net::Connector::Netdisco::Tftp::Archive::Failure"
+			d.UnderlyingType = trustedCauseType(e)
+		}
 	}
 	return d.sanitized()
 }

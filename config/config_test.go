@@ -25,8 +25,8 @@ func TestLayerPrecedenceAndPaths(t *testing.T) {
 	high := filepath.Join(root, "high")
 	os.Mkdir(low, 0700)
 	os.Mkdir(high, 0700)
-	os.WriteFile(filepath.Join(low, "net-connector.yml"), []byte("common:\n  ssh:\n    protocol: ssh\nbackup:\n  backup:\n    directory: ./saved\n    parallel: 2\n"), 0600)
-	os.WriteFile(filepath.Join(high, "backup.yml"), []byte("backup:\n  parallel: 3\n"), 0600)
+	os.WriteFile(filepath.Join(low, "net-connector.yml"), []byte("ssh:\n  protocol: ssh\nbackup:\n  directory: ./saved\n  parallel: 2\n"), 0600)
+	os.WriteFile(filepath.Join(high, "net-connector.yml"), []byte("backup:\n  parallel: 3\n"), 0600)
 	os.WriteFile(filepath.Join(high, ".env"), []byte("NC_PARALLEL=1\nNC_DEVICE_PASSWORD='a#$b'\n"), 0600)
 	s, e := Load(Options{Name: "backup", CWD: root, Home: root, Directories: []string{low, high}, Environment: map[string]string{"NC_PARALLEL": "4"}, Overrides: map[string]any{"backup": map[string]any{"parallel": 5}}})
 	if e != nil {
@@ -142,7 +142,7 @@ func TestRelativeSourceContextsAreAbsolute(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if e = os.WriteFile(filepath.Join(root, "backup.yml"), []byte("backup:\n  parallel: 7\n"), 0600); e != nil {
+	if e = os.WriteFile(filepath.Join(root, "net-connector.yml"), []byte("backup:\n  parallel: 7\n"), 0600); e != nil {
 		t.Fatal(e)
 	}
 	for _, cwd := range []string{".", rel} {
@@ -166,7 +166,7 @@ func TestRelativeSourceContextsAreAbsolute(t *testing.T) {
 				t.Fatalf("cache=%v", got)
 			}
 			cfg, env := s.InitPaths()
-			if cfg != filepath.Join(root, "home/.config/net-connector/backup.yml") || !filepath.IsAbs(env) {
+			if cfg != filepath.Join(root, "home/.config/net-connector/net-connector.yml") || !filepath.IsAbs(env) {
 				t.Fatalf("init paths=%s %s", cfg, env)
 			}
 		})
@@ -178,7 +178,7 @@ func TestConfigurationSymlinkDiscoveryAndExplicitFiles(t *testing.T) {
 		t.Run(fmt.Sprintf("explicit_%v", explicit), func(t *testing.T) {
 			root := t.TempDir()
 			targets := t.TempDir()
-			for name, content := range map[string]string{"backup.yml": "backup:\n  parallel: 6\n  directory: ./saved\n", ".env": "NC_DEVICE_PASSWORD='fixture'\n"} {
+			for name, content := range map[string]string{"net-connector.yml": "backup:\n  parallel: 6\n  directory: ./saved\n", ".env": "NC_DEVICE_PASSWORD='fixture'\n"} {
 				path := filepath.Join(targets, name)
 				if e := os.WriteFile(path, []byte(content), 0644); e != nil {
 					t.Fatal(e)
@@ -190,7 +190,7 @@ func TestConfigurationSymlinkDiscoveryAndExplicitFiles(t *testing.T) {
 			o := Options{Name: "backup", CWD: root, Home: root, Directories: []string{root}}
 			if explicit {
 				o.Directories = []string{}
-				o.ConfigFile = "backup.yml"
+				o.ConfigFile = "net-connector.yml"
 				o.EnvFile = ".env"
 			}
 			s, e := Load(o)
@@ -244,7 +244,7 @@ func TestConfigurationRejectsNonregularAndOversizedFiles(t *testing.T) {
 
 func TestExplicitEmptyDirectoriesDisableDiscovery(t *testing.T) {
 	root := t.TempDir()
-	if e := os.WriteFile(filepath.Join(root, "backup.yml"), []byte("invalid: true"), 0600); e != nil {
+	if e := os.WriteFile(filepath.Join(root, "net-connector.yml"), []byte("invalid: true"), 0600); e != nil {
 		t.Fatal(e)
 	}
 	if e := os.WriteFile(filepath.Join(root, ".env"), []byte("X=$(no)"), 0600); e != nil {
@@ -266,7 +266,7 @@ func TestIntegerSchemaRejectsFloatingPointScalars(t *testing.T) {
 			t.Run(field+"/"+value, func(t *testing.T) {
 				root := t.TempDir()
 				parts := strings.SplitN(field, ".", 2)
-				path := filepath.Join(root, "backup.yml")
+				path := filepath.Join(root, "net-connector.yml")
 				if e := os.WriteFile(path, []byte(parts[0]+":\n  "+parts[1]+": "+value+"\n"), 0600); e != nil {
 					t.Fatal(e)
 				}

@@ -65,17 +65,27 @@ sequenceDiagram
   Worker->>Files: stable read under same target lock
   Worker-->>Protocol: body and delivered proof
   Protocol-->>Client: verified server receipt
-  Client->>Worker: cleanup only after local commit and server verification
+  Client->>Worker: cleanup only after local durability and server verification
   Worker-->>Client: complete
   Pool->>Pool: Close stops admission, cancels and joins active work
   Pool->>Client: close retained channels
   Pool->>Master: terminate and reap SSH process group
 ```
 
-Pool 唯一负责并发接纳、预检协调和批次关闭；Client 拥有一次目标事务及其通道清理；Protocol 拥有帧顺序与总期限；worker 拥有目录 FD、文件身份、目标锁和服务端目标回执。设备只报告传输完成时回执仍是 `device_reported`；只有归档 worker 返回的正文与尾帧都匹配字节数和 SHA-256 后才成为 `server_verified`。本地持久化或清理失败保留已获得的证据，但不会重新上传。
+Pool 唯一负责并发接纳、预检协调和批次关闭；Client 拥有一次目标事务及其通道清理；Protocol 拥有帧顺序并消费 Client 明确提供的阶段 context；worker 拥有目录 FD、文件身份、目标锁和服务端目标回执。设备只报告传输完成时回执仍是 `device_reported`；只有归档 worker 返回的正文与尾帧都匹配字节数和 SHA-256 后才成为 `server_verified`。本地持久化或清理失败保留已获得的证据，但不会重新上传。
 
 HTTP/PG 来源拥有各自请求/连接，返回整份有效清单或错误；不交付半页结果。Cache 保存 schema1、身份双 SHA-256 和完整清单，来源失败时可显式使用已校验旧缓存。Fleet 在库存顺序输出结果，取消后停止接纳新任务并等待已接纳任务退出。
 
 配置和纯计划不打开设备，不查询设备凭据。批次预检覆盖所有有能力的设备，抽样不能隐藏无效策略。主机过滤以地址区间比较，不展开 IPv4/IPv6 网段。历史质量证据用于审计，不参与当前构建；go-expect 通过正式发布模块解析。
 
 响应处理区分原始字节、解码正文与可见文本；完成步骤复用不可变渲染结果。分页剥离首次发生时才分离正文缓冲。无回显日志仅保留预算计数与安全事件元数据。TextFSM 仅缓存内嵌模板的只读编译状态，每次解析复制 Values 并创建独立 ParserOutput；自定义模板不缓存。
+
+## 归档 v2 与统一配置
+
+归档事务 module 的 interface 返回 `archive.Result`：设备报告在 `Transfer`，服务器 `Proof`、本地 `storage.Receipt` 与清理状态在 `Receipt`。Fleet 保存这两份正交证据，不再从一个 verification 值推断本地是否持久化。部分失败后仍保留所有已经确认的事实，清理未确认时不能报批次成功。
+
+Client 为准备、上传、核验、本地提交及清理安排阶段 context；Pool 排队与 Client 准备沿用同一截止点。Launcher 归事务父 context 所有，阶段结束不会销毁仍需使用的 worker。worker 使用同一 v2 预算并在阶段交接控制帧允许固定 10 秒传输余量。正文、尾帧和本地提交共享 Verify 截止点；worker 收到 cleanup 前不会开始清理计时。同步磁盘操作和借用回调仍须合作取消，不以遗弃 goroutine 模拟硬超时。
+
+配置只发现平铺的 `net-connector.yml`，按目录优先级合并同名文件，显式 `--config` 最后加载。`.env` 与来源追踪保持原用途，自动发现不再读取旧用途文件。归档默认期限与 worker 路径在 archive 定义，config 默认输出与 bootstrap 类型化设置复用它们；业务运行时只传递一份 Timeouts。
+
+导出由报告模式决定固定产物位置：backup 在批次根，TFTP 在 `tftp`。报告绝对路径只提供文件名，实际读取锚定用户指定的批次目录，固定子目录和文件都禁止符号链接。搬移整个批次后仍能导出，根目录同名文件不会替代 TFTP 产物。

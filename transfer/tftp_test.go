@@ -68,7 +68,7 @@ func TestTFTPDialects(t *testing.T) {
 		t.Run(test.vendor, func(t *testing.T) {
 			d := transferDevice(t, test.vendor, [][2]string{{test.command, test.command + "\r\n" + test.success + "\r\nsw#"}})
 			result, e := TFTP(t.Context(), vendors.NewBuiltinRegistry(), d, TFTPOptions{Server: "192.0.2.9", Path: "backup.cfg"})
-			if e != nil || !result.Receipt.Reported() || result.Receipt.Verified() || len(result.Steps) != 1 {
+			if e != nil || !result.Receipt.Reported() || result.Receipt.Verification != VerificationDeviceReported || len(result.Steps) != 1 {
 				t.Fatal(result, e)
 			}
 		})

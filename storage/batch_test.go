@@ -21,6 +21,12 @@ func batchFixture(t *testing.T, mode string) (string, map[string]any) {
 	sum := sha256.Sum256(body)
 	row := map[string]any{"host": "192.0.2.1", "name": "核心交换机", "path": "/old/location/" + name, "bytes": len(body), "sha256": hex.EncodeToString(sum[:]), "status": "failed"}
 	if mode == "tftp" {
+		if err := os.Mkdir(filepath.Join(directory, "tftp"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(filepath.Join(directory, name), filepath.Join(directory, "tftp", name)); err != nil {
+			t.Fatal(err)
+		}
 		row["local_file"] = row["path"]
 		row["path"] = "remote-upload.cfg"
 		row["verification"] = "server_verified"
@@ -141,5 +147,51 @@ func TestReadBatchSavedRejectsSummarySymlink(t *testing.T) {
 	}
 	if _, _, err = ReadBatchSaved(t.Context(), d, "192.0.2.1"); err == nil {
 		t.Fatal("followed report symlink")
+	}
+}
+
+func TestTFTPExportUsesAnchoredSubdirectoryAfterMove(t *testing.T) {
+	dir, _ := batchFixture(t, "tftp")
+	moved := filepath.Join(t.TempDir(), "moved-batch")
+	if err := os.Rename(dir, moved); err != nil {
+		t.Fatal(err)
+	}
+	name := "核心交换机-192.0.2.1.txt"
+	// Even matching bytes in the root are irrelevant; the selected location is tftp/.
+	if err := os.WriteFile(filepath.Join(moved, name), []byte("wrong root artifact"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	body, artifact, err := ReadBatchSaved(t.Context(), moved, "192.0.2.1")
+	if err != nil || string(body) != "设备配置\n\xff" || artifact.Path != filepath.Join(moved, "tftp", name) {
+		t.Fatal(artifact, err)
+	}
+	for _, kind := range []string{"inward_directory", "outward_directory", "file"} {
+		t.Run(kind, func(t *testing.T) {
+			dir, _ := batchFixture(t, "tftp")
+			path := filepath.Join(dir, "tftp")
+			if kind == "file" {
+				target := filepath.Join(dir, "target.txt")
+				if err := os.Rename(filepath.Join(path, name), target); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, filepath.Join(path, name)); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				target := filepath.Join(dir, "inside")
+				if kind == "outward_directory" {
+					target = filepath.Join(t.TempDir(), "outside")
+				}
+				if err := os.Rename(path, target); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, _, err := ReadBatchSaved(t.Context(), dir, "192.0.2.1"); err == nil {
+				t.Fatal("symlink accepted")
+			}
+		})
 	}
 }

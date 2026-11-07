@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gatework/go-net-connector/archive"
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/internal/batchreport"
 )
@@ -47,7 +48,7 @@ func (r Report) Success() bool {
 	for _, o := range b.outcomes {
 		if o.Success() {
 			success = true
-			if r.policy == "verified" && (o.Artifact.Transfer == nil || !o.Artifact.Transfer.Verified()) {
+			if r.policy == "verified" && (o.Artifact.Archive == nil || !o.Artifact.Archive.Complete()) {
 				return false
 			}
 		} else if outcomeStatus(o.Status) != outcomeStatusFiltered && outcomeStatus(o.Status) != outcomeStatusSampleLimit {
@@ -89,7 +90,7 @@ func (r Report) totals() reportTotals {
 			if outcome.Artifact.Transfer == nil {
 				continue
 			}
-			if outcome.Artifact.Transfer.Verified() {
+			if outcome.Artifact.Archive != nil && outcome.Artifact.Archive.Verified() {
 				verification.Verified++
 			} else {
 				verification.Unverified++
@@ -243,13 +244,21 @@ func (r Report) devices() []batchreport.Device {
 				device.SourceFile = optionalString(receipt.SourceFile)
 				device.Format = stringPointer(receipt.Format)
 				device.Verification = optionalString(string(receipt.Verification))
+			}
+			if receipt := outcome.Artifact.Archive; receipt != nil {
+				device.Archive = reportArchiveReceipt(*receipt)
 				device.ServerFileVerified = receipt.Verified()
-				device.ServerSHA256 = optionalString(receipt.ServerSHA256)
-				device.SHA256 = device.ServerSHA256
-				device.LocalFile = optionalString(receipt.LocalPath)
-				device.ServerArchiveFile = optionalString(receipt.ArchivePath)
 				if receipt.Verified() {
-					device.Bytes = int64Pointer(receipt.ServerBytes)
+					device.Verification = stringPointer("server_verified")
+					device.ServerSHA256 = stringPointer(receipt.Server.SHA256)
+					device.SHA256 = device.ServerSHA256
+					device.Bytes = int64Pointer(receipt.Server.Bytes)
+				}
+				if receipt.Server != nil {
+					device.ServerArchiveFile = optionalString(receipt.Server.ArchivePath)
+				}
+				if receipt.Local.Committed() {
+					device.LocalFile = optionalString(receipt.Local.Path)
 				}
 			}
 		}
@@ -260,6 +269,17 @@ func (r Report) devices() []batchreport.Device {
 		devices = append(devices, device)
 	}
 	return devices
+}
+
+func reportArchiveReceipt(receipt archive.Receipt) *batchreport.ArchiveReceipt {
+	r := &batchreport.ArchiveReceipt{
+		Local:   batchreport.FileReceipt{Path: receipt.Local.Path, State: string(receipt.Local.State), Phase: receipt.Local.Phase},
+		Cleanup: string(receipt.Cleanup),
+	}
+	if proof := receipt.Server; proof != nil {
+		r.Server = &batchreport.ArchiveProof{Bytes: proof.Bytes, SHA256: proof.SHA256, ArchivePath: proof.ArchivePath, Verified: proof.Verified}
+	}
+	return r
 }
 
 func reportBackupSource(source *connector.BackupSource) *batchreport.BackupSource {

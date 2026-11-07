@@ -20,8 +20,8 @@ func TestTFTPUploadTimeoutConfiguration(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if s.TFTPUploadTimeout() != tc.want {
-			t.Fatal(s.TFTPUploadTimeout())
+		if s.ArchiveTimeouts().Upload != tc.want {
+			t.Fatal(s.ArchiveTimeouts().Upload)
 		}
 	}
 }
@@ -56,5 +56,32 @@ func TestTFTPPolicyIsResolvedOnceAtConstruction(t *testing.T) {
 	target, err := first.For("192.0.2.1", "h3c")
 	if err != nil || target.Server != "192.0.2.50" {
 		t.Fatalf("target=%+v error=%v", target, err)
+	}
+}
+
+func TestArchiveTimeoutConfigurationAndLimits(t *testing.T) {
+	for _, tc := range []struct {
+		env     map[string]string
+		invalid bool
+	}{
+		{map[string]string{"NC_TFTP_UPLOAD_TIMEOUT": "600", "NC_TFTP_ARCHIVE_PREPARE_TIMEOUT": "7.5", "NC_TFTP_ARCHIVE_VERIFY_TIMEOUT": "12", "NC_TFTP_ARCHIVE_CLEANUP_TIMEOUT": "2"}, false},
+		{map[string]string{"NC_TFTP_UPLOAD_TIMEOUT": "1000000000000000000"}, true},
+		{map[string]string{"NC_TFTP_ARCHIVE_VERIFY_TIMEOUT": "0"}, true},
+		{map[string]string{"NC_TFTP_ARCHIVE_CLEANUP_TIMEOUT": "0.00000000001"}, true},
+	} {
+		p, err := config.Load(config.Options{Name: "backup", CWD: t.TempDir(), Home: t.TempDir(), Directories: []string{}, Environment: tc.env, Defaults: config.Defaults("tftp")})
+		if err == nil {
+			var s *Services
+			s, err = New(p, nil)
+			if err == nil && !tc.invalid {
+				timeouts := s.ArchiveTimeouts()
+				if timeouts.Upload != 600*time.Second || timeouts.Prepare != 7500*time.Millisecond || timeouts.Verify != 12*time.Second || timeouts.Cleanup != 2*time.Second {
+					t.Fatal(timeouts)
+				}
+			}
+		}
+		if (err != nil) != tc.invalid {
+			t.Fatalf("invalid=%v err=%v", tc.invalid, err)
+		}
 	}
 }

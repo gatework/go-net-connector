@@ -33,8 +33,8 @@ func TestProtocolBlockedIOPreservesCancellation(t *testing.T) {
 			defer a.Close()
 			defer b.Close()
 			c := &enteredConn{Conn: a, entered: make(chan struct{})}
-			p := NewProtocol(c, c, time.Second)
-			ctx, cancel := context.WithCancel(t.Context())
+			p := NewProtocol(c, c)
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
 			done := make(chan error, 1)
 			go func() {

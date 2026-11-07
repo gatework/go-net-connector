@@ -4,8 +4,8 @@ package workflow
 import (
 	"context"
 	"io"
-	"time"
 
+	"github.com/gatework/go-net-connector/archive"
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/internal/progress"
@@ -43,9 +43,9 @@ type SessionObserver func(context.Context, connector.SessionEvent) error
 type DeviceOpener func(context.Context, fleet.Record, io.Writer, SessionObserver) (*connector.Device, error)
 
 type TFTPSettings struct {
+	ArchiveTimeouts   archive.Timeouts
 	Policy            *transfer.Policy
 	LimitPerVendor    int
-	UploadTimeout     time.Duration
 	ArchiveWorkerPath string
 	ArchivePassword   func() string
 }

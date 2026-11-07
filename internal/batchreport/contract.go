@@ -111,6 +111,18 @@ type FileReceipt struct {
 	Phase string `json:"phase"`
 }
 
+type ArchiveProof struct {
+	Bytes       int64  `json:"bytes"`
+	SHA256      string `json:"sha256"`
+	ArchivePath string `json:"archive_path"`
+	Verified    bool   `json:"verified"`
+}
+type ArchiveReceipt struct {
+	Server  *ArchiveProof `json:"server,omitempty"`
+	Local   FileReceipt   `json:"local"`
+	Cleanup string        `json:"cleanup"`
+}
+
 type SourceSegment struct {
 	Step   int `json:"step"`
 	Offset int `json:"offset"`
@@ -140,37 +152,38 @@ type TextWarning struct {
 // Device is a report row. Mode and HasBackup control mode-specific fields but
 // are not serialized, keeping the established schema-v2 shape intact.
 type Device struct {
-	Mode               string        `json:"-"`
-	HasBackup          bool          `json:"-"`
-	Host               string        `json:"host"`
-	Name               *string       `json:"name"`
-	Vendor             *string       `json:"vendor"`
-	Status             string        `json:"status"`
-	Path               *string       `json:"path"`
-	Bytes              *int64        `json:"bytes"`
-	SHA256             *string       `json:"sha256"`
-	Change             *string       `json:"change"`
-	PreviousSHA256     *string       `json:"previous_sha256"`
-	StartedAt          *string       `json:"started_at"`
-	FinishedAt         *string       `json:"finished_at"`
-	DurationMS         *float64      `json:"duration_ms"`
-	ErrorCode          *string       `json:"error_code"`
-	ErrorType          *string       `json:"error_type"`
-	Diagnostic         Diagnostic    `json:"diagnostic"`
-	Source             *BackupSource `json:"source"`
-	Encoding           *string       `json:"encoding"`
-	TextWarning        *TextWarning  `json:"text_warning"`
-	RemotePath         *string       `json:"remote_path"`
-	Server             *string       `json:"server"`
-	ConfigurationKind  *string       `json:"configuration_kind"`
-	SourceFile         *string       `json:"source_file"`
-	Format             *string       `json:"format"`
-	Verification       *string       `json:"verification"`
-	ServerSHA256       *string       `json:"server_sha256"`
-	LocalFile          *string       `json:"local_file"`
-	ServerArchiveFile  *string       `json:"server_archive_file"`
-	ServerFileVerified bool          `json:"server_file_verified"`
-	SessionLog         *string       `json:"session_log"`
+	Archive            *ArchiveReceipt `json:"archive,omitempty"`
+	Mode               string          `json:"-"`
+	HasBackup          bool            `json:"-"`
+	Host               string          `json:"host"`
+	Name               *string         `json:"name"`
+	Vendor             *string         `json:"vendor"`
+	Status             string          `json:"status"`
+	Path               *string         `json:"path"`
+	Bytes              *int64          `json:"bytes"`
+	SHA256             *string         `json:"sha256"`
+	Change             *string         `json:"change"`
+	PreviousSHA256     *string         `json:"previous_sha256"`
+	StartedAt          *string         `json:"started_at"`
+	FinishedAt         *string         `json:"finished_at"`
+	DurationMS         *float64        `json:"duration_ms"`
+	ErrorCode          *string         `json:"error_code"`
+	ErrorType          *string         `json:"error_type"`
+	Diagnostic         Diagnostic      `json:"diagnostic"`
+	Source             *BackupSource   `json:"source"`
+	Encoding           *string         `json:"encoding"`
+	TextWarning        *TextWarning    `json:"text_warning"`
+	RemotePath         *string         `json:"remote_path"`
+	Server             *string         `json:"server"`
+	ConfigurationKind  *string         `json:"configuration_kind"`
+	SourceFile         *string         `json:"source_file"`
+	Format             *string         `json:"format"`
+	Verification       *string         `json:"verification"`
+	ServerSHA256       *string         `json:"server_sha256"`
+	LocalFile          *string         `json:"local_file"`
+	ServerArchiveFile  *string         `json:"server_archive_file"`
+	ServerFileVerified bool            `json:"server_file_verified"`
+	SessionLog         *string         `json:"session_log"`
 }
 
 func (d Device) MarshalJSON() ([]byte, error) {
@@ -187,6 +200,9 @@ func (d Device) values() map[string]any {
 		"error_type": stringValue(d.ErrorType), "diagnostic": d.Diagnostic.values(),
 	}
 	if d.Mode == "tftp" {
+		if d.Archive != nil {
+			fields["archive"] = d.Archive
+		}
 		fields["remote_path"] = stringValue(d.RemotePath)
 		fields["server"] = stringValue(d.Server)
 		fields["configuration_kind"] = stringValue(d.ConfigurationKind)
@@ -244,11 +260,13 @@ func floatValue(value *float64) any {
 }
 
 type Artifact struct {
-	Host   string
-	Path   string
-	Bytes  int64
-	SHA256 string
-	Status string
+	// Subdirectory is derived from mode, never from a report-controlled path.
+	Subdirectory string
+	Host         string
+	Path         string
+	Bytes        int64
+	SHA256       string
+	Status       string
 }
 
 func NormalizeHost(host string) (string, error) {
@@ -290,7 +308,9 @@ func SelectArtifact(data []byte, host string) (Artifact, error) {
 		return Artifact{}, ErrInvalidEvidence
 	}
 	path := selected.Path
+	subdirectory := ""
 	if summary.Mode == "tftp" {
+		subdirectory = "tftp"
 		if selected.Verification == nil || *selected.Verification != "server_verified" {
 			return Artifact{}, ErrInvalidEvidence
 		}
@@ -300,10 +320,11 @@ func SelectArtifact(data []byte, host string) (Artifact, error) {
 		return Artifact{}, ErrInvalidEvidence
 	}
 	return Artifact{
-		Host:   address.String(),
-		Path:   *path,
-		Bytes:  *selected.Bytes,
-		SHA256: *selected.SHA256,
-		Status: selected.Status,
+		Subdirectory: subdirectory,
+		Host:         address.String(),
+		Path:         *path,
+		Bytes:        *selected.Bytes,
+		SHA256:       *selected.SHA256,
+		Status:       selected.Status,
 	}, nil
 }

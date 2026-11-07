@@ -77,7 +77,25 @@ func ReadBatchSaved(ctx context.Context, directory, host string) ([]byte, BatchA
 	if err != nil {
 		return nil, BatchArtifact{}, err
 	}
-	body, err := readBatchFile(ctx, root, name, batchreport.MaxArtifactBytes)
+	var body []byte
+	if selected.Subdirectory == "tftp" {
+		// Anchor the intermediate directory too: NOFOLLOW on tftp/name alone
+		// would still follow an inward-pointing tftp directory symlink.
+		dir, openErr := root.OpenFile("tftp", os.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+		if openErr != nil {
+			return nil, BatchArtifact{}, openErr
+		}
+		defer dir.Close()
+		fd, openErr := unix.Openat(int(dir.Fd()), name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+		if openErr != nil {
+			return nil, BatchArtifact{}, openErr
+		}
+		file := os.NewFile(uintptr(fd), name)
+		defer file.Close()
+		body, err = readBatchContents(ctx, file, batchreport.MaxArtifactBytes)
+	} else {
+		body, err = readBatchFile(ctx, root, name, batchreport.MaxArtifactBytes)
+	}
 	if err != nil {
 		return nil, BatchArtifact{}, err
 	}
@@ -85,7 +103,7 @@ func ReadBatchSaved(ctx context.Context, directory, host string) ([]byte, BatchA
 	if int64(len(body)) != selected.Bytes || !strings.EqualFold(hex.EncodeToString(sum[:]), selected.SHA256) {
 		return nil, BatchArtifact{}, ErrBatchEvidence
 	}
-	artifact := BatchArtifact{Host: selected.Host, Batch: directory, Path: filepath.Join(directory, name), Bytes: selected.Bytes, SHA256: hex.EncodeToString(sum[:]), Status: selected.Status}
+	artifact := BatchArtifact{Host: selected.Host, Batch: directory, Path: filepath.Join(directory, selected.Subdirectory, name), Bytes: selected.Bytes, SHA256: hex.EncodeToString(sum[:]), Status: selected.Status}
 	return body, artifact, nil
 }
 
@@ -115,6 +133,10 @@ func readBatchFile(ctx context.Context, root *os.Root, name string, limit int64)
 		return nil, err
 	}
 	defer f.Close()
+	return readBatchContents(ctx, f, limit)
+}
+
+func readBatchContents(ctx context.Context, f *os.File, limit int64) ([]byte, error) {
 	info, err := f.Stat()
 	if err != nil {
 		return nil, err

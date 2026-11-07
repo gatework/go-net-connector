@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gatework/go-net-connector/archive"
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/parallel"
 	"github.com/gatework/go-net-connector/transfer"
@@ -16,9 +17,14 @@ var ErrMissingCredentials = errors.New("netdisco: missing credentials")
 type Artifact struct {
 	Backup   *connector.BackupReceipt
 	Transfer *transfer.Receipt
+	Archive  *archive.Receipt
 }
 
 func (a Artifact) clone() Artifact {
+	if a.Archive != nil {
+		v := a.Archive.Clone()
+		a.Archive = &v
+	}
 	if a.Backup != nil {
 		v := a.Backup.Clone()
 		a.Backup = &v
@@ -155,6 +161,9 @@ func Run(ctx context.Context, p Plan, o RunOptions) (Batch, error) {
 			out.Status = string(outcomeStatusMissingCredentials)
 			e = nil
 		case p.mode == modeTFTP && a.Transfer != nil && a.Transfer.Reported():
+			if a.Archive != nil && !a.Archive.Complete() && e == nil {
+				e = connector.ErrIncomplete
+			}
 			out.Status = string(outcomeStatusReportedUploaded)
 			if e != nil {
 				out.Status = string(outcomeStatusReportedWithError)
@@ -169,7 +178,7 @@ func Run(ctx context.Context, p Plan, o RunOptions) (Batch, error) {
 			if e != nil {
 				out.Status = string(outcomeStatusSavedWithError)
 			}
-		case errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded) && ctx.Err() != nil:
+		case (errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded)) && ctx.Err() != nil:
 			out.Status = string(outcomeStatusInterrupted)
 		default:
 			out.Status = string(outcomeStatusFailed)

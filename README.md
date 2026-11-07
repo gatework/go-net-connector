@@ -14,7 +14,7 @@ GOWORK=off go test ./...
 GOWORK=off go build -o bin/ ./cmd/...
 ```
 
-公开 Go API 的变更见 [迁移说明](docs/api-migration.md)。本次 CLI 直接迁移统一入口；配置发现、厂商命令及报告格式保持既有契约。
+公开 Go API 的变更见 [迁移说明](docs/api-migration.md)。当前版本统一使用平铺的 `net-connector.yml`，归档协议升级为 v2；迁移步骤见上述说明。
 
 系统需要 `ssh`；Telnet 连接另需系统 `telnet`。SSH 归档服务器需要管理员安装 `tftp-archive`，默认路径 `/usr/local/bin/tftp-archive`。客户端只探测协议版本和能力，不上传或安装 worker。
 
@@ -28,6 +28,8 @@ GOWORK=off go build -o bin/ ./cmd/...
 bin/netman --help
 bin/netman config init --non-interactive
 bin/netman config show
+bin/netman config defaults
+bin/netman config defaults --for tftp --json
 bin/netman inventory list --hosts 192.0.2.0/24
 bin/netman backup plan --method cli --json
 bin/netman backup run --json
@@ -38,9 +40,9 @@ bin/netman backup export 192.0.2.1 --batch ./backups/具体批次 --output ./sav
 bin/netman completion zsh
 ```
 
-备份默认全量选择和批次归档。配置采集默认 selected；TFTP 默认 verified，要求服务器核验并取回文件、本地保存成功。`--success-policy selected` 可显式选择以设备报告判断上传结果。文本文件统一为 `设备名称-IP.txt`；可使用 `--sample` 抽样、`--success-policy strict` 严格判定及 `--layout flat` 平铺。设备名缺失时使用 `unnamed`。CLI 不生成 `.raw` 旁车：正常编码转换为 UTF-8；设备配置本身无法无损解码时保留原编码字节并报告编码警告，不猜字、不丢字，也不伪装成有效 UTF-8。
+备份默认全量选择和批次归档。配置采集默认 selected；TFTP 默认 verified，要求服务器核验并取回文件、本地持久化及暂存清理确认成功。`--success-policy selected` 可显式选择以设备报告判断上传结果。文本文件统一为 `设备名称-IP.txt`；可使用 `--sample` 抽样、`--success-policy strict` 严格判定及 `--layout flat` 平铺。设备名缺失时使用 `unnamed`。CLI 不生成 `.raw` 旁车：正常编码转换为 UTF-8；设备配置本身无法无损解码时保留原编码字节并报告编码警告，不猜字、不丢字，也不伪装成有效 UTF-8。
 
-帮助、版本、补全、配置查看和初始化不访问设备或清单；清单预览和备份规划可访问清单但不连接设备。拓扑规划需要只读访问设备，应用前会重新核验。
+帮助、版本、补全、默认配置打印、配置查看和初始化不访问设备或清单；清单预览和备份规划可访问清单但不连接设备。拓扑规划需要只读访问设备，应用前会重新核验。
 
 退出码：`0` 策略成功，`1` 不完整或没有可执行目标，`2` 参数、清单或 I/O 错误，`130` 中断。中文进度写 stderr，JSON 结果写 stdout。批次保留 `plan.json`、`events.jsonl`、`summary.json` 和 `summary.txt`。
 
@@ -66,14 +68,14 @@ bin/netman completion zsh
 优先级为 CLI > 原进程环境 > YAML > `.env` > 默认值。配置发现包括系统目录、用户目录、程序目录和启动目录，不向上搜索父目录。相对路径按配置来源解析；读取不会修改进程环境。YAML 禁止别名、重复键、多文档和非字符串键。
 
 ```yaml
-# backup.yml
+# net-connector.yml
 netdisco:
   url: https://netdisco.example.invalid
 ```
 
 起步配置只填写环境事实；并发、目录、筛选等按需覆盖。配置备份、TFTP 备份和拓扑任务共用 `backup.parallel`，需要时可用 `topology.parallel` 单独覆盖。初始化省略继承的默认值，明确设置的 false 和空筛选会保留。`config init --json` 返回实际创建的文件；`backup export --output 文件` 默认输出中文回执，可加 `--json` 获取元数据；直接导出到 stdout 始终只包含配置原文件。
 
-程序名为 `netman`，配置发现继续使用 `~/.config/net-connector/`、`net-connector.yml` 与 `backup.yml`，既有 `NC_`/`ND_` 环境变量继续有效。归档端部署与协议说明见 [tftp-archive](docs/tftp-archive.md)。
+程序名为 `netman`，所有用途只发现 `net-connector.yml`，默认初始化到 `~/.config/net-connector/net-connector.yml`，不再发现 `backup.yml` 或 `topology.yml`。文件内直接使用 `netdisco`、`inventory`、`ssh`、`backup`、`tftp`、`topology` 分组，不再使用 `common` 或用途下的重复嵌套。既有 `NC_`/`ND_` 环境变量继续有效。归档端部署与协议说明见 [tftp-archive](docs/tftp-archive.md)。
 
 密码不放在 YAML。环境变量包括 `ND_USERNAME`、`ND_PASSWORD` 或 `ND_API_KEY`，以及 `NC_DEVICE_USERNAME`、`NC_DEVICE_PASSWORD`、`NC_ENABLE_PASSWORD`。使用 API key 且启用清单缓存时，需提供非敏感账户标识 `ND_USERNAME` 或 `ND_CACHE_NAMESPACE`，避免不同账户复用同一份缓存。设备凭据支持 `NC_<VENDOR>_USERNAME/PASSWORD/ENABLE_PASSWORD`，例如 `NC_H3C_PASSWORD`。显式通用 CLI 凭据覆盖对应厂商值。终端可用 `--ask-password`；自动化可用 `--stdin-credentials`，先发送一行凭据 JSON，执行备份或拓扑应用前再发送 `RUN`。
 
@@ -156,8 +158,16 @@ CLI 上传命令默认最多等待 180 秒，通过 `tftp.upload_timeout`（秒�
 
 ### 最小环境配置与统一结果展示
 
-`backup.yml` 只需保留本站 TFTP 服务器、归档根目录及设备例外；清单服务与本机目录等共享配置放在 `net-connector.yml` 一处。空筛选、空 hosts 映射、缓存默认值和重复 SSH 设置无需填写。CLI 备份与 TFTP 使用一致的分区展示，输出备份方式、目录、文本报告及 JSON 报告；自动化继续使用 `--json --quiet`。成功策略可用 `backup.success_policy`、`NC_BACKUP_SUCCESS_POLICY` 或 `--success-policy` 覆盖，优先级遵循统一约定。
+所有站点设置集中在 `net-connector.yml` 一处，包括清单服务、TFTP 服务器、归档根目录、设备例外与本机目录。空筛选、空 hosts 映射、缓存默认值和重复 SSH 设置无需填写。CLI 备份与 TFTP 使用一致的分区展示，输出备份方式、目录、文本报告及 JSON 报告；自动化继续使用 `--json --quiet`。成功策略可用 `backup.success_policy`、`NC_BACKUP_SUCCESS_POLICY` 或 `--success-policy` 覆盖，优先级遵循统一约定。
 
 默认 H3C、Radware、Centec 采用 management 上传源，Huawei 默认源文件为 `flash:/startup.cfg`，NX-OS 默认 management VRF；环境不同仍可显式覆盖。Hillstone 路由域和逐设备例外保留为站点设置。
 
 CLI 文件备份的完整性与文本编码质量分别统计。设备原生配置中截断的 UTF-8 不会被误猜为 GBK；保存文件标记 `original-bytes`，`text_warning` 给出异常字节位置，正文可能不是合法 UTF-8。TFTP 文件通过 SHA-256 核验也不表示原生文本编码合法。CLI 当前配置与厂商原生启动文件具有不同范围，不能仅按状态名或文件哈希直接判定结果矛盾。
+
+### 查看默认值与归档 v2
+
+`netman config defaults` 打印纯 YAML；`--json` 打印 JSON；`--for backup|tftp|topology` 选择命令的成功策略默认值。输出来自程序内置默认值，不读取本地配置、环境覆盖、凭据或清单。`config show` 则展示加载后的生效配置及来源。默认值不必写入站点文件，通常只维护实际环境差异；`.env` 仍只承载凭据等环境值。
+
+归档准备/排队、设备上传、核验及本地提交、清理分别有 240/180/100/10 秒默认窗口。准备完成后才开始设备上传窗口；它仍受调用方总 context 约束。可选 `tftp.archive_prepare_timeout`、`tftp.upload_timeout`、`tftp.archive_verify_timeout`、`tftp.archive_cleanup_timeout` 按秒调整，环境变量分别为 `NC_TFTP_ARCHIVE_PREPARE_TIMEOUT`、`NC_TFTP_UPLOAD_TIMEOUT`、`NC_TFTP_ARCHIVE_VERIFY_TIMEOUT`、`NC_TFTP_ARCHIVE_CLEANUP_TIMEOUT`。所有默认值由归档定义统一生成，不重复维护。
+
+`netman` 与 `tftp-archive` 必须同步升级到协议 v2，旧 worker 在设备连接前预检失败。清理失败不会撤销已核验和已持久化的文件，但批次仍不完整；可使用指定批次导出已保存文件。

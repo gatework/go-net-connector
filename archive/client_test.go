@@ -33,10 +33,10 @@ func TestClientVerifiesBothArchivesBeforeCleanup(t *testing.T) {
 		os.WriteFile(filepath.Join(root, "running.txt"), []byte("running config"), 0600)
 		return transfer.Receipt{Server: "192.0.2.9", Path: "running.txt", Verification: "device_reported"}, nil
 	})
-	if e != nil || !got.Verified() || got.LocalPath == "" || got.ArchivePath == "" {
+	if e != nil || !got.Receipt.Verified() || got.Receipt.Local.Path == "" || got.Receipt.Server.ArchivePath == "" {
 		t.Fatal(got, e)
 	}
-	b, e := os.ReadFile(got.LocalPath)
+	b, e := os.ReadFile(got.Receipt.Local.Path)
 	if e != nil || string(b) != "running config" {
 		t.Fatal(e)
 	}
@@ -61,7 +61,7 @@ func TestClientRejectsChannelWithoutDeadlinesBeforeIO(t *testing.T) {
 			return nil
 		}}, nil
 	}
-	client, err := NewClient(ClientOptions{Root: root, Directory: t.TempDir(), Launcher: launcher, Timeout: 20 * time.Millisecond})
+	client, err := NewClient(ClientOptions{Root: root, Directory: t.TempDir(), Launcher: launcher, Timeouts: Timeouts{Prepare: 20 * time.Millisecond}})
 	if err != nil {
 		t.Fatal(err)
 	}

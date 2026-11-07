@@ -18,7 +18,7 @@ type Channel struct {
 type Launcher func(context.Context) (Channel, error)
 
 // runChannel owns a launched channel, including partial returns with an error.
-func runChannel(ctx context.Context, launch Launcher, timeout time.Duration, run func(*Protocol) error, retain func(func() error)) (err error) {
+func runChannel(ctx context.Context, launch Launcher, run func(*Protocol) error, retain func(func() error)) (err error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -34,12 +34,12 @@ func runChannel(ctx context.Context, launch Launcher, timeout time.Duration, run
 		if ch.Close != nil {
 			e = errors.Join(e, closeChannel())
 		}
-		return &Error{cause: e}
+		return channelFailure(e)
 	}
 	if ch.Close != nil {
 		defer func() {
 			if joined := errors.Join(err, closeChannel()); joined != nil {
-				err = &Error{cause: joined}
+				err = channelFailure(joined)
 			}
 		}()
 	}
@@ -69,7 +69,16 @@ func runChannel(ctx context.Context, launch Launcher, timeout time.Duration, run
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return run(NewProtocol(ch.Input, ch.Output, timeout))
+	return run(NewProtocol(ch.Input, ch.Output))
+}
+
+func channelFailure(cause error) error {
+	phase := ""
+	var primary *Error
+	if errors.As(cause, &primary) {
+		phase = primary.Phase
+	}
+	return &Error{Phase: phase, cause: cause}
 }
 
 func nilEndpoint(v any) bool {

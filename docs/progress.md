@@ -378,3 +378,34 @@ TFTP `upload_timeout` 现在同时限制平台的源文件发现和上传命令�
 验证：`GOWORK=off go build ./cmd/...`、`go vet ./...`、`go test -p 1 -count=1 ./...`、核心资源/回执包 `go test -race -p 1 -count=1 ./archive ./connector ./fleet ./internal/batchreport ./internal/bootstrap ./internal/workflow ./storage ./topology ./transfer`、`go mod verify`、`go mod tidy -diff` 和 `python3 scripts/verify-consumer.py` 通过；Linux/Darwin × amd64/arm64 四组 `CGO_ENABLED=0` 命令交叉构建通过。首次 `goimports -l .` 找到 Palo Alto 拓扑文件一处 import 排序，修正后复查通过。全程离线 fixture 和临时消费者环境，没有访问网络设备、真实库存源或远端归档服务。
 
 独立复核又覆盖了报告与 JSON 的混合产物形状，发现 TFTP 失败结果带有 backup 元数据时泛用汇总会多出两项字段。新增该组合用例，确认旧实现先失败；按模式限制兼容字段后通过。复核者确认本轮 DTO 与 Archive 文件拆分无 Critical/Important 问题。
+
+## 2026-11-07：归档 v2、默认值打印与单文件配置
+
+本轮按确认方案实现归档事务阶段期限与完整回执，并根据后续要求收敛配置入口。
+
+- 归档协议直接升级到 v2；版本及阶段预算在文件操作前验证。准备/排队、设备上传、核验及本地持久化、清理默认分别为 240/180/100/10 秒。Pool 排队与 Client 准备沿用同一绝对期限，ready 成功交付后才开始完整上传窗口；正文、尾帧及本地提交共用 Verify 期限，cleanup 收到后才切入清理窗口。移除 Protocol.Expect 隐式刷新期限与固定 280 秒。阶段取消仍受父 context 约束，借用回调与 Sync/Fsync 保持合作式取消。
+- `archive.Result` 分开保存设备报告与 `archive.Receipt`。后者保留服务器证明、本地 storage 回执、清理确认状态；只有服务器核验、本地 durable 且没有前序错误才清理。上传已报告但返回错误时仍可核验；清理失败保留成果且批次不成功。Fleet、事件与 schema v2 报告统一映射这些事实，保留既有投影字段并新增 archive 详情。
+- 修正 TFTP 实际存放于批次 `tftp/` 而导出只查根目录的问题。由报告模式选择固定位置，目录 FD 与 NOFOLLOW 同时约束中间子目录和最终文件；不信任报告绝对目录，支持整体搬移后的导出。
+- 增加 `netman config defaults [--for backup|tftp|topology] [--json]`，默认纯 YAML，不读取配置、环境覆盖、凭据、标准输入或清单。初始化与自动发现只使用平铺 `net-connector.yml`；旧 backup.yml/topology.yml 自动发现、common 容器及用途重复嵌套移除。现有文件不被自动删除或改写，`.env` 仍用于凭据。新设置的默认值和 worker 路径由 archive 定义，config.Defaults 与库零值复用；工作流只传递一份 ArchiveTimeouts，移除重复 UploadTimeout 字段。
+- 补充 GLOSSARY、迁移、归档协议、架构、README、同源命令参考与实施账本。源码消费者检查现在覆盖公开归档 v2 返回类型、实际本地事务及 defaults 输出。
+
+失败边界验证覆盖：同名目标锁等待后的完整上传窗口、Pool 队列与目标准备共用期限、600 秒上传预算、ready 慢发送及已交付控制帧跨期、启动器超时保留取消与 I/O 错误树、设备已报告但上传截止后继续核验、本地提交前后失败、delivered 后慢本地提交、清理超时/丢确认、主错误不被次要持久化错误覆盖、内部取消不冒充用户中断、协议超时诊断保留 Timeout::Error、真实 Upload→Report→搬移→Export、目录/文件符号链接与根目录同名产物。独立只读复核发现的上述错误分类和阶段交接问题均已修正并由回归用例固定；最终复核未发现其他实质问题。
+
+本地验证环境：Go 1.27.3 / linux amd64。起始根分区已满，清理可再生 Go 构建缓存后完成验证，未删除仓库资料；使用 /dev/shm 与独立构建缓存控制磁盘用量。
+
+通过的检查：
+
+- `GOWORK=off go build -p 1 -o /tmp/netconnector-v2-bin/ ./cmd/...`
+- `GOWORK=off NC_TEST_ARCHIVE_WORKER=/tmp/netconnector-v2-bin/tftp-archive go test -p 1 -count=1 ./...`
+- `GOWORK=off go test -race -p 1 -shuffle=on -count=1 ./...`
+- `GOWORK=off go vet -p 1 ./...`
+- `GOWORK=off go run golang.org/x/tools/cmd/goimports@v0.52.0 -l .` 无输出；`git diff --check` 通过。
+- `GOWORK=off python3 scripts/verify-consumer.py` 通过，仍消费正式固定 go-expect v0.4.0，无外部依赖替换。
+
+本轮仅有离线 fixture、本地管道、临时文件及安装后的本地 worker 证据；未访问生产设备、真实清单或远端归档，未提交、推送、发布或部署。协议 v2 需要客户端与 worker 同步升级；旧用途 YAML 需要一次性人工迁移。
+
+收尾回归补齐阶段 deadline 设置失败的退出路径：切换阶段时先清空已停止的回调，避免设置新 deadline 失败后再次等待旧回调；取消后的错误帧不再尝试写入。失败注入用例及 `go test -race -p 1 -count=1 ./archive ./fleet` 通过。
+
+## v0.2.0 发布准备
+
+用户明确授权发布到 GitHub。因协议、配置格式和公开 API 变更，版本从 v0.1.0 升为 v0.2.0，并补充发行及迁移说明。保留无关的未跟踪 `docs/superpowers/` 草案，不纳入发布。计划推送本地 main 到同名新分支，不修改仓库可见性或默认分支；等待该提交完整 CI 和不可变打包通过后，校验并发布同一份 CI 产物，最后读回标签与附件身份。此段只记录发布准备，不预先声明发布成功。

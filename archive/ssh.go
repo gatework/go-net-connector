@@ -14,7 +14,8 @@ import (
 	"time"
 )
 
-const defaultWorkerPath = "/usr/local/bin/tftp-archive"
+// DefaultWorkerPath is used by both archive construction and CLI defaults.
+const DefaultWorkerPath = "/usr/local/bin/tftp-archive"
 
 // sshMaster owns a single foreground ControlMaster and its private socket.
 // The password, when configured, is provided only to a private askpass helper.

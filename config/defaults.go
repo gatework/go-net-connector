@@ -4,7 +4,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/gatework/go-net-connector/archive"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -26,14 +28,11 @@ func Defaults(mode string) map[string]any {
 		"ssh":    map[string]any{"protocol": "ssh", "host_key_policy": "accept_new", "log_level": "info"},
 		"backup": map[string]any{"directory": "./backups", "parallel": 4, "limit_per_vendor": 0, "layout": "batch"},
 	}
-	if mode == "topology" {
-		// Topology inherits backup.parallel. topology.parallel remains an
-		// optional override so a single batch default applies across commands.
-		m["topology"] = map[string]any{"mode": "plan", "cache_mode": "prefer", "directory": "./topologys", "description_format": "To_%{neighbor}_%{port}", "abbreviate_ports": true, "lowercase_ports": false, "neighbor_name_prefixes": []any{}}
-	}
-	if mode == "backup" || mode == "tftp" {
-		m["tftp"] = map[string]any{"ssh_worker_path": "/usr/local/bin/tftp-archive", "upload_timeout": 180}
-	}
+	// One flat document serves every command; only the command's success policy
+	// default differs. Topology inherits backup.parallel unless explicitly set.
+	m["topology"] = map[string]any{"mode": "plan", "cache_mode": "prefer", "directory": "./topologys", "description_format": "To_%{neighbor}_%{port}", "abbreviate_ports": true, "lowercase_ports": false, "neighbor_name_prefixes": []any{}}
+	timeouts := archive.DefaultTimeouts()
+	m["tftp"] = map[string]any{"ssh_worker_path": archive.DefaultWorkerPath, "upload_timeout": int(timeouts.Upload / time.Second), "archive_prepare_timeout": int(timeouts.Prepare / time.Second), "archive_verify_timeout": int(timeouts.Verify / time.Second), "archive_cleanup_timeout": int(timeouts.Cleanup / time.Second)}
 	policy := "selected"
 	if mode == "tftp" {
 		policy = "verified"
@@ -69,14 +68,7 @@ func Initialize(s Snapshot, name string) ([]string, error) {
 // InitializeSelected publishes only the files whose creation was approved.
 func InitializeSelected(s Snapshot, name string, createConfig, createEnv bool) ([]string, error) {
 	doc := s.initializationValues()
-	if name == "topology" {
-		delete(doc, "backup")
-		setPath(doc, "topology.mode", "plan")
-	}
 	path, env := s.InitPaths()
-	if filepath.Base(path) == "net-connector.yml" {
-		doc = map[string]any{name: doc}
-	}
 	data, e := yaml.Marshal(doc)
 	if e != nil {
 		return nil, ErrInvalid

@@ -31,9 +31,9 @@ func tftpSettings(services *bootstrap.Services) (workflow.TFTPSettings, error) {
 	}
 	workerPath, _ := services.Policy().Value("tftp.ssh_worker_path").(string)
 	return workflow.TFTPSettings{
+		ArchiveTimeouts:   services.ArchiveTimeouts(),
 		Policy:            policy,
 		LimitPerVendor:    services.Limit(),
-		UploadTimeout:     services.TFTPUploadTimeout(),
 		ArchiveWorkerPath: workerPath,
 		ArchivePassword:   services.ArchivePassword,
 	}, nil

@@ -25,7 +25,7 @@ func TestInitExitsWithoutInventoryAndNeverCopiesPassword(t *testing.T) {
 	if code := r.Run(context.Background()); code != 0 {
 		t.Fatal(code, errout.String())
 	}
-	b, e := os.ReadFile(filepath.Join(root, ".config/net-connector/backup.yml"))
+	b, e := os.ReadFile(filepath.Join(root, ".config/net-connector/net-connector.yml"))
 	if e != nil || bytes.Contains(b, []byte("secret-value")) {
 		t.Fatal(string(b), e)
 	}

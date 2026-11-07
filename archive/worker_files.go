@@ -200,6 +200,9 @@ func persistMode(ctx context.Context, parent int, name string, source int, sourc
 	if e != nil {
 		return e
 	}
+	if e = ctx.Err(); e != nil {
+		return e
+	}
 	if replace {
 		if _, _, e = readFile(ctx, parent, name, true, nil); e != nil {
 			return e
@@ -211,7 +214,10 @@ func persistMode(ctx context.Context, parent int, name string, source int, sourc
 	if e != nil {
 		return e
 	}
-	return unix.Fsync(parent)
+	if e = unix.Fsync(parent); e != nil {
+		return e
+	}
+	return ctx.Err()
 }
 func verifyLock(parent int, name string, fd int) error {
 	s, e := statFD(fd)
@@ -232,9 +238,11 @@ func lockArchiveTarget(ctx context.Context, parent int, name string) (int, error
 		unix.Close(fd)
 		return -1, e
 	}
-	ctx, cancel := context.WithTimeout(ctx, 240*time.Second)
-	defer cancel()
 	for {
+		if e := ctx.Err(); e != nil {
+			unix.Close(fd)
+			return -1, e
+		}
 		e = unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB)
 		if e == nil {
 			return fd, nil

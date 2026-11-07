@@ -18,6 +18,7 @@ import (
 type PoolOptions struct {
 	Root, Directory, WorkerPath, Password string
 	Parallel                              int
+	Timeouts                              Timeouts
 }
 
 // PrepareStage identifies the safe phase of archive service preparation.
@@ -37,6 +38,7 @@ type PrepareProgress struct {
 }
 
 type Pool struct {
+	timeouts                             Timeouts
 	clients                              []*Client
 	masters                              []*sshMaster
 	available                            chan *Client
@@ -52,6 +54,10 @@ type Pool struct {
 }
 
 func NewPool(o PoolOptions) (*Pool, error) {
+	timeouts, err := o.Timeouts.normalize()
+	if err != nil {
+		return nil, err
+	}
 	if o.Parallel < 1 || o.Parallel > 500 || o.Directory == "" || strings.ContainsAny(o.Password, "\x00\r\n") {
 		return nil, ErrArchive
 	}
@@ -61,12 +67,12 @@ func NewPool(o PoolOptions) (*Pool, error) {
 	}
 	worker := o.WorkerPath
 	if worker == "" {
-		worker = defaultWorkerPath
+		worker = DefaultWorkerPath
 	}
 	if !safeWorkerPath(worker) {
 		return nil, ErrArchive
 	}
-	p := &Pool{available: make(chan *Client, o.Parallel), stop: make(chan struct{}), closeDone: make(chan struct{})}
+	p := &Pool{timeouts: timeouts, available: make(chan *Client, o.Parallel), stop: make(chan struct{}), closeDone: make(chan struct{})}
 	clientRoot := root
 	if strings.HasPrefix(root, "ssh://") {
 		p.endpoint, clientRoot, err = parseArchiveEndpoint(root)
@@ -84,7 +90,7 @@ func NewPool(o PoolOptions) (*Pool, error) {
 		} else {
 			launch = LocalLauncher()
 		}
-		client, e := NewClient(ClientOptions{Root: clientRoot, Directory: o.Directory, Launcher: launch})
+		client, e := NewClient(ClientOptions{Root: clientRoot, Directory: o.Directory, Launcher: launch, Timeouts: timeouts})
 		if e != nil {
 			return nil, e
 		}
@@ -286,35 +292,42 @@ func (p *Pool) preparationWorkers() int {
 }
 
 // Upload borrows one of at most Parallel slots and returns it after the transaction.
-func (p *Pool) Upload(ctx context.Context, filename, archiveName string, upload func(context.Context, string) (transfer.Receipt, error)) (transfer.Receipt, error) {
+func (p *Pool) Upload(ctx context.Context, filename, archiveName string, upload func(context.Context, string) (transfer.Receipt, error)) (Result, error) {
+	prepare, cancelPrepare := context.WithTimeout(ctx, p.timeouts.Prepare)
+	defer cancelPrepare()
 	p.mu.Lock()
 	if !p.prepared || p.closed {
 		p.mu.Unlock()
-		return transfer.Receipt{}, ErrArchive
+		return Result{}, ErrArchive
 	}
 	p.active.Add(1)
 	p.mu.Unlock()
 	defer p.active.Done()
 	select {
-	case <-ctx.Done():
-		return transfer.Receipt{}, ctx.Err()
+	case <-prepare.Done():
+		return Result{}, stageFailure("prepare", prepare.Err())
 	case <-p.stop:
-		return transfer.Receipt{}, ErrArchive
+		return Result{}, ErrArchive
 	case client := <-p.available:
 		defer func() { p.available <- client }()
 		select {
 		case <-p.stop:
-			return transfer.Receipt{}, ErrArchive
+			return Result{}, ErrArchive
 		default:
 		}
 		callCtx, cancel := context.WithCancel(ctx)
 		stop := context.AfterFunc(&poolDoneContext{done: p.stop}, cancel)
 		defer func() { stop(); cancel() }()
-		receipt, err := client.Upload(callCtx, filename, archiveName, upload)
-		if p.endpoint != nil && receipt.ArchivePath != "" {
+		// Prepare admission must also observe Pool.Close, while keeping its
+		// original deadline across the local queue and the server's target lock.
+		admission, cancelAdmission := context.WithCancel(prepare)
+		stopAdmission := context.AfterFunc(callCtx, cancelAdmission)
+		defer func() { stopAdmission(); cancelAdmission() }()
+		receipt, err := client.upload(callCtx, admission, filename, archiveName, upload)
+		if p.endpoint != nil && receipt.Receipt.Server != nil && receipt.Receipt.Server.ArchivePath != "" {
 			u := *p.endpoint
-			u.Path, u.RawPath = receipt.ArchivePath, ""
-			receipt.ArchivePath = u.String()
+			u.Path, u.RawPath = receipt.Receipt.Server.ArchivePath, ""
+			receipt.Receipt.Server.ArchivePath = u.String()
 		}
 		return receipt, err
 	}

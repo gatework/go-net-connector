@@ -13,7 +13,7 @@
 子命令：
   backup             配置备份、目标规划与批次导出
   completion         生成无需配置或凭据的命令补全脚本
-  config             离线初始化、查看和检查本地配置
+  config             打印默认值、初始化、查看和检查本地配置
   help               显示指定命令的中文帮助
   inventory          查看设备清单，不连接设备
   topology           发现、规划和重新核验后应用拓扑变更
@@ -372,13 +372,14 @@
 ## netman config
 
 ```text
-离线初始化、查看和检查本地配置
+打印默认值、初始化、查看和检查本地配置
 
 用法：
   netman config [子命令] [选项]
 
 子命令：
   check              仅检查本地配置，不验证远程访问或设备凭据
+  defaults           打印内置默认配置，不读取本地配置、环境凭据或清单
   init               创建缺失的私有配置文件后退出，不访问清单或设备
   show               显示有效的非敏感配置及其来源
 
@@ -411,6 +412,29 @@
 
 示例：
   netman config check --for backup
+
+使用 netman help <命令路径> 查看详细帮助。
+```
+
+## netman config defaults
+
+```text
+打印内置默认配置，不读取本地配置、环境凭据或清单
+
+用法：
+  netman config defaults [选项]
+
+常用选项：
+  --for <用途>                 配置用途：backup、tftp 或 topology（默认：backup）
+  -h, --help                 显示当前命令的中文帮助
+  --json                     以 JSON 输出结果
+
+全局选项：
+  --config <文件>              最后加载的配置文件；相对路径从启动目录解析
+  --env-file <文件>            最后加载的环境文件；不修改进程环境
+
+示例：
+  netman config defaults --for backup
 
 使用 netman help <命令路径> 查看详细帮助。
 ```

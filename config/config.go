@@ -272,12 +272,6 @@ func Load(o Options) (Snapshot, error) {
 	paths := []string{}
 	for _, dir := range dirs {
 		paths = append(paths, filepath.Join(dir, "net-connector.yml"))
-		if o.Name == "topology" {
-			// Batch concurrency is shared with backup.yml. Only parallel is
-			// imported from this scope; topology-specific policy stays isolated.
-			paths = append(paths, filepath.Join(dir, "backup.yml"))
-		}
-		paths = append(paths, filepath.Join(dir, o.Name+".yml"))
 	}
 	apply := func(m map[string]any, source string) error {
 		normalizeSourceFiles(m)
@@ -301,57 +295,10 @@ func Load(o Options) (Snapshot, error) {
 		if e != nil {
 			return s, e
 		}
-		if o.Name == "topology" && filepath.Base(path) == "backup.yml" && path != selected {
-			used, importErr := applySharedBatchParallel(apply, m, path)
-			if importErr != nil {
-				return s, importErr
-			}
-			if used {
-				s.files = append(s.files, path)
-			}
-			continue
+		if e = apply(m, path); e != nil {
+			return s, e
 		}
-		if filepath.Base(path) == "net-connector.yml" {
-			for k := range m {
-				if k != "common" && k != "backup" && k != "topology" && k != "vxlan" && k != "wireless" {
-					return s, ErrInvalid
-				}
-			}
-			if c, ok := m["common"]; ok {
-				common, ok := c.(map[string]any)
-				if !ok {
-					return s, ErrInvalid
-				}
-				for k := range common {
-					if k != "netdisco" && k != "inventory" && k != "ssh" {
-						return s, ErrInvalid
-					}
-				}
-				if e = apply(common, path); e != nil {
-					return s, e
-				}
-			}
-			if o.Name == "topology" {
-				if _, e = applySharedBatchParallel(apply, m, path); e != nil {
-					return s, e
-				}
-			}
-			if c, ok := m[o.Name]; ok {
-				native, ok := c.(map[string]any)
-				if !ok {
-					return s, ErrInvalid
-				}
-				if e = apply(native, path); e != nil {
-					return s, e
-				}
-				s.applicable = true
-			}
-		} else {
-			if e = apply(m, path); e != nil {
-				return s, e
-			}
-			s.applicable = true
-		}
+		s.applicable = true
 		s.files = append(s.files, path)
 	}
 	yamlData := s.data
@@ -431,7 +378,7 @@ func Load(o Options) (Snapshot, error) {
 	}
 	s.configPath = selected
 	if s.configPath == "" {
-		s.configPath = filepath.Join(user, o.Name+".yml")
+		s.configPath = filepath.Join(user, "net-connector.yml")
 	}
 	s.envPath = envFile
 	if s.envPath == "" {
@@ -440,23 +387,6 @@ func Load(o Options) (Snapshot, error) {
 	return s, nil
 }
 
-// applySharedBatchParallel imports only backup.parallel into topology policy.
-// A combined file nests a mode beneath its root key; backup.yml contains the
-// mode object directly. Any explicit topology.parallel remains independent.
-func applySharedBatchParallel(apply func(map[string]any, string) error, document map[string]any, source string) (bool, error) {
-	section, ok := document["backup"].(map[string]any)
-	if !ok {
-		return false, nil
-	}
-	if nested, ok := section["backup"].(map[string]any); ok {
-		section = nested
-	}
-	parallel, ok := section["parallel"]
-	if !ok {
-		return false, nil
-	}
-	return true, apply(map[string]any{"backup": map[string]any{"parallel": parallel}}, source)
-}
 func hasPath(values map[string]any, path string) bool {
 	parts := strings.SplitN(path, ".", 2)
 	v, ok := values[parts[0]]

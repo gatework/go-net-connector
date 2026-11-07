@@ -14,38 +14,33 @@ import (
 )
 
 type Proof struct {
-	Bytes               int64
-	SHA256, ArchivePath string
-	Verified            bool
+	Bytes       int64  `json:"bytes"`
+	SHA256      string `json:"sha256"`
+	ArchivePath string `json:"archive_path"`
+	Verified    bool   `json:"verified"`
 }
 type Protocol struct {
-	last     frame
-	input    io.Writer
-	output   io.Reader
-	reader   *bufio.Reader
-	timeout  time.Duration
-	deadline time.Time
-	phase    string
+	last   frame
+	input  io.Writer
+	output io.Reader
+	reader *bufio.Reader
+	phase  string
 }
 
 var archiveHashPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
-func NewProtocol(input io.Writer, output io.Reader, timeout time.Duration) *Protocol {
-	if timeout <= 0 {
-		timeout = 280 * time.Second
-	}
-	return &Protocol{input: input, output: output, reader: bufio.NewReaderSize(output, ControlLimit+1), timeout: timeout}
+// NewProtocol owns framing, not stage timers. Every I/O call requires a context
+// with a deadline; callers share one context throughout each transaction stage.
+func NewProtocol(input io.Writer, output io.Reader) *Protocol {
+	return &Protocol{input: input, output: output, reader: bufio.NewReaderSize(output, ControlLimit+1)}
 }
 func (p *Protocol) bounded(ctx context.Context, read bool) (func(), error) {
 	if e := ctx.Err(); e != nil {
 		return nil, e
 	}
-	deadline := p.deadline
-	if deadline.IsZero() {
-		deadline = time.Now().Add(p.timeout)
-	}
-	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
-		deadline = d
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return nil, ErrArchive
 	}
 	if time.Now().After(deadline) {
 		return nil, context.DeadlineExceeded
@@ -80,6 +75,7 @@ func (p *Protocol) Send(ctx context.Context, request Request) error {
 		return e
 	}
 	defer stop()
+	request.Version = Version
 	b, e := json.Marshal(request)
 	if e != nil || len(b)+1 > ControlLimit {
 		return ErrArchive
@@ -90,7 +86,6 @@ func (p *Protocol) Send(ctx context.Context, request Request) error {
 	return ctx.Err()
 }
 func (p *Protocol) Expect(ctx context.Context, phase string) (Proof, error) {
-	p.deadline = time.Now().Add(p.timeout)
 	return p.readPhase(ctx, phase)
 }
 func (p *Protocol) readPhase(ctx context.Context, phase string) (Proof, error) {
@@ -106,11 +101,8 @@ func (p *Protocol) readPhase(ctx context.Context, phase string) (Proof, error) {
 	if e = ctx.Err(); e != nil {
 		return Proof{}, e
 	}
-	if time.Now().After(p.deadline) {
-		return Proof{}, context.DeadlineExceeded
-	}
 	var f frame
-	if json.Unmarshal(line, &f) != nil || !f.OK || f.Phase != phase {
+	if json.Unmarshal(line, &f) != nil || f.Version != Version || !f.OK || f.Phase != phase {
 		return Proof{}, ErrArchive
 	}
 	proof := Proof{Bytes: f.Bytes, SHA256: f.SHA256, ArchivePath: f.ArchivePath}
@@ -169,15 +161,21 @@ func (p *Protocol) Receive(ctx context.Context, proof Proof, sink io.Writer) (Pr
 }
 
 // Error reports safe archive metadata while preserving all underlying causes.
-type Error struct{ cause error }
+type Error struct {
+	Phase string
+	cause error
+}
 
-func (e *Error) Error() string    { return "archive: operation failed" }
-func (e *Error) GoString() string { return e.Error() }
-func (e *Error) Unwrap() error    { return e.cause }
+func (e *Error) Error() string        { return "archive: operation failed" }
+func (e *Error) GoString() string     { return e.Error() }
+func (e *Error) Unwrap() error        { return e.cause }
+func (e *Error) Is(target error) bool { return target == ErrArchive }
 func protocolFailure(ctx context.Context, cause error) error {
 	var deadline error
 	if errors.Is(cause, os.ErrDeadlineExceeded) {
 		deadline = context.DeadlineExceeded
 	}
-	return &Error{cause: errors.Join(ErrArchive, ctx.Err(), deadline, cause)}
+	// Error.Is supplies the archive sentinel. Keep the actual failure first so
+	// diagnostic consumers do not mistake that sentinel for the primary cause.
+	return &Error{cause: errors.Join(ctx.Err(), deadline, cause)}
 }

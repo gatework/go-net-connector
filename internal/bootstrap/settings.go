@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/gatework/go-net-connector/archive"
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/fleet"
@@ -41,13 +43,13 @@ type Services struct {
 // composition root. Policy remains available for provenance and less common
 // values, but runtime workflows do not repeatedly unpack these fields.
 type resolvedSettings struct {
-	parallel          int
-	limitPerVendor    int
-	backupDirectory   string
-	backupLayout      string
-	logDirectory      string
-	tftpUploadTimeout time.Duration
-	inventoryLimits   netdisco.Limits
+	parallel        int
+	limitPerVendor  int
+	backupDirectory string
+	backupLayout    string
+	logDirectory    string
+	archiveTimeouts archive.Timeouts
+	inventoryLimits netdisco.Limits
 }
 
 func New(policy config.Snapshot, secret Secret) (*Services, error) {
@@ -100,12 +102,11 @@ func New(policy config.Snapshot, secret Secret) (*Services, error) {
 
 func resolveSettings(policy config.Snapshot) (resolvedSettings, error) {
 	settings := resolvedSettings{
-		parallel:          integerValue(policy, "backup.parallel"),
-		limitPerVendor:    integerValue(policy, "backup.limit_per_vendor"),
-		backupDirectory:   stringValue(policy, "backup.directory"),
-		backupLayout:      stringValue(policy, "backup.layout"),
-		logDirectory:      stringValue(policy, "ssh.log_directory"),
-		tftpUploadTimeout: durationValue(policy, "tftp.upload_timeout"),
+		parallel:        integerValue(policy, "backup.parallel"),
+		limitPerVendor:  integerValue(policy, "backup.limit_per_vendor"),
+		backupDirectory: stringValue(policy, "backup.directory"),
+		backupLayout:    stringValue(policy, "backup.layout"),
+		logDirectory:    stringValue(policy, "ssh.log_directory"),
 		inventoryLimits: netdisco.Limits{
 			PageSize:          integerValue(policy, "netdisco.page_size"),
 			MaxPages:          integerValue(policy, "netdisco.max_pages"),
@@ -117,6 +118,27 @@ func resolveSettings(policy config.Snapshot) (resolvedSettings, error) {
 	}
 	if settings.backupLayout != "batch" && settings.backupLayout != "flat" || settings.parallel < 1 || settings.parallel > 500 || settings.limitPerVendor < 0 || settings.limitPerVendor > 5 {
 		return resolvedSettings{}, config.ErrInvalid
+	}
+	if policy.Value("tftp.upload_timeout") != nil {
+		values := []*time.Duration{&settings.archiveTimeouts.Prepare, &settings.archiveTimeouts.Upload, &settings.archiveTimeouts.Verify, &settings.archiveTimeouts.Cleanup}
+		for i, key := range []string{"archive_prepare_timeout", "upload_timeout", "archive_verify_timeout", "archive_cleanup_timeout"} {
+			var seconds float64
+			switch v := policy.Value("tftp." + key).(type) {
+			case int:
+				seconds = float64(v)
+			case float64:
+				seconds = v
+			default:
+				return resolvedSettings{}, &config.FieldError{Field: "tftp." + key, Problem: "required"}
+			}
+			if math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds <= 0 || seconds >= float64(time.Duration(1<<63-1))/float64(time.Second) || seconds*float64(time.Second) < 1 {
+				return resolvedSettings{}, &config.FieldError{Field: "tftp." + key, Problem: "invalid"}
+			}
+			*values[i] = time.Duration(seconds * float64(time.Second))
+		}
+		if err := settings.archiveTimeouts.Validate(); err != nil {
+			return resolvedSettings{}, err
+		}
 	}
 	return settings, nil
 }

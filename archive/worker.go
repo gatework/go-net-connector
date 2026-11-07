@@ -17,22 +17,22 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-const Version = 1
+const Version = 2
 const ControlLimit = 16 << 10
 const PayloadLimit = 64 << 20
 const ChunkSize = 64 << 10
 
 var ErrArchive = errors.New("tftp_archive_failed")
-var capabilities = []string{"target_lock", "preserve_previous", "stable_sha256", "binary_delivery", "confirmed_cleanup", "daily_latest"}
+var capabilities = []string{"target_lock", "preserve_previous", "stable_sha256", "binary_delivery", "confirmed_cleanup", "daily_latest", "stage_timeouts"}
 var archiveBatchPattern = regexp.MustCompile(`^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}(?:_[0-9]{2,})*|[0-9_-]+-ssh-[a-f0-9]{16})$`)
 
 // Serve owns one transaction. Readers/writers must unblock on disconnect or context cancellation.
 // A failure never removes an unconfirmed staging upload or replays a device operation.
 func Serve(ctx context.Context, input io.Reader, output io.Writer) (err error) {
-	deadline := time.Now().Add(280 * time.Second)
-	if limit, ok := ctx.Deadline(); ok && limit.Before(deadline) {
-		deadline = limit
-	}
+	return serve(ctx, input, output, controlTimeout)
+}
+
+func serve(parent context.Context, input io.Reader, output io.Writer, control time.Duration) (err error) {
 	var setters []func(time.Time) error
 	if d, ok := input.(interface{ SetReadDeadline(time.Time) error }); ok {
 		setters = append(setters, d.SetReadDeadline)
@@ -40,26 +40,50 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer) (err error) {
 	if d, ok := output.(interface{ SetWriteDeadline(time.Time) error }); ok {
 		setters = append(setters, d.SetWriteDeadline)
 	}
-	for _, set := range setters {
-		if e := set(deadline); e != nil {
-			return ErrArchive
-		}
-	}
-	stopped := make(chan struct{})
-	stop := context.AfterFunc(ctx, func() {
+	ctx := parent
+	finish := func() {}
+	setDeadline := func(deadline time.Time) error {
+		finish()
+		// A setter can fail before the new cancellation callback is installed.
+		// Never retain an already-stopped callback whose done channel cannot close.
+		finish = func() {}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(parent, deadline)
+		deadline, _ = ctx.Deadline()
 		for _, set := range setters {
-			_ = set(time.Now())
+			if e := set(deadline); e != nil {
+				cancel()
+				return e
+			}
 		}
-		close(stopped)
-	})
-	defer func() {
-		if !stop() {
-			<-stopped
+		stopped := make(chan struct{})
+		stop := context.AfterFunc(ctx, func() {
+			for _, set := range setters {
+				_ = set(time.Now())
+			}
+			close(stopped)
+		})
+		finish = func() {
+			if !stop() {
+				<-stopped
+			}
+			cancel()
 		}
-	}()
+		return ctx.Err()
+	}
+	setStage := func(timeout time.Duration) error {
+		if e := ctx.Err(); e != nil {
+			return e
+		}
+		return setDeadline(time.Now().Add(timeout))
+	}
+	defer func() { finish() }()
+	if e := setStage(control); e != nil {
+		return e
+	}
 
 	defer func() {
-		if err != nil {
+		if err != nil && ctx.Err() == nil {
 			_ = writeFrame(output, frame{OK: false, Error: "tftp_archive_failed"})
 		}
 	}()
@@ -70,6 +94,19 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer) (err error) {
 	}
 	if req.Action == "probe" {
 		return writeFrame(output, frame{OK: true, Phase: "ready", Version: Version, Capabilities: append([]string(nil), capabilities...)})
+	}
+	var timeouts Timeouts
+	if req.Action != "preflight" {
+		if req.Timeouts == nil {
+			return ErrArchive
+		}
+		timeouts, e = req.Timeouts.decode()
+		if e != nil {
+			return e
+		}
+		if e = setStage(timeouts.Prepare); e != nil {
+			return e
+		}
 	}
 	daily := dailyBatch(req.Batch)
 	if !isSafeName(req.Filename) || !isSafeName(req.ArchiveName) || !daily && !archiveBatchPattern.MatchString(req.Batch) {
@@ -130,6 +167,9 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer) (err error) {
 	}
 	defer unix.Close(lockFD)
 	verify := func() error {
+		if e := ctx.Err(); e != nil {
+			return e
+		}
 		if e := dirs.verify(); e != nil {
 			return e
 		}
@@ -158,7 +198,13 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer) (err error) {
 	if e = verify(); e != nil {
 		return e
 	}
+	// Once ready is published the client owns a full upload window. Neither a
+	// slow ready write nor scheduling after delivery may consume that window.
+	// The client enforces the upload budget; the worker keeps a bounded watchdog.
 	if e = writeFrame(output, frame{OK: true, Phase: "ready"}); e != nil {
+		return e
+	}
+	if e = setDeadline(time.Now().Add(timeouts.Upload + control)); e != nil {
 		return e
 	}
 	next, e := readRequest(reader)
@@ -166,7 +212,13 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer) (err error) {
 		return e
 	}
 	if next.Action != "verify" {
-		return nil
+		if next.Action == "abort" {
+			return nil
+		}
+		return ErrArchive
+	}
+	if e = setStage(timeouts.Verify); e != nil {
+		return e
 	}
 	if e = verify(); e != nil {
 		return e
@@ -195,7 +247,13 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer) (err error) {
 	if e = verify(); e != nil {
 		return e
 	}
+	verifyDeadline, _ := ctx.Deadline()
 	if e = writeFrame(output, frame{OK: true, Phase: "delivered"}); e != nil {
+		return e
+	}
+	// Local fsync/rename/directory sync still belong to verification. Only the
+	// next control frame gets handoff allowance; no file work uses this margin.
+	if e = setDeadline(verifyDeadline.Add(control)); e != nil {
 		return e
 	}
 	action, e := readRequest(reader)
@@ -203,6 +261,9 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer) (err error) {
 		return e
 	}
 	if action.Action == "cleanup" {
+		if e = setStage(timeouts.Cleanup); e != nil {
+			return e
+		}
 		if action.SHA256 != digest {
 			return ErrArchive
 		}
@@ -222,7 +283,13 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer) (err error) {
 		if e = unix.Fsync(dirs.root); e != nil {
 			return e
 		}
+		if e = ctx.Err(); e != nil {
+			return e
+		}
 		return writeFrame(output, frame{OK: true, Phase: "complete"})
 	}
-	return nil
+	if action.Action == "abort" {
+		return nil
+	}
+	return ErrArchive
 }

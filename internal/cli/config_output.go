@@ -1,13 +1,38 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 
+	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/internal/display"
 	"go.yaml.in/yaml/v3"
 )
+
+func (r Runtime) renderDefaults(scope string, jsonOutput bool) int {
+	data := config.Defaults(scope)
+	var body []byte
+	var err error
+	if jsonOutput {
+		body, err = json.MarshalIndent(data, "", "  ")
+		body = append(body, '\n')
+	} else {
+		body, err = yaml.Marshal(data)
+	}
+	if err != nil {
+		return r.fail("netman", err)
+	}
+	n, err := r.Output.Write(body)
+	if err == nil && n != len(body) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		return r.fail("netman", err)
+	}
+	return 0
+}
 
 func (r Runtime) renderInitialization(created []string, scope string, cause error, jsonOutput bool) int {
 	if jsonOutput {

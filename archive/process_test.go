@@ -29,7 +29,7 @@ func TestInstalledWorkerCLI(t *testing.T) {
 	}{
 		{"help", []string{"--help"}, 0, "用法：tftp-archive"},
 		{"short help", []string{"-h"}, 0, "用法：tftp-archive"},
-		{"version", []string{"--version"}, 0, "tftp-archive 协议版本 1"},
+		{"version", []string{"--version"}, 0, "tftp-archive 协议版本 2"},
 		{"unknown", []string{"--private-value"}, 2, "参数无效"},
 		{"extra", []string{"--help", "private-value"}, 2, "参数无效"},
 	} {
@@ -103,7 +103,7 @@ func TestInstalledWorkerPipes(t *testing.T) {
 		}
 		return transfer.Receipt{Path: name, Verification: "device_reported"}, nil
 	})
-	if e != nil || !receipt.Verified() {
+	if e != nil || !receipt.Receipt.Verified() {
 		t.Fatal(receipt, e)
 	}
 }

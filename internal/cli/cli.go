@@ -46,6 +46,14 @@ func (r Runtime) Run(ctx context.Context) int {
 	if r.Error == nil {
 		r.Error = os.Stderr
 	}
+
+	return r.runCommands(ctx)
+}
+func (r Runtime) executeSelected(ctx context.Context, o options) int {
+	const program = "netman"
+	if o.action == "defaults" {
+		return r.renderDefaults(o.mode, o.json)
+	}
 	if r.Environment == nil {
 		r.Environment = map[string]string{}
 		for _, entry := range os.Environ() {
@@ -53,10 +61,6 @@ func (r Runtime) Run(ctx context.Context) int {
 			r.Environment[k] = v
 		}
 	}
-	return r.runCommands(ctx)
-}
-func (r Runtime) executeSelected(ctx context.Context, o options) int {
-	const program = "netman"
 	var reporter *progress.Reporter
 	var stopUpdates func()
 	resumeSetup := func() {}

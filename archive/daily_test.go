@@ -33,7 +33,7 @@ func TestDailyArchiveLatestAndFailedUploadPreservesPrevious(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if receipt.ArchivePath != want || !receipt.Verified() {
+		if receipt.Receipt.Server.ArchivePath != want || !receipt.Receipt.Verified() {
 			t.Fatal(receipt)
 		}
 		c.Close()

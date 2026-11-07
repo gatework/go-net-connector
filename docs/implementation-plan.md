@@ -41,3 +41,7 @@ CLI > original env > YAML > .env > defaults. Merge /etc/net-connector,/usr/local
 ## Task 8: acceptance
 
 Shared Ruby/Go fixtures compare outgoing exact bytes/order/count, output/config/hash/error/partialreceipt/report. Real PTY/process/localHTTP/TLS/tempPG/localsshd+worker integration, no production devices. Race/vet/leak/fuzz; Linux/macOS Go1.26+1.27; amd64/arm64 builds; independent consumer/outside checkout CLI embeds templates. Benchmarks64KiB/1/8/32MiB,1000pagedchunks,1000/10000 mockdevices record allocations/RSS/time, no networkspeed claims. Complete docs, compatibility matrix, evidence. No automatic publication.
+
+## 当前增量：归档 v2 与单文件配置
+
+本节覆盖此前协议 v1、多用途 YAML 自动发现及嵌套配置结构条款。归档事务统一阶段期限与独立证据；客户端和 worker 同步迁移 v2。CLI 新增 config defaults，配置仅自动发现平铺 net-connector.yml，旧 backup.yml/topology.yml 需一次迁移；不自动删除或重写站点文件。实现细节与迁移见 api-migration.md、tftp-archive.md；本轮验证证据记录到 progress.md。

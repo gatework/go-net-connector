@@ -5,6 +5,9 @@ type Field struct{ Env, Kind string }
 var schema = map[string]Field{
 	"backup.success_policy":           {Env: "NC_BACKUP_SUCCESS_POLICY", Kind: "string"},
 	"tftp.upload_timeout":             {Env: "NC_TFTP_UPLOAD_TIMEOUT", Kind: "number"},
+	"tftp.archive_prepare_timeout":    {Env: "NC_TFTP_ARCHIVE_PREPARE_TIMEOUT", Kind: "number"},
+	"tftp.archive_verify_timeout":     {Env: "NC_TFTP_ARCHIVE_VERIFY_TIMEOUT", Kind: "number"},
+	"tftp.archive_cleanup_timeout":    {Env: "NC_TFTP_ARCHIVE_CLEANUP_TIMEOUT", Kind: "number"},
 	"backup.layout":                   {Env: "NC_BACKUP_LAYOUT", Kind: "string"},
 	"netdisco.cache_directory":        {Env: "ND_CACHE_DIRECTORY", Kind: "string"},
 	"netdisco.cache_namespace":        {Env: "ND_CACHE_NAMESPACE", Kind: "optional_string"},

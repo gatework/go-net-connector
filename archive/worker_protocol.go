@@ -8,12 +8,14 @@ import (
 )
 
 type Request struct {
-	Action      string `json:"action"`
-	Root        string `json:"root"`
-	Filename    string `json:"filename"`
-	ArchiveName string `json:"archive_name"`
-	Batch       string `json:"batch"`
-	SHA256      string `json:"sha256"`
+	Version     int            `json:"version"`
+	Timeouts    *TimeoutBudget `json:"timeouts,omitempty"`
+	Action      string         `json:"action"`
+	Root        string         `json:"root"`
+	Filename    string         `json:"filename"`
+	ArchiveName string         `json:"archive_name"`
+	Batch       string         `json:"batch"`
+	SHA256      string         `json:"sha256"`
 }
 type frame struct {
 	OK           bool     `json:"ok"`
@@ -32,12 +34,13 @@ func readRequest(reader *bufio.Reader) (Request, error) {
 	if e != nil || len(line) > ControlLimit {
 		return req, ErrArchive
 	}
-	if json.Unmarshal(line, &req) != nil {
+	if json.Unmarshal(line, &req) != nil || req.Version != Version {
 		return req, ErrArchive
 	}
 	return req, nil
 }
 func writeFrame(writer io.Writer, message frame) error {
+	message.Version = Version
 	b, e := json.Marshal(message)
 	if e != nil {
 		return ErrArchive

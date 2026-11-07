@@ -66,7 +66,7 @@ func TestHelpOutputFailureReturnsNonzero(t *testing.T) {
 // Even successful local JSON output may race the user's cancellation.
 func TestConfigShowCancellationTakesPriority(t *testing.T) {
 	root := t.TempDir()
-	file := filepath.Join(root, "backup.yml")
+	file := filepath.Join(root, "net-connector.yml")
 	if err := os.WriteFile(file, []byte("backup:\n  directory: ./backups\n"), 0600); err != nil {
 		t.Fatal(err)
 	}

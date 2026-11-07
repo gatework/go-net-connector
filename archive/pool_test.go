@@ -65,7 +65,7 @@ func TestPoolLocalPipes(t *testing.T) {
 		}
 		return transfer.Receipt{Path: filename, Verification: "device_reported"}, nil
 	})
-	if err != nil || !receipt.Verified() || receipt.LocalPath == "" {
+	if err != nil || !receipt.Receipt.Verified() || receipt.Receipt.Local.Path == "" {
 		t.Fatalf("receipt %+v, err %v", receipt, err)
 	}
 	if len(p.available) != 5 {
@@ -319,7 +319,7 @@ func TestRemotePoolPreparesClientsWithBoundedConcurrency(t *testing.T) {
 						return
 					}
 				}
-				response := frame{OK: true, Phase: "ready"}
+				response := frame{OK: true, Phase: "ready", Version: Version}
 				if request.Action == "probe" {
 					response.Version = Version
 					response.Capabilities = append([]string(nil), capabilities...)

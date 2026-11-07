@@ -63,7 +63,7 @@ func TestChannelRejectsInvalidEndpointsBeforeIO(t *testing.T) {
 			case "missing_close":
 				ch.Close = nil
 			}
-			err := runChannel(t.Context(), func(context.Context) (Channel, error) { return ch, nil }, time.Second, func(*Protocol) error { ran = true; return nil }, nil)
+			err := runChannel(t.Context(), func(context.Context) (Channel, error) { return ch, nil }, func(*Protocol) error { ran = true; return nil }, nil)
 			if !errors.Is(err, ErrArchive) || ran {
 				t.Errorf("invalid channel: ran=%v err=%v", ran, err)
 			}
@@ -95,7 +95,7 @@ func TestChannelRejectsUnsupportedDeadlinesBeforeIO(t *testing.T) {
 			closes, ran := 0, false
 			err := runChannel(t.Context(), func(context.Context) (Channel, error) {
 				return Channel{Input: endpoint, Output: endpoint, Close: func() error { closes++; return nil }}, nil
-			}, time.Second, func(*Protocol) error { ran = true; return nil }, nil)
+			}, func(*Protocol) error { ran = true; return nil }, nil)
 			if !errors.Is(err, ErrArchive) || !errors.Is(err, fault) || ran || closes != 1 || endpoint.reads != 0 || endpoint.writes != 0 {
 				t.Errorf("unsupported deadlines: ran=%v closes=%d reads=%d writes=%d err=%v", ran, closes, endpoint.reads, endpoint.writes, err)
 			}
@@ -109,7 +109,7 @@ func TestChannelPreservesPrimaryAndCleanupErrors(t *testing.T) {
 	primary, cleanup := errors.New("primary"), errors.New("cleanup")
 	err := runChannel(t.Context(), func(context.Context) (Channel, error) {
 		return Channel{Input: a, Output: a, Close: func() error { a.Close(); return cleanup }}, nil
-	}, time.Second, func(*Protocol) error { return primary }, nil)
+	}, func(*Protocol) error { return primary }, nil)
 	if !errors.Is(err, primary) || !errors.Is(err, cleanup) {
 		t.Fatalf("lost cause: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestChannelOwnsPartialLauncherReturn(t *testing.T) {
 	primary, cleanup := errors.New("setup"), errors.New("cleanup")
 	err := runChannel(t.Context(), func(context.Context) (Channel, error) {
 		return Channel{Close: func() error { closed = true; return cleanup }}, primary
-	}, time.Second, func(*Protocol) error { t.Fatal("ran failed channel"); return nil }, nil)
+	}, func(*Protocol) error { t.Fatal("ran failed channel"); return nil }, nil)
 	if !closed || !errors.Is(err, primary) || !errors.Is(err, cleanup) {
 		t.Fatalf("closed=%v err=%v", closed, err)
 	}

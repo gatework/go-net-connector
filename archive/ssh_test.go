@@ -105,7 +105,7 @@ func TestSSHMasterCanceledPreparationReaps(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	u, _ := url.Parse("ssh://archive@example.test/var/tftp")
-	m := &sshMaster{endpoint: u, worker: defaultWorkerPath}
+	m := &sshMaster{endpoint: u, worker: DefaultWorkerPath}
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	if err := m.prepare(ctx); !errors.Is(err, context.DeadlineExceeded) {
@@ -170,7 +170,7 @@ exit 0
 	t.Setenv("NC_TEST_CHILD_PID", pidFile)
 	t.Setenv("NC_TEST_EXIT_FIFO", releaseFile)
 	u, _ := url.Parse("ssh://archive@example.test/var/tftp")
-	m := &sshMaster{endpoint: u, worker: defaultWorkerPath}
+	m := &sshMaster{endpoint: u, worker: DefaultWorkerPath}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := m.prepare(ctx); err != nil {

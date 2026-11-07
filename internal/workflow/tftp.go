@@ -41,7 +41,7 @@ func (r *Runner) TFTP(ctx context.Context, runtime Runtime, settings TFTPSetting
 		if e != nil {
 			return transfer.Target{}, e
 		}
-		target.Timeout = settings.UploadTimeout
+		target.Timeout = settings.ArchiveTimeouts.Upload
 		path, e := transfer.InventoryFilename(runtime.Registry, d.Vendor, d.Host, d.Name)
 		if e != nil {
 			return transfer.Target{}, e
@@ -119,7 +119,7 @@ func (r *Runner) TFTP(ctx context.Context, runtime Runtime, settings TFTPSetting
 		if settings.ArchivePassword != nil {
 			password = settings.ArchivePassword()
 		}
-		pool, e := archive.NewPool(archive.PoolOptions{Root: target.Root, Directory: directory, WorkerPath: settings.ArchiveWorkerPath, Password: password, Parallel: runtime.Workers})
+		pool, e := archive.NewPool(archive.PoolOptions{Root: target.Root, Directory: directory, WorkerPath: settings.ArchiveWorkerPath, Password: password, Parallel: runtime.Workers, Timeouts: settings.ArchiveTimeouts})
 		if e != nil {
 			return r.fail(errors.Join(ErrTFTPArchivePreflight, e))
 		}
@@ -148,7 +148,7 @@ func (r *Runner) TFTP(ctx context.Context, runtime Runtime, settings TFTPSetting
 	defer events.Close()
 	events.reporter = p
 	events.progress = nil
-	_ = p.Phase(fmt.Sprintf("正在执行 TFTP 备份（上传上限 %.0f 秒）", settings.UploadTimeout.Seconds()))
+	_ = p.Phase(fmt.Sprintf("正在执行 TFTP 备份（上传上限 %.0f 秒）", settings.ArchiveTimeouts.Upload.Seconds()))
 	batch, runErr := fleet.Run(ctx, plan, fleet.RunOptions{Workers: runtime.Workers, Run: func(ctx context.Context, task fleet.Task) (artifact fleet.Artifact, err error) {
 		_ = p.Start(task.Device.Host, task.Device.Vendor)
 		target := task.Target
@@ -177,7 +177,9 @@ func (r *Runner) TFTP(ctx context.Context, runtime Runtime, settings TFTPSetting
 				return artifact, e
 			}
 			name = strings.TrimSuffix(name, ".txt") + filepath.Ext(filename)
-			receipt, err = pool.Upload(ctx, filename, name, upload)
+			result, uploadErr := pool.Upload(ctx, filename, name, upload)
+			receipt, err = result.Transfer, uploadErr
+			artifact.Archive = &result.Receipt
 		} else {
 			receipt, err = upload(ctx, filename)
 		}

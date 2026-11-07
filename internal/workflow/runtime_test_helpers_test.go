@@ -27,7 +27,8 @@ func tftpSettingsForTest(services *bootstrap.Services) TFTPSettings {
 	policy, _ := services.TFTPPolicy()
 	workerPath, _ := services.Policy().Value("tftp.ssh_worker_path").(string)
 	return TFTPSettings{
-		Policy: policy, LimitPerVendor: services.Limit(), UploadTimeout: services.TFTPUploadTimeout(),
+		ArchiveTimeouts: services.ArchiveTimeouts(),
+		Policy:          policy, LimitPerVendor: services.Limit(),
 		ArchiveWorkerPath: workerPath, ArchivePassword: services.ArchivePassword,
 	}
 }

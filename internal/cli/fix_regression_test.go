@@ -187,7 +187,7 @@ func TestInteractiveSetupConsentAndCustomization(t *testing.T) {
 			if code != tc.wantCode {
 				t.Fatal(code)
 			}
-			configPath := filepath.Join(root, ".config", "net-connector", "backup.yml")
+			configPath := filepath.Join(root, ".config", "net-connector", "net-connector.yml")
 			envPath := filepath.Join(root, ".config", "net-connector", ".env")
 			for _, item := range []struct {
 				path string
@@ -227,7 +227,7 @@ func TestInitInteractiveExistingFilesNeedsNoTerminal(t *testing.T) {
 	if code := r.Run(t.Context()); code != 0 {
 		t.Fatal(code)
 	}
-	configPath := filepath.Join(r.Home, ".config", "net-connector", "backup.yml")
+	configPath := filepath.Join(r.Home, ".config", "net-connector", "net-connector.yml")
 	envPath := filepath.Join(r.Home, ".config", "net-connector", ".env")
 	before := map[string][]byte{}
 	for _, path := range []string{configPath, envPath} {

@@ -8,7 +8,6 @@ type Verification string
 
 const (
 	VerificationDeviceReported Verification = "device_reported"
-	VerificationServerVerified Verification = "server_verified"
 )
 
 type Receipt struct {
@@ -17,9 +16,6 @@ type Receipt struct {
 	RequestedPath                                       *string
 	Path, Server, ConfigurationKind, SourceFile, Format string
 	Verification                                        Verification
-	ServerSHA256, LocalPath, ArchivePath                string
-	ServerBytes                                         int64
 }
 
-func (r Receipt) Verified() bool { return r.Verification == "server_verified" }
-func (r Receipt) Reported() bool { return r.Verification == "device_reported" || r.Verified() }
+func (r Receipt) Reported() bool { return r.Verification == VerificationDeviceReported }

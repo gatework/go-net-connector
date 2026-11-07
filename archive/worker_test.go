@@ -27,8 +27,10 @@ func TestWorkerTransactionAndUnconfirmedStaging(t *testing.T) {
 			done := make(chan error, 1)
 			go func() { defer server.Close(); done <- Serve(context.Background(), server, server) }()
 			reader := bufio.NewReader(client)
-			writeRequest := func(v any) {
+			writeRequest := func(v map[string]any) {
 				t.Helper()
+				v["version"] = Version
+				v["timeouts"] = TimeoutBudget{Prepare: 1000, Upload: 1000, Verify: 1000, Cleanup: 1000}
 				if e := json.NewEncoder(client).Encode(v); e != nil {
 					t.Fatal(e)
 				}
@@ -82,7 +84,7 @@ func TestWorkerPreflightAndUnsafePaths(t *testing.T) {
 		c, s := net.Pipe()
 		done := make(chan error, 1)
 		go func() { defer s.Close(); done <- Serve(context.Background(), s, s) }()
-		json.NewEncoder(c).Encode(map[string]any{"root": root, "filename": name, "archive_name": "x", "batch": "2026-10-25-ssh-0123456789abcdef"})
+		json.NewEncoder(c).Encode(map[string]any{"version": Version, "timeouts": TimeoutBudget{1000, 1000, 1000, 1000}, "root": root, "filename": name, "archive_name": "x", "batch": "2026-10-25-ssh-0123456789abcdef"})
 		io.ReadAll(c)
 		if e := <-done; e == nil {
 			t.Fatal(name)

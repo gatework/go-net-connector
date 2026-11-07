@@ -1,8 +1,7 @@
 package bootstrap
 
 import (
-	"time"
-
+	"github.com/gatework/go-net-connector/archive"
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/transfer"
 )
@@ -53,7 +52,4 @@ func (s *Services) buildTFTPPolicy() (*transfer.Policy, error) {
 // ArchivePassword resolves the archive credential only during online preparation.
 func (s *Services) ArchivePassword() string { return s.secret("NC_TFTP_SSH_PASSWORD") }
 
-// TFTPUploadTimeout bounds device upload commands in CLI batches.
-func (s *Services) TFTPUploadTimeout() time.Duration {
-	return s.settings.tftpUploadTimeout
-}
+func (s *Services) ArchiveTimeouts() archive.Timeouts { return s.settings.archiveTimeouts }

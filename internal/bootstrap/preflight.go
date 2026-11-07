@@ -51,7 +51,7 @@ func ValidateTFTP(snapshot config.Snapshot, successPolicy string) error {
 	if worker != "" && (!filepath.IsAbs(worker) || filepath.Clean(worker) != worker || strings.ContainsAny(worker, "\x00\r\n")) {
 		return &config.FieldError{Field: "tftp.ssh_worker_path", Problem: "invalid"}
 	}
-	if s.TFTPUploadTimeout() <= 0 {
+	if s.ArchiveTimeouts().Upload <= 0 {
 		return &config.FieldError{Field: "tftp.upload_timeout", Problem: "invalid"}
 	}
 	return nil

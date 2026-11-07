@@ -16,9 +16,9 @@ func BenchmarkLoadLayeredConfiguration(b *testing.B) {
 		}
 	}
 	fixtures := map[string]string{
-		filepath.Join(low, "net-connector.yml"): "common:\n  ssh:\n    protocol: ssh\nbackup:\n  backup:\n    directory: ./saved\n    parallel: 2\n",
-		filepath.Join(high, "backup.yml"):       "backup:\n  parallel: 3\n",
-		filepath.Join(high, ".env"):             "NC_PARALLEL=4\nNC_DEVICE_USERNAME=bench\n",
+		filepath.Join(low, "net-connector.yml"):  "ssh:\n  protocol: ssh\nbackup:\n  directory: ./saved\n  parallel: 2\n",
+		filepath.Join(high, "net-connector.yml"): "backup:\n  parallel: 3\n",
+		filepath.Join(high, ".env"):              "NC_PARALLEL=4\nNC_DEVICE_USERNAME=bench\n",
 	}
 	for path, data := range fixtures {
 		if err := os.WriteFile(path, []byte(data), 0600); err != nil {

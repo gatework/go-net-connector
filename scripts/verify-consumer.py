@@ -27,7 +27,7 @@ with tempfile.TemporaryDirectory(prefix="nc-consumer-") as temporary:
     consumer = package / "consumercheck"
     consumer.mkdir()
     (consumer / "main_test.go").write_text('''package consumercheck
-import("testing";"errors";"github.com/gatework/go-net-connector/vendors";"github.com/gatework/go-net-connector/vendors/dialect";"github.com/gatework/go-net-connector/vendors/h3c";"github.com/gatework/go-net-connector/topology";"github.com/gatework/go-net-connector/textfsm";"github.com/gatework/go-net-connector/connector";"github.com/gatework/go-net-connector/fleet")
+import("testing";"errors";"context";"os";"path/filepath";"time";"github.com/gatework/go-net-connector/archive";"github.com/gatework/go-net-connector/transfer";"github.com/gatework/go-net-connector/vendors";"github.com/gatework/go-net-connector/vendors/dialect";"github.com/gatework/go-net-connector/vendors/h3c";"github.com/gatework/go-net-connector/topology";"github.com/gatework/go-net-connector/textfsm";"github.com/gatework/go-net-connector/connector";"github.com/gatework/go-net-connector/fleet")
 func TestSourceConsumer(t *testing.T){
  registry:=vendors.NewBuiltinRegistry()
  declaration,e:=registry.Lookup("cisco_ios");if e!=nil{t.Fatal(e)}
@@ -45,6 +45,13 @@ func TestSourceConsumer(t *testing.T){
  _ = topologyClient
  if got:=topology.ConfigName("Te1/0/2");got!="TenGigabitEthernet1/0/2"{t.Fatal(got)}
  var step connector.StepResult;if _,e=step.Response().Rendered();!errors.Is(e,connector.ErrIncomplete){t.Fatal(e)}
+ limits:=archive.DefaultTimeouts();limits.Upload=600*time.Second;if e=limits.Validate();e!=nil{t.Fatal(e)}
+ root,e:=filepath.EvalSymlinks(t.TempDir());if e!=nil{t.Fatal(e)}
+ pool,e:=archive.NewPool(archive.PoolOptions{Root:root,Directory:t.TempDir(),Parallel:1,Timeouts:limits});if e!=nil{t.Fatal(e)};defer pool.Close()
+ if e=pool.Prepare(t.Context());e!=nil{t.Fatal(e)}
+ result,e:=pool.Upload(t.Context(),"running.cfg","device.cfg",func(_ context.Context,name string)(transfer.Receipt,error){e:=os.WriteFile(filepath.Join(root,name),[]byte("configuration"),0600);return transfer.Receipt{Path:name,Verification:transfer.VerificationDeviceReported},e})
+ if e!=nil||!result.Transfer.Reported()||!result.Receipt.Complete(){t.Fatal(result,e)}
+ var artifact=fleet.Artifact{Transfer:&result.Transfer,Archive:&result.Receipt};_ = artifact
  rows,e:=textfsm.ParseTemplate("cisco/show_running_config.textfsm","interface Gi0/0\\n description uplink\\n!\\n");if e!=nil||len(rows)!=1{t.Fatal("embedded template",e)}
 }
 ''')
@@ -68,11 +75,15 @@ func TestSourceConsumer(t *testing.T){
     expected = {"netman", "tftp-archive"}
     if {path.name for path in binaries.iterdir()} != expected:
         raise SystemExit("发行命令清单不匹配")
-    commands = [[], ["backup"], ["backup", "run"], ["backup", "plan"], ["backup", "tftp"], ["backup", "export"], ["inventory", "list"], ["topology", "discover"], ["topology", "plan"], ["topology", "apply"], ["config", "init"], ["config", "show"], ["config", "check"], ["completion"], ["version"]]
+    commands = [[], ["backup"], ["backup", "run"], ["backup", "plan"], ["backup", "tftp"], ["backup", "export"], ["inventory", "list"], ["topology", "discover"], ["topology", "plan"], ["topology", "apply"], ["config", "init"], ["config", "show"], ["config", "defaults"], ["config", "check"], ["completion"], ["version"]]
     for command in commands:
         result = subprocess.run([str(binaries / "netman"), *command, "--help"], cwd=outside, env=env, check=True, capture_output=True, text=True)
         if "用法" not in result.stdout or any(term in result.stdout for term in ("Usage:", "Available Commands:", "Global Flags:", "help for ", "(default ")):
             raise SystemExit("中文帮助不完整：" + " ".join(command))
+    defaults = subprocess.run([str(binaries / "netman"), "config", "defaults", "--for", "tftp", "--json", "--config", "/missing/ignored.yml"], cwd=outside, env=env, check=True, capture_output=True, text=True)
+    values = json.loads(defaults.stdout)
+    if values["tftp"]["upload_timeout"] != 180 or values["tftp"]["archive_verify_timeout"] != 100 or defaults.stderr:
+        raise SystemExit("默认配置输出不匹配")
     for shell in ("bash", "zsh", "fish"):
         result = subprocess.run([str(binaries / "netman"), "completion", shell], cwd=outside, env=env, check=True, capture_output=True, text=True)
         if "netman" not in result.stdout:

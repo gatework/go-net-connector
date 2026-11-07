@@ -5,6 +5,32 @@ layer. Resolve the pinned GitHub dependency with GOWORK=off. Do not run the old
 workspace reconstruction scripts for current builds; retained baselines/patches
 are historical audit material.
 
+## Archive v2 and one configuration document
+
+- `archive.ClientOptions.Timeout` becomes `Timeouts`; `PoolOptions` also accepts the same `archive.Timeouts`. `archive.DefaultTimeouts()` supplies the only archive defaults, also used by config output. Zero option fields select defaults; explicit configuration values must be positive and representable.
+- `NewProtocol(input, output)` no longer accepts a timeout. Every Send/Expect/Receive requires a deadline-bearing context; the transaction owner passes one context through each entire stage.
+- Client.Upload and Pool.Upload return `(archive.Result, error)`. Check both `result.Transfer` (device report) and `result.Receipt` (Server proof, Local storage receipt, Cleanup state), including on errors. `Receipt.Clone()` detaches the mutable proof pointer.
+- `transfer.Receipt.Verified`, `VerificationServerVerified`, `ServerSHA256`, `ServerBytes`, `ArchivePath`, and `LocalPath` are removed. Device-only transfers cannot establish server verification. Read those facts from `archive.Receipt.Server` and `.Local`; use `.Verified()` for independent server delivery and `.Complete()` for verified/durable/cleanup-complete.
+- `fleet.Artifact.Archive` carries archive evidence alongside `.Transfer`; callers using Pool.Upload map both returned values. Strict/selected policies fail incomplete archive transactions too. Report schema v2 keeps its existing projected fields and adds optional `archive` detail.
+- Wire protocol is v2 only: client and worker must upgrade together. Preflight rejects old workers before device commands. No automatic upload retry or installation is introduced.
+
+Only `net-connector.yml` is automatically discovered. `backup.yml` and `topology.yml` discovery, the `common` container, and nested scope documents are removed. Merge their environment-specific sections into one flat document:
+
+```yaml
+netdisco:
+  url: https://netdisco.example.invalid
+tftp:
+  server: 192.0.2.9
+  verification_root: ssh://archive@192.0.2.9/srv/tftp
+backup:
+  directory: ./backups
+# Optional: topology.parallel overrides shared backup.parallel.
+```
+
+From an old combined document, lift `common.netdisco/inventory/ssh`, `backup.backup/tftp`, and `topology.topology` to their top-level groups, resolving repeated settings deliberately. YAML paths resolve relative to the unified file. Existing files are never deleted or automatically rewritten. Explicit `--config` still allows a custom filename containing the same flat structure. `.env` remains a separate credential input, not another YAML configuration.
+
+`netman config defaults [--for backup|tftp|topology] [--json]` prints built-in defaults (YAML by default) without loading files, environment overrides, credentials or inventory. `config show` prints effective loaded configuration instead. Initializers now create `~/.config/net-connector/net-connector.yml` and never overwrite an existing file. Avoid copying all defaults into site policy: keep only actual overrides, especially since TFTP defaults to verified while ordinary backup defaults to selected.
+
 ## 2026-11-07 Go naming cleanup
 
 The project uses package and capability context instead of repeating those
