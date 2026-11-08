@@ -2,6 +2,26 @@
 
 整体审查的六项问题均已修复并通过限定范围复审。当前记录来自本地测试，不代表生产设备或远端 CI；发布验证另行记录。
 
+## 2026-11-07 单命令回执与配置边界局部验证
+
+本节是本轮隔离源码候选的局部证据，以下历史全量记录不替代本轮联合验收。
+
+| 检查 | 当前结果 |
+| --- | --- |
+| Go 1.27.3 `go test -race -shuffle=on ./connector -count=1` | 通过；真实传输验证唯一接受回执、晚错误、严格正文、分页、GB18030 与备份保真隔离 |
+| Go 1.26.0 Connector 新增及相关回归 | 通过 |
+| Go 1.27.3 `go test -race -shuffle=on ./config ./internal/bootstrap ./internal/cli -count=1` | 通过；分块取消、文件预算、符号链接/FIFO、配置覆盖和 CLI 取消退出码 |
+| Go 1.26.0 `go test ./config ./internal/bootstrap ./internal/cli -count=1` | 通过 |
+| Go 1.27.3 上述四包 `go vet` | 通过 |
+| `python3 scripts/check-architecture.py` | 通过；解析 38 个生产包与传递依赖 |
+| `python3 scripts/test_architecture.py` | 4 个测试通过，包含多组真实临时 Go 模块负例 |
+| 变更文件 gopls、goimports、`git diff --check` | 无新增诊断或格式问题；旧 fixture Scanner.Err 提示未改变 |
+| Go 1.27.3 `bash scripts/ci`，`GOWORK=off` | 全部通过；包含 PostgreSQL/归档 worker、全包 race/shuffle、vet、三组各 100,000 次 fuzz、独立源码消费者和目录外 CLI |
+| Go 1.27.3 `golangci-lint run` | 通过 |
+| Go 1.26.0 `go test -p=1 -count=1 ./...` | 全部通过；并行首轮的 SSH 子进程夹具曾触发 5 秒超时，该用例独立连续三次通过，随后串行全包通过 |
+
+未修改 go.mod/go.sum/VERSION，未提交、推送、发布或连接实机。同步文件系统调用与有界解析在阶段边界检查 context；这些测试不证明可打断阻塞 syscall。上述 Connector CI 使用已发布的 Expect v0.4.1；四仓联动候选和外部消费者的冻结源码验收另行记录，不构成新版本已发布的证据。
+
 ## 冻结来源与差分
 
 `baseline/*.json` 记录 Ruby connector、expect-ruby、ctx_cli 和 Go expect 的 Git HEAD、工作区状态及逐文件 SHA-256。Ruby 基线为 0.18.0，包含未提交修改。隔离的 Ruby 4.0.6 / Minitest5 运行：1,225 tests、12,020 assertions、0 failures/errors/skips；未运行独立加载、发布和示例入口套件，见 `baseline/ruby-tests.log`。

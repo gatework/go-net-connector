@@ -77,7 +77,7 @@ func (r Runtime) executeSelected(ctx context.Context, o options, request command
 	if request.kind == requestExport {
 		return r.exportBatch(ctx, o.export, o.batch, o.output, o.json)
 	}
-	policy, e := bootstrap.LoadPolicy(bootstrap.PolicyOptions{
+	policy, e := bootstrap.LoadPolicy(ctx, bootstrap.PolicyOptions{
 		Mode: o.mode, CWD: r.CWD, Home: r.Home, Program: r.Program,
 		Directories: r.Directories, ConfigFile: o.config, EnvFile: o.envFile,
 		Environment: r.Environment, PublicOverrides: o.public,
@@ -124,7 +124,7 @@ func (r Runtime) executeSelected(ctx context.Context, o options, request command
 		if request.kind == requestInitialize || createConfig || createEnv {
 			if o.interactive {
 				if createConfig {
-					policy, e = r.configure(policy, o, name, reader)
+					policy, e = r.configure(ctx, policy, o, name, reader)
 				}
 				if e != nil {
 					return r.fail(program, e)

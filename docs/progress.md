@@ -1,5 +1,19 @@
 # Implementation progress
 
+## 2026-11-07：配置读取、取消传播与架构门禁
+
+新增共享 `config.ReadFile`，保留 16 MiB、普通文件、跟随可读符号链接、非阻塞打开拒绝 FIFO 的规则，采用 32 KiB 同步分块读取并在读前、读后及关闭边界检查 context。缺失允许开关不屏蔽取消，失败不返回部分正文，普通文件错误不泄露路径或内容。新增 `LoadContext` 并将 CLI/bootstrap 的初次加载和交互重载接入，`Load` 保留最小兼容入口；发现、各层解码与最终快照返回检查取消。新增 `ParseYAMLMapping`，与原解析器共用所有限制但要求显式根映射，支持 VXLAN 保留空文件/null 拒绝规则；原 `ParseYAML` 行为不变。
+
+架构检查读取真实 `go list -json ./...` 的 38 个生产包及传递依赖，对完整包路径和子包执行库/应用、connector/vendors、bootstrap/CLI、workflow/Reporter 边界。`scripts/ci` 接入检查和 4 个临时 Go 模块测试；负例包含嵌套包、间接倒依赖和无法解析的循环，合法组合及相似名称不误报。
+
+Go 1.27.3 的 config、internal/bootstrap、internal/cli 全包 race/shuffle 与 vet 通过，同三包 Go 1.26.0 测试通过；覆盖取消优先于发现、末次读取取消丢弃数据、精确/超限字节预算、既有符号链接/FIFO 与覆盖语义，以及取消 CLI 保留退出码 130。架构检查、全部负例和变更文件 gopls 检查通过。检查不承诺中断文件系统阻塞调用；跨仓源码配对和完整 CI 由整体验收记录，未修改依赖或版本、未发布。
+
+## 2026-11-07：单命令回执与严格正文
+
+新增 `Result.SingleAccepted`、`StepResult.Body` 和 `ErrInvalidResult`，统一唯一主命令、精确身份、确认提示符和严格文本的判断。执行错误仍独立，hook 尝试保留在 `Attempts`；晚到 hook 失败不抹除 accepted step。正文只移除提示符和首行回显，保留缩进、正文中的同名命令、提示符前的分隔换行和末尾空行。备份保真转义及原始字节视图不作为严格解析正文；厂商配置选择、清洗、保存和原始证据语义不变。
+
+复用真实 `net.Pipe` fixture 覆盖回显/无回显、空正文、分页、终端改写、GB18030、多个分隔换行、关闭后快照、hook 尝试与晚错误、拒绝及无效编码；补充零值、缺失或不一致提示符和安全错误链检查。Go 1.27.3 的完整 `connector` 包 race/shuffle、`go vet ./connector`、新增及相关用例的 Go 1.26.0 最低版本测试通过。变更文件 gopls 检查无新增诊断；既有 fixture 的 `bufio.Scanner` 未检查终态错误提示仍存在。本轮只做局部源码验证，未发布版本、修改依赖或连接实机；跨仓消费者和完整门禁由整体验收记录。
+
 ## 2026-11-07：借用会话与清理所有权
 
 新增 `WithBorrowedOperation`，在已连接设备上持有完整回调租约，禁止隐式连接、重连或命令重放。`Operation.Retire` 在取消后仍可清理，拒绝重入、重复及过期使用；`Connected` 限定为活动作用域的会话快照。借用作用域分别返回操作错误和首次清理错误，回调忽略清理失败或返回 nil、作用域退出取消并等待已接纳调用时都保留清理证据；退出不自动重试清理，后续显式 `Device.Close` 可以重试失败的 transport owner。

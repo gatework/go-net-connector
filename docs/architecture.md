@@ -35,6 +35,10 @@ Profile 只声明规则；Device 拥有当前会话和操作租约。transport �
 
 共享清单配置由公开 `config.InventoryEnvironment` 与 `config.ValidateInventory` 处理，只接受 `netdisco` / `inventory` 范围，并复用 config 内部同一份字段定义和解码器。环境投影先按高优先级字段的存在性屏蔽，再解析剩余值；false、null、空列表和替换父节都属于明确覆盖。纯校验不发现文件、不解析路径、不补默认值，也不读取凭据，业务程序仍拥有自己的文件与参数入口。
 
+文件输入边界统一为 `config.ReadFile(ctx, path, missingOK)`：跟随可读符号链接，只接纳 16 MiB 以内普通文件，使用非阻塞打开拒绝 FIFO，分块同步读取并在边界检查取消。失败不交付部分正文，文件错误不包含路径或内容；取消原因可由 `errors.Is` 判断。`ParseYAML` 与要求显式根映射的 `ParseYAMLMapping` 共用严格解析与资源预算。各应用继续拥有 schema、文件发现和覆盖策略。Connector 的 `LoadContext` 在发现、各层解码与最终返回前传播调用方 context；旧 `Load` 只作兼容。上下文检查不承诺中断阻塞的文件系统调用。
+
+`scripts/check-architecture.py` 从 `GOWORK=off go list -json ./...` 的实际生产包和传递依赖检查边界：公开库不依赖 cmd、bootstrap、CLI 或 workflow；通用 connector 不选择 vendors；bootstrap 不依赖 CLI；workflow 不反向依赖 bootstrap、CLI 或进度 Reporter。规则按完整包路径及其子包匹配，允许既有纯呈现、存储和厂商能力依赖，测试专用导入不计入生产边界。CI 同时运行临时 Go 模块负例，验证嵌套包、间接导入和解析失败不能绕过规则。
+
 ## 厂商方言与能力
 
 `vendors.NewBuiltinRegistry()` 是唯一内建平台目录。目录项是 `vendors/<family>` 家族包中的具体平台对象；每个对象返回独立的 `connector.Profile` 副本。`vendors/dialect` 只放 `Platform`、`Registry` 和跨包 DTO；`topology`、`transfer`、`fleet` 各自拥有消费端行为接口。家族对象只组合真实支持的接口，例如 Radware 提供描述读取和接口身份映射，不虚报邻居发现或描述写入。每个家族包集中组织 `dialect.go`、`inventory.go`、`configuration.go`、`topology.go` 和传输策略。H3C/H3C Wireless 与 Cisco IOS/NX-OS 共享家族实现，同时保留独立平台类型和平台覆盖。
@@ -48,6 +52,8 @@ Profile 只声明规则；Device 拥有当前会话和操作租约。transport �
 新增平台的业务流程、文件职责、内建识别顺序和验收清单见 [`vendors/README.md`](../vendors/README.md)。
 
 命令回执必须已经匹配提示符且未被设备拒绝。回执在日志收尾、hook 和观察者回调之前登记。原文必须显式读取；默认格式化只显示安全元数据。敏感交互采用操作范围的脱敏规则，不把密码交给全局状态。
+
+`Result.SingleAccepted` 集中校验唯一 accepted 主命令与精确命令身份；hook 尝试仍由 `Attempts` 保存。它不替代执行错误判断，晚到错误与已接受步骤可以同时存在。`StepResult.Body` 只从严格验证过的不可变文本中移除确认提示符和首行匹配回显，保留缩进、正文中的同名命令与所有末尾分隔换行；提示符匹配的前导换行属于正文分隔符。缺少严格文本、提示符不一致及备份专用保真视图返回安全的 `ErrInvalidResult` 错误，原转换原因仍可解包。厂商多步骤配置选择、Clean、保存签名及原始证据继续各自拥有业务语义，不复用正文接口改变清理规则。
 
 本地备份的 `Change` 表示内容关系；`File.State` 表示本次写入是否提交/持久化。只有实际核验同一私有文件并跳过写入时才设置 `NoWriteVerified`。内容相同但替换失败不属于已保存文件。
 

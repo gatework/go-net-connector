@@ -36,7 +36,7 @@ func TestSetupAsksOnlyMissingEnvironmentFacts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			p, err = r.configure(p, options{mode: "backup"}, "backup", bufio.NewReader(strings.NewReader(tc.answers)))
+			p, err = r.configure(t.Context(), p, options{mode: "backup"}, "backup", bufio.NewReader(strings.NewReader(tc.answers)))
 			if err != nil || p.Value("netdisco.url") != "https://inventory.example.test" {
 				t.Fatalf("setup error=%v", err)
 			}

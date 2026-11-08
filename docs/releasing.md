@@ -8,7 +8,7 @@ The runtime matrix is Ubuntu/macOS with the latest Go 1.26 and 1.27 patches. Eve
 
 The quality job uses golangci-lint v2.15.0 (only govet, ineffassign, staticcheck SA checks and unused), govulncheck v1.9.0 and actionlint v1.7.12. Action versions are pinned to reviewed upstream commit SHAs in the workflow. Packaging and security use the latest Go 1.27 patch; the exact compiler version is recorded in `MANIFEST.json` and checked against every binary's Go build information. Go 1.27-built Darwin binaries require macOS 13 or newer.
 
-All release checks and builds use `GOWORK=off`, read-only module resolution and the selected local toolchain. `scripts/release.py check-modules` rejects every `replace` directive and `v0.0.0` dependency. The module currently pins published go-expect `v0.4.0`; future dependency changes must also use a compatible published version before packaging.
+All release checks and builds use `GOWORK=off`, read-only module resolution and the selected local toolchain. `scripts/release.py check-modules` rejects every `replace` directive and `v0.0.0` dependency. The module pins published go-expect `v0.4.1`; future dependency changes must also use a compatible published version before packaging.
 
 ## Artifact contract
 

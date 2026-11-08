@@ -11,6 +11,18 @@ import (
 type panicReader struct{}
 
 func (panicReader) Read([]byte) (int, error) { panic("stdin read") }
+
+func TestCanceledConfigurationShowDoesNotSucceed(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	root := t.TempDir()
+	var out, errout bytes.Buffer
+	r := Runtime{Args: []string{"config", "show", "--json"}, CWD: root, Home: root, Directories: []string{}, Environment: map[string]string{}, Input: panicReader{}, Output: &out, Error: &errout}
+	if code := r.Run(ctx); code != 130 || out.Len() != 0 || errout.Len() != 0 {
+		t.Fatalf("canceled configuration: code=%d output=%q error=%q", code, out.String(), errout.String())
+	}
+}
+
 func TestHelpDoesNotReadConfigOrStdin(t *testing.T) {
 	var out, errout bytes.Buffer
 	r := Runtime{Args: []string{"--help"}, Environment: map[string]string{"NC_CONFIG": "/does/not/exist"}, Input: panicReader{}, Output: &out, Error: &errout}

@@ -1,6 +1,8 @@
 package bootstrap
 
 import (
+	"context"
+
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/internal/workflow"
 )
@@ -15,7 +17,10 @@ type PolicyOptions struct {
 }
 
 // LoadPolicy selects command defaults and loads one immutable policy snapshot.
-func LoadPolicy(o PolicyOptions) (config.Snapshot, error) {
+func LoadPolicy(ctx context.Context, o PolicyOptions) (config.Snapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return config.Snapshot{}, err
+	}
 	overrides, err := config.FromEnvironment(o.PublicOverrides)
 	if err != nil {
 		return config.Snapshot{}, err
@@ -24,7 +29,7 @@ func LoadPolicy(o PolicyOptions) (config.Snapshot, error) {
 	if o.Mode == "topology" {
 		name = "topology"
 	}
-	return config.Load(config.Options{
+	return config.LoadContext(ctx, config.Options{
 		Name: name, CWD: o.CWD, Home: o.Home, Program: o.Program,
 		Directories: o.Directories, ConfigFile: o.ConfigFile, EnvFile: o.EnvFile,
 		Environment: o.Environment, Overrides: overrides, Defaults: config.Defaults(o.Mode),

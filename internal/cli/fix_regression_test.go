@@ -172,7 +172,7 @@ func TestInteractiveSetupConsentAndCustomization(t *testing.T) {
 					t.Fatal(e)
 				} else {
 					if createConfig {
-						policy, e = r.configure(policy, options{mode: "backup"}, "backup", reader)
+						policy, e = r.configure(t.Context(), policy, options{mode: "backup"}, "backup", reader)
 					}
 					if e == nil {
 						_, e = config.InitializeSelected(policy, "backup", createConfig, createEnv)

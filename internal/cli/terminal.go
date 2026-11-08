@@ -111,7 +111,7 @@ func (r Runtime) passwords(ctx context.Context, o *options) error {
 	}
 	return nil
 }
-func (r Runtime) configure(snapshot config.Snapshot, o options, name string, reader *bufio.Reader) (config.Snapshot, error) {
+func (r Runtime) configure(ctx context.Context, snapshot config.Snapshot, o options, name string, reader *bufio.Reader) (config.Snapshot, error) {
 	if _, ok := r.terminal(); !ok {
 		return snapshot, config.ErrInvalid
 	}
@@ -206,7 +206,7 @@ func (r Runtime) configure(snapshot config.Snapshot, o options, name string, rea
 	if e != nil {
 		return snapshot, e
 	}
-	result, e := config.Load(config.Options{Name: name, CWD: r.CWD, Home: r.Home, Program: r.Program, Directories: r.Directories, ConfigFile: o.config, EnvFile: o.envFile, Defaults: snapshot.Public(), Overrides: overrides, Environment: r.Environment, AllowMissing: true})
+	result, e := config.LoadContext(ctx, config.Options{Name: name, CWD: r.CWD, Home: r.Home, Program: r.Program, Directories: r.Directories, ConfigFile: o.config, EnvFile: o.envFile, Defaults: snapshot.Public(), Overrides: overrides, Environment: r.Environment, AllowMissing: true})
 	if e == nil {
 		_, e = bootstrap.New(result, nil)
 	}

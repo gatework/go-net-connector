@@ -21,6 +21,7 @@ type responseData struct {
 	raw, rawPrompt, output, rendered, prompt, encoding string
 	outputErr, renderErr, promptErr                    error
 	rawWarning                                         *TextWarning
+	verifiedText                                       bool // strict conversion, not a backup preservation view
 }
 
 func (r Response) Raw() string {
@@ -73,6 +74,7 @@ func (r Response) MarshalJSON() ([]byte, error) {
 // convert verifies the complete response once, before command acceptance checks.
 // diagnostic preserves decoded text even where terminal edits erase a device error.
 func (r *responseData) convert() (diagnostic string, err error) {
+	r.verifiedText = false
 	wire := r.output
 	output, encoding, err := textcodec.Decode(wire, "auto")
 	if err != nil {
@@ -98,12 +100,14 @@ func (r *responseData) convert() (diagnostic string, err error) {
 	if r.renderErr != nil {
 		return diagnostic, r.renderErr
 	}
+	r.verifiedText = r.promptErr == nil
 	return diagnostic, r.promptErr
 }
 
 // convertBackup preserves undecodable source bytes without weakening commands
 // used by configuration parsers. The original response remains immutable.
 func (r *responseData) convertBackup() (string, error) {
+	r.verifiedText = false
 	wire := r.output
 	diagnostic := r.raw
 	if !utf8.ValidString(r.raw) {
@@ -144,6 +148,7 @@ func (r *responseData) convertBackup() (string, error) {
 
 // convertOriginal is limited to explicit backup preservation; parsers retain strict decoding.
 func (r *responseData) convertOriginal() (string, error) {
+	r.verifiedText = false
 	output, err := terminal.RenderEncoded([]byte(r.output), false, "bytes")
 	if err != nil {
 		return "", err

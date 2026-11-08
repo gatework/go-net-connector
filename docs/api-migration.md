@@ -5,6 +5,81 @@ layer. Resolve the pinned GitHub dependency with GOWORK=off. Do not run the old
 workspace reconstruction scripts for current builds; retained baselines/patches
 are historical audit material.
 
+## Pending: shared configuration reads and cancellation
+
+Applications can reuse the configuration input boundary without adopting
+Connector's schema or file discovery:
+
+```go
+data, found, err := config.ReadFile(ctx, path, missingOK)
+if err != nil || !found {
+    return err
+}
+document, err := config.ParseYAMLMapping(data)
+// Apply the application's own schema, precedence and path resolution.
+```
+
+`ReadFile(context.Context, string, bool) ([]byte, bool, error)` requires a regular
+file of at most `config.MaxBytes` (16 MiB), follows readable symlinks and rejects
+FIFOs without waiting for a writer. `missingOK` only permits a nonexistent file;
+it does not suppress cancellation, permission, size or file-type failures.
+Failures return no partial bytes. Ordinary file errors become `ErrInvalid`
+without paths or contents; `errors.Is` recognizes `context.Canceled` and
+`context.DeadlineExceeded`. Reading uses synchronous bounded chunks with context
+checks between calls; it does not promise to interrupt a blocked filesystem call.
+
+`ParseYAMLMapping([]byte) (map[string]any, error)` requires an explicit mapping
+root. Empty/comment-only documents and root nulls, including `~` and a bare
+document marker, return `ErrInvalid`; `{}` is valid. It shares the existing
+parser's byte, node and depth budgets and restrictions on duplicate keys,
+aliases, tags and multiple documents. `ParseYAML` keeps its compatible empty/null
+root behavior. Neither parser loads files or applies application field rules.
+
+`LoadContext(context.Context, Options) (Snapshot, error)` propagates cancellation
+through Connector's existing discovery and layer boundaries, including the final
+snapshot return. `Load(Options)` remains a small compatibility wrapper using
+`context.Background()`. New request-scoped callers should use `LoadContext`.
+Connector's CLI and bootstrap pass their operation context through both initial
+loading and interactive reload. Precedence, source tracking, explicit false/null/
+empty overrides, parser budgets and symlink-relative path handling are unchanged.
+
+## Pending: single-command receipts and verified bodies
+
+`Result.SingleAccepted(expectedCommand)` returns the only accepted main step when
+its command text exactly matches the expected command. Hook commands remain in
+`Attempts` and do not affect this selection. Acceptance does not establish overall
+operation success: an accepted step can coexist with a later hook, observer,
+logger, context or cleanup error. Continue to handle the execution error.
+
+`StepResult.Body()` reads the already strictly decoded, terminal-visible response.
+It removes the confirmed prompt and a matching first-line command echo. Prompt
+matching can include preceding newlines; those are body separators and remain in
+the returned text. Indentation, trailing separators and command-like lines later
+in the body remain unchanged. A successfully accepted command can have an empty
+body. Vendor configuration selection, validation and cleaning remain separate.
+
+```go
+result, executionErr := device.ExecuteCommand(ctx, command, connector.ExecuteOptions{})
+step, receiptErr := result.SingleAccepted(command.Text)
+if receiptErr != nil {
+    return errors.Join(executionErr, receiptErr)
+}
+body, bodyErr := step.Body()
+if err := errors.Join(executionErr, bodyErr); err != nil {
+    return err
+}
+return parse(body)
+```
+
+Both methods return errors matching `connector.ErrInvalidResult` for invalid
+receipts or unavailable bodies. They use safe `*connector.Error` metadata with
+code `invalid_command_result` and phase `parse`; formatting does not include
+commands, response text or conversion causes. Original conversion errors remain
+available through `errors.Is`/`errors.As`. Missing strictly verified text also
+matches `ErrIncomplete`. A backup preservation view, including `original-bytes`,
+is not strict parser input even when its explicit `Response` accessors succeed.
+These methods never decode again, alter snapshots, reconnect or replay commands.
+
 ## Pending: shared inventory collection and evidence ownership
 
 The CLI arguments, configuration fields, report schema and device commands remain

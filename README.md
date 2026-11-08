@@ -14,7 +14,7 @@ GOWORK=off go test ./...
 GOWORK=off go build -o bin/ ./cmd/...
 ```
 
-公开 Go API 的变更见 [迁移说明](docs/api-migration.md)。当前版本统一使用平铺的 `net-connector.yml`，归档协议升级为 v2；迁移步骤见上述说明。
+当前版本为 [v0.5.0](docs/releases/v0.5.0.md)，新增统一的接受回执、正文及有界配置读取 API。公开 Go API 的变更见 [迁移说明](docs/api-migration.md)。配置使用平铺的 `net-connector.yml`，归档协议为 v2。
 
 系统需要 `ssh`；Telnet 连接另需系统 `telnet`。SSH 归档服务器需要管理员安装 `tftp-archive`，默认路径 `/usr/local/bin/tftp-archive`。客户端只探测协议版本和能力，不上传或安装 worker。
 

@@ -22,13 +22,24 @@ const maxDepth = 128
 const maxNodes = 100000
 
 func ParseYAML(data []byte) (map[string]any, error) {
+	return parseYAML(data, false)
+}
+
+// ParseYAMLMapping requires an explicit root mapping, including an empty {}.
+// Empty documents and root nulls are invalid. All other YAML restrictions and
+// resource budgets are shared with ParseYAML.
+func ParseYAMLMapping(data []byte) (map[string]any, error) {
+	return parseYAML(data, true)
+}
+
+func parseYAML(data []byte, requireMapping bool) (map[string]any, error) {
 	if len(data) > MaxBytes {
 		return nil, ErrInvalid
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var root yaml.Node
 	if e := dec.Decode(&root); e != nil {
-		if e == io.EOF {
+		if e == io.EOF && !requireMapping {
 			return map[string]any{}, nil
 		}
 		return nil, ErrInvalid
@@ -117,7 +128,7 @@ func ParseYAML(data []byte) (map[string]any, error) {
 	if e != nil {
 		return nil, e
 	}
-	if v == nil {
+	if v == nil && !requireMapping {
 		return map[string]any{}, nil
 	}
 	m, ok := v.(map[string]any)

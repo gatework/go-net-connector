@@ -8,6 +8,8 @@ if [[ -n "$format_files" ]]; then
   exit 1
 fi
 python3 scripts/release.py check-modules
+python3 scripts/check-architecture.py
+python3 scripts/test_architecture.py
 go version
 go mod verify
 go mod tidy -diff

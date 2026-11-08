@@ -70,18 +70,31 @@ func TestWholeScriptValidationBeforeConnection(t *testing.T) {
 }
 func TestReceiptSurvivesHookFailure(t *testing.T) {
 	p := fixtureProfile()
-	p.AfterCommand = func(context.Context, Command, StepResult, Executor) error { return errors.New("secret callback body") }
-	d, writes := fixtureDevice(t, p, []string{"show\r\nvalue\r\nsw#"})
+	hookErr := errors.New("secret callback body")
+	p.AfterCommand = func(ctx context.Context, _ Command, _ StepResult, executor Executor) error {
+		if _, err := executor.Execute(ctx, Command{Text: "hook"}); err != nil {
+			return err
+		}
+		return hookErr
+	}
+	d, writes := fixtureDevice(t, p, []string{"show\r\nvalue\r\nsw#", "hook\r\ndone\r\nsw#"})
 	receipts := 0
 	r, e := d.ExecuteScript(t.Context(), Script{Commands: []Command{{Text: "show"}, {Text: "next"}}}, ExecuteOptions{OnReceipt: func(context.Context, StepResult) error { receipts++; return nil }})
-	if e == nil || len(r.Steps()) != 1 || receipts != 1 {
+	if !errors.Is(e, hookErr) || len(r.Steps()) != 1 || len(r.Attempts()) != 2 || receipts != 1 {
 		t.Fatalf("steps=%d receipts=%d err=%v", len(r.Steps()), receipts, e)
+	}
+	step, err := r.SingleAccepted("show")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body, err := step.Body(); err != nil || body != "value\n" {
+		t.Fatalf("accepted body=%q err=%v", body, err)
 	}
 	if strings.Contains(fmt.Sprintf("%+v %#v", r, e), "secret") {
 		t.Fatal("secret in diagnostics")
 	}
 	d.Close()
-	if len(*writes) != 1 {
+	if len(*writes) != 2 || (*writes)[1] != "hook" {
 		t.Fatal(*writes)
 	}
 }
@@ -90,6 +103,9 @@ func TestDeviceRejectionProducesNoReceipt(t *testing.T) {
 	r, e := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{})
 	if !errors.Is(e, ErrDevice) || len(r.Steps()) != 0 {
 		t.Fatalf("%+v %v", r, e)
+	}
+	if _, err := r.SingleAccepted("show"); !errors.Is(err, ErrInvalidResult) {
+		t.Fatalf("rejected command produced accepted receipt: %v", err)
 	}
 }
 func TestPagingAccumulatesRawAndExcludesMarker(t *testing.T) {
@@ -103,6 +119,13 @@ func TestPagingAccumulatesRawAndExcludesMarker(t *testing.T) {
 	}
 	if !strings.Contains(r.Steps()[0].Response().Raw(), "--More--") || strings.Contains(testResultOutput(r), "--More--") || !strings.Contains(testResultOutput(r), "three") {
 		t.Fatalf("raw=%q out=%q", r.Steps()[0].Response().Raw(), testResultOutput(r))
+	}
+	step, err := r.SingleAccepted("show")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body, err := step.Body(); err != nil || body != "one\ntwo\nthree\n" {
+		t.Fatalf("paged body=%q err=%v", body, err)
 	}
 	d.Close()
 	if len(*w) != 3 {

@@ -2,9 +2,39 @@ package config
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestParseYAMLMappingRequiresExplicitRoot(t *testing.T) {
+	for _, test := range []struct {
+		name, input string
+	}{
+		{name: "empty"}, {name: "comments", input: "# empty\n"},
+		{name: "null", input: "null"}, {name: "null shorthand", input: "~"},
+		{name: "document marker", input: "---\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := ParseYAMLMapping([]byte(test.input)); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("non-mapping root accepted: %v", err)
+			}
+			if document, err := ParseYAML([]byte(test.input)); err != nil || len(document) != 0 {
+				t.Fatalf("compatible root behavior changed: %v", err)
+			}
+		})
+	}
+	for _, input := range []string{"{}", "---\n{}", "values: [false, null, '', []]"} {
+		got, err := ParseYAMLMapping([]byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := ParseYAML([]byte(input))
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatal("mapping values changed", err)
+		}
+	}
+}
 
 func TestDotenvExpansionBudgets(t *testing.T) {
 	large := strings.Repeat("x", MaxBytes/3)

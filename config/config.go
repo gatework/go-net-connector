@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -8,8 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"golang.org/x/sys/unix"
 )
 
 type Options struct {
@@ -150,41 +149,45 @@ func uniquePaths(paths []string, last string) []string {
 	}
 	return out
 }
-func readFile(path string, missingOK bool) ([]byte, bool, error) {
-	// Configuration follows readable symlinks, unlike private backup storage.
-	// NONBLOCK lets us inspect and reject FIFOs without waiting for a writer.
-	fd, e := unix.Open(path, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
-	if errors.Is(e, os.ErrNotExist) && missingOK {
-		return nil, false, nil
-	}
-	if e != nil {
-		return nil, false, ErrInvalid
-	}
-	file := os.NewFile(uintptr(fd), path)
-	defer file.Close()
-	info, e := file.Stat()
-	if e != nil || !info.Mode().IsRegular() || info.Size() > MaxBytes {
-		return nil, false, ErrInvalid
-	}
-	b, e := io.ReadAll(io.LimitReader(file, MaxBytes+1))
-	if e != nil || len(b) > MaxBytes {
-		return nil, false, ErrInvalid
-	}
-	return b, true, nil
-}
+
+// Load is the compatibility entry point for callers without a context.
 func Load(o Options) (Snapshot, error) {
+	return LoadContext(context.Background(), o)
+}
+
+// LoadContext loads and freezes the configured layers, checking cancellation
+// between discovery, file reads and layer decoding. Filesystem calls and bounded
+// parsers remain synchronous; cancellation cannot interrupt a blocked syscall.
+func LoadContext(ctx context.Context, o Options) (snapshot Snapshot, err error) {
 	s := Snapshot{data: map[string]any{}, environment: map[string]string{}, fields: map[string]string{}}
+	if ctx == nil {
+		return s, ErrInvalid
+	}
+	defer func() {
+		if canceled := ctx.Err(); canceled != nil && !errors.Is(err, canceled) {
+			err = errors.Join(err, canceled)
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return s, err
+	}
 	if o.Name != "backup" && o.Name != "topology" {
 		return s, ErrInvalid
 	}
 	// Validate and own caller data before walking or merging any containers.
 	for _, layer := range []*map[string]any{&o.Defaults, &o.Overrides} {
+		if err := ctx.Err(); err != nil {
+			return s, err
+		}
 		owned, e := copyPlain(*layer)
 		if e != nil {
 			return s, e
 		}
 		*layer = owned.(map[string]any)
 		normalizeSourceFiles(*layer)
+	}
+	if err := ctx.Err(); err != nil {
+		return s, err
 	}
 	actualCWD, e := os.Getwd()
 	if e != nil {
@@ -225,6 +228,9 @@ func Load(o Options) (Snapshot, error) {
 		dirs = []string{"/etc/net-connector", "/usr/local/etc/net-connector", user, filepath.Dir(absolutePath(program, o.CWD, o.Home)), o.CWD}
 	}
 	for i, d := range dirs {
+		if err := ctx.Err(); err != nil {
+			return s, err
+		}
 		dirs[i] = absolutePath(d, o.CWD, o.Home)
 	}
 	dirs = uniquePaths(dirs, "")
@@ -239,7 +245,7 @@ func Load(o Options) (Snapshot, error) {
 	}
 	for _, path := range uniquePaths(envPathsList, envFile) {
 		missingOK := path != envFile || o.AllowMissing
-		b, ok, e := readFile(path, missingOK)
+		b, ok, e := ReadFile(ctx, path, missingOK)
 		if e != nil {
 			return s, e
 		}
@@ -247,6 +253,9 @@ func Load(o Options) (Snapshot, error) {
 			continue
 		}
 		m, e := ParseEnvironment(string(b), s.environment, process)
+		if err := ctx.Err(); err != nil {
+			return s, err
+		}
 		if e != nil {
 			return s, e
 		}
@@ -274,17 +283,20 @@ func Load(o Options) (Snapshot, error) {
 		paths = append(paths, filepath.Join(dir, "net-connector.yml"))
 	}
 	apply := func(m map[string]any, source string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		normalizeSourceFiles(m)
 		if e := resolvePaths(m, filepath.Dir(source), o.Home, ""); e != nil {
 			return e
 		}
 		recordFields(s.fields, s.data, m, source, "")
 		mergeValues(s.data, m)
-		return nil
+		return ctx.Err()
 	}
 	for _, path := range uniquePaths(paths, selected) {
 		missingOK := path != selected || o.AllowMissing
-		b, ok, e := readFile(path, missingOK)
+		b, ok, e := ReadFile(ctx, path, missingOK)
 		if e != nil {
 			return s, e
 		}
@@ -292,6 +304,9 @@ func Load(o Options) (Snapshot, error) {
 			continue
 		}
 		m, e := ParseYAML(b)
+		if err := ctx.Err(); err != nil {
+			return s, err
+		}
 		if e != nil {
 			return s, e
 		}
@@ -326,7 +341,13 @@ func Load(o Options) (Snapshot, error) {
 		higher map[string]any
 		source string
 	}{{s.environment, mergeMaps(mergeMaps(yamlData, processPresence), o.Overrides), ".env"}, {process, o.Overrides, "environment"}} {
+		if err := ctx.Err(); err != nil {
+			return s, err
+		}
 		m, e := environmentValues(layer.env, layer.higher, nil)
+		if err := ctx.Err(); err != nil {
+			return s, err
+		}
 		if e != nil {
 			return s, e
 		}
@@ -345,6 +366,9 @@ func Load(o Options) (Snapshot, error) {
 			recordFields(s.fields, s.data, m, layer.source, "")
 			mergeValues(s.data, m)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return s, err
 	}
 	overrides := cloneValue(o.Overrides)
 	if overrides != nil {
@@ -376,7 +400,7 @@ func Load(o Options) (Snapshot, error) {
 	if s.envPath == "" {
 		s.envPath = filepath.Join(user, ".env")
 	}
-	return s, nil
+	return s, ctx.Err()
 }
 
 func hasPath(values map[string]any, path string) bool {

@@ -28,6 +28,7 @@ var (
 	ErrOutputLimit    = errors.New("connector: output limit exceeded")
 	ErrScriptLimit    = errors.New("connector: script output limit exceeded")
 	ErrInvalid        = errors.New("connector: invalid input")
+	ErrInvalidResult  = errors.New("connector: invalid command result")
 	ErrUnsupported    = errors.New("connector: unsupported operation")
 	ErrIncomplete     = errors.New("connector: incomplete configuration")
 	ErrScope          = errors.New("connector: operation scope ended")

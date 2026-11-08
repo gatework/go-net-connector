@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -13,10 +14,28 @@ import (
 )
 
 func TestStrictYAML(t *testing.T) {
-	for _, s := range []string{"a: 1\na: 2", "a: &a [1]\nb: *a", "1: yes", "a: 1\n---\nb: 2", "a: !!python/object {}"} {
-		if _, e := ParseYAML([]byte(s)); e == nil {
-			t.Fatalf("accepted %q", s)
-		}
+	for name, parse := range map[string]func([]byte) (map[string]any, error){"compatible": ParseYAML, "mapping": ParseYAMLMapping} {
+		t.Run(name, func(t *testing.T) {
+			for _, s := range []string{"a: 1\na: 2", "a: &a [1]\nb: *a", "1: yes", "a: 1\n---\nb: 2", "a: !!python/object {}"} {
+				if _, e := parse([]byte(s)); !errors.Is(e, ErrInvalid) {
+					t.Fatalf("accepted %q", s)
+				}
+			}
+		})
+	}
+}
+
+func TestLoadContextCancellationPrecedesDiscovery(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	root := t.TempDir()
+	path := filepath.Join(root, "net-connector.yml")
+	if err := unix.Mkfifo(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadContext(ctx, Options{Name: "backup", CWD: root, Home: root, Directories: []string{root}})
+	if !errors.Is(err, context.Canceled) || errors.Is(err, ErrInvalid) {
+		t.Fatalf("discovery preceded cancellation: %v", err)
 	}
 }
 func TestLayerPrecedenceAndPaths(t *testing.T) {
