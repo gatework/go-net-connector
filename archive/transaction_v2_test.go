@@ -369,7 +369,10 @@ func TestWorkerUsesConfiguredLongUploadWindow(t *testing.T) {
 }
 
 func TestPreparationBoundsLauncherWithoutExpiringWorker(t *testing.T) {
-	c, _ := transactionClient(t, Timeouts{Prepare: 25 * time.Millisecond})
+	c, _ := transactionClient(t, Timeouts{})
+	// Only the blocked launcher uses this short budget; filesystem preflight
+	// must complete before exercising the transaction preparation deadline.
+	c.timeouts.Prepare = 25 * time.Millisecond
 	var calls atomic.Int32
 	c.launch = func(ctx context.Context) (Channel, error) {
 		calls.Add(1)
