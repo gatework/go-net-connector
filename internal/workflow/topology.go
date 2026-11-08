@@ -4,65 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/fleet"
-	"github.com/gatework/go-net-connector/internal/display"
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/parallel"
 	"github.com/gatework/go-net-connector/storage"
 	"github.com/gatework/go-net-connector/topology"
 )
 
-var topologyPrefix = regexp.MustCompile(`^[\pL\pN_.-]+$`)
 var topologyWhitespace = regexp.MustCompile(`\s+`)
-
-type topologyOutcome struct {
-	device fleet.Record
-	plan   *topology.Plan
-	row    map[string]any
-	audit  topology.Audit
-	result topology.Result
-}
-
-func ValidateTopologyPolicy(p config.Snapshot, o TopologyOptions) error {
-	mode, _ := p.Value("topology.mode").(string)
-	if mode == "" {
-		mode = "plan"
-	}
-	if o.Mode == "apply" {
-		mode = "apply"
-	} else if o.Mode == "discover" {
-		mode = "discover"
-	} else if o.Mode == "plan" {
-		mode = "plan"
-	}
-	if mode == "apply" && o.Mode != "apply" || mode != "plan" && mode != "discover" && mode != "apply" {
-		return config.ErrInvalid
-	}
-	format, _ := p.Value("topology.description_format").(string)
-	if strings.ContainsAny(format, "\r\n\x00") || strings.Contains(strings.ReplaceAll(strings.ReplaceAll(format, "%{neighbor}", ""), "%{port}", ""), "%") {
-		return config.ErrInvalid
-	}
-	if values, ok := p.Value("topology.neighbor_name_prefixes").([]any); ok {
-		for _, v := range values {
-			prefix, ok := v.(string)
-			if !ok || !topologyPrefix.MatchString(prefix) {
-				return config.ErrInvalid
-			}
-		}
-	}
-	if cacheMode, ok := p.Value("topology.cache_mode").(string); ok && cacheMode != "prefer" && cacheMode != "only" && cacheMode != "refresh" {
-		return config.ErrInvalid
-	}
-	return nil
-}
 
 func supportsTopologyMode(declaration any, mode string) bool {
 	if _, ok := declaration.(topology.NeighborDiscovery); !ok {
@@ -82,20 +37,10 @@ func supportsTopologyMode(declaration any, mode string) bool {
 }
 
 func (r *Runner) Topology(ctx context.Context, runtime Runtime, settings TopologySettings, rows []inventory.Device, o TopologyOptions) (Result, error) {
-	r.result = Result{}
+	r.begin()
 	mode := settings.Mode
-	if mode == "" {
-		mode = "plan"
-	}
-	if o.Mode == "apply" {
-		mode = "apply"
-	} else if o.Mode == "discover" {
-		mode = "discover"
-	} else if o.Mode == "plan" {
-		mode = "plan"
-	}
-	if mode == "apply" && o.Mode != "apply" || mode != "plan" && mode != "discover" && mode != "apply" {
-		return r.fail(config.ErrInvalid)
+	if mode != "plan" && mode != "discover" && mode != "apply" {
+		return r.fail(ErrInvalidRequest)
 	}
 	// The inventory plan owns duplicate-address classification for every CLI.
 	plan, e := fleet.NewPlan(rows, runtime.Rules, fleet.PlanOptions{Mode: "backup"})
@@ -103,7 +48,7 @@ func (r *Runner) Topology(ctx context.Context, runtime Runtime, settings Topolog
 		return r.fail(e)
 	}
 	devices := []fleet.Record{}
-	inventoryRows := []map[string]any{}
+	inventoryRows := []topologyInventoryEntry{}
 	issues := map[string]int{}
 	unexpected := false
 	for _, entry := range plan.Entries() {
@@ -112,7 +57,7 @@ func (r *Runner) Topology(ctx context.Context, runtime Runtime, settings Topolog
 		if entry.Status == "duplicate_host" {
 			issue = entry.Status
 		}
-		inventoryRows = append(inventoryRows, map[string]any{"host": nullableString(record.Host), "vendor": nullableString(record.Vendor), "issue": nullableString(issue)})
+		inventoryRows = append(inventoryRows, topologyInventoryEntry{record.Host, record.Vendor, issue})
 		if issue == "" {
 			devices = append(devices, record)
 		} else {
@@ -123,11 +68,7 @@ func (r *Runner) Topology(ctx context.Context, runtime Runtime, settings Topolog
 		}
 	}
 	if o.InventoryOnly {
-		preview := []map[string]any{}
-		for _, d := range devices {
-			preview = append(preview, map[string]any{"host": d.Host, "name": nullableString(d.Name), "vendor": d.Vendor})
-		}
-		r.result = Result{Success: len(devices) > 0, Topology: &TopologyResult{Inventory: plan.Entries(), Summary: map[string]any{"total": len(rows), "ready": len(devices), "issues": issues, "devices": preview}}}
+		r.result = Result{Success: len(devices) > 0, Topology: &TopologyResult{Inventory: plan.Entries(), Report: &TopologyReport{preview: &topologyPreview{len(rows), len(devices), issues, devices}}}}
 		return r.result, nil
 	}
 
@@ -155,24 +96,15 @@ func (r *Runner) Topology(ctx context.Context, runtime Runtime, settings Topolog
 		}
 		devices = selected
 	}
-	progress := r.reporter()
-	_ = progress.Plan(len(rows), len(devices), workers, "topology")
+	_ = r.emit(PlanEvent{Total: len(rows), Selected: len(devices), Workers: workers, Mode: "topology"})
 	observer := r.observe()
 	format := settings.DescriptionFormat
 	if format == "" {
 		format = "To_%{neighbor}_%{port}"
 	}
-	if strings.ContainsAny(format, "\r\n\x00") || strings.Contains(strings.ReplaceAll(strings.ReplaceAll(format, "%{neighbor}", ""), "%{port}", ""), "%") {
-		return r.fail(config.ErrInvalid)
-	}
 	abbreviate := settings.AbbreviatePorts
 	lower := settings.LowercasePorts
 	prefixes := append([]string(nil), settings.NeighborNamePrefixes...)
-	for _, prefix := range prefixes {
-		if !topologyPrefix.MatchString(prefix) {
-			return r.fail(config.ErrInvalid)
-		}
-	}
 	directory, e = storage.CreateBatchDirectory(directory, time.Now())
 	if e != nil {
 		return r.fail(e)
@@ -212,81 +144,55 @@ func (r *Runner) Topology(ctx context.Context, runtime Runtime, settings Topolog
 	notify := func(out *topologyOutcome) {
 		eventMu.Lock()
 		defer eventMu.Unlock()
-		copy := map[string]any{}
-		for k, v := range out.row {
-			if k != "commands" {
-				copy[k] = v
-			}
-		}
-		if e := json.NewEncoder(eventsFile).Encode(copy); e != nil {
-			out.row["event_error_type"] = "IOError"
+		if e := json.NewEncoder(eventsFile).Encode(out.row(false)); e != nil {
+			out.eventError = true
 			if eventError == nil {
 				eventError = e
 			}
 		}
-		if r.Reporter != nil {
-			code := ""
-			if diag, ok := out.row["diagnostic"].(map[string]any); ok {
-				code, _ = diag["error_code"].(string)
-			}
-			duration, _ := out.row["duration_ms"].(int64)
-			if e := r.Reporter.Outcome(out.device.Host, fmt.Sprint(out.row["status"]), code, time.Duration(duration)*time.Millisecond); e != nil {
-				out.row["progress_error_type"] = "IOError"
-				if progressError == nil {
-					progressError = e
-				}
-			}
-		} else if r.Progress != nil {
-			if _, e := fmt.Fprintf(r.Progress, "%s: %v\n", out.device.Host, display.Status(fmt.Sprint(out.row["status"]))); e != nil {
-				out.row["progress_error_type"] = "IOError"
-				if progressError == nil {
-					progressError = e
-				}
+		if e := r.emit(OutcomeEvent{Host: out.device.Host, Status: string(out.state), ErrorCode: out.diagnostic.code, Duration: out.duration}); e != nil {
+			out.progressError = true
+			if progressError == nil {
+				progressError = e
 			}
 		}
 	}
 	execute := func(ctx context.Context, d fleet.Record, previous *topologyOutcome) (out topologyOutcome, err error) {
-		_ = progress.Start(d.Host, d.Vendor)
+		_ = r.emit(StartEvent{Host: d.Host, Vendor: d.Vendor})
 		start := time.Now()
-		out = topologyOutcome{device: d, row: map[string]any{"host": d.Host, "vendor": d.Vendor, "status": "failed"}}
+		out = topologyOutcome{device: d, state: topologyFailed}
 		if previous != nil {
 			out = *previous
-			out.row = map[string]any{}
-			for k, v := range previous.row {
-				out.row[k] = v
-			}
 		}
 		defer func() {
-			out.row["started_at"] = start.UTC().Format(time.RFC3339)
-			out.row["finished_at"] = time.Now().UTC().Format(time.RFC3339)
-			out.row["duration_ms"] = time.Since(start).Milliseconds()
+			out.startedAt, out.finishedAt, out.duration = start, time.Now(), time.Since(start)
 			if err != nil {
 				if out.result.Persisted {
-					out.row["status"] = "persisted_with_error"
+					out.state = topologyPersistedWithError
 				} else if errors.Is(err, fleet.ErrMissingCredentials) {
-					out.row["status"] = "missing_credentials"
+					out.state = topologyMissingCredentials
 				} else if ctx.Err() != nil {
-					out.row["status"] = "interrupted"
+					out.state = topologyInterrupted
 				} else {
-					if count, ok := out.row["steps"].(int); ok && count > 0 {
-						out.row["status"] = "partial"
+					if out.steps() > 0 {
+						out.state = topologyPartial
 					} else {
-						out.row["status"] = "failed"
+						out.state = topologyFailed
 					}
 				}
 				var te *topology.Error
 				if errors.As(err, &te) {
-					out.row["diagnostic"] = map[string]any{"error_code": te.Code, "phase": te.Phase, "error_type": "Net::Connector::Error"}
+					out.diagnostic = topologyDiagnostic{te.Code, te.Phase, "Net::Connector::Error"}
 				} else {
-					out.row["diagnostic"] = map[string]any{"error_type": "StandardError"}
+					out.diagnostic = topologyDiagnostic{errorType: "StandardError"}
 				}
 			}
-			out.row["session_log"] = filepath.Join(runtime.logDir("topology", directory), strings.ReplaceAll(d.Host, ":", "_")+".log")
+			out.sessionLog = filepath.Join(runtime.logDir("topology", directory), strings.ReplaceAll(d.Host, ":", "_")+".log")
 			notify(&out)
 		}()
 		declaration, lookupErr := runtime.Registry.Lookup(d.Vendor)
 		if lookupErr != nil || !supportsTopologyMode(declaration, mode) {
-			out.row["status"] = "unsupported_operation"
+			out.state = topologyUnsupported
 			return out, nil
 		}
 		device, closeDevice, e := openDevice(ctx, runtime, d, runtime.logDir("topology", directory), observer)
@@ -302,181 +208,126 @@ func (r *Runner) Topology(ctx context.Context, runtime Runtime, settings Topolog
 		}
 		if previous != nil {
 			result, e := t.Apply(ctx, *previous.plan, topology.ApplyOptions{Confirmed: true})
-			out.result = result
-			out.row["verified"] = result.Verified
-			out.row["persisted"] = result.Persisted
-			out.row["receipts"] = result.Receipts
-			out.row["steps"] = len(result.Steps())
-			out.row["status"] = "applied"
-			if items, ok := out.row["issues"].([]topology.Issue); ok && len(items) > 0 {
-				out.row["status"] = "partial_applied"
+			out.result, out.applied = result, true
+			out.state = topologyApplied
+			if len(out.audit.Issues) > 0 {
+				out.state = topologyPartialApplied
 			}
 			return out, e
 		}
 		audit, e := t.Audit(ctx, opts)
-		out.audit = audit
-		out.row["receipts"] = audit.Receipts
-		out.row["steps"] = len(audit.Receipts)
+		out.audit, out.audited = audit, true
 		out.plan = audit.Plan
 		if mode == "discover" {
 			out.plan = nil
 		}
-		out.row["neighbors"] = audit.Comparisons
-		out.row["issues"] = audit.Issues
-		out.row["changes"] = audit.Changes()
-		out.row["commands"] = []string{}
-		if out.plan != nil {
-			out.row["commands"] = out.plan.Commands
-		}
 		if e != nil {
 			return out, e
 		}
-		status := "discovered"
+		status := topologyDiscovered
 		if !audit.Complete() {
-			status = "unverified"
+			status = topologyUnverified
 			if out.plan != nil && len(out.plan.Changes) > 0 && mode != "discover" {
-				status = "partial_planned"
+				status = topologyPartialPlanned
 			}
 		} else if mode != "discover" {
 			if audit.ManualRequired {
-				status = "manual_required"
+				status = topologyManualRequired
 			} else if out.plan != nil {
-				status = "planned"
+				status = topologyPlanned
 			}
 		}
-		out.row["status"] = status
+		out.state = status
 		return out, nil
 	}
 	collected, collectErr := parallel.Map(ctx, workers, devices, func(ctx context.Context, d fleet.Record) (topologyOutcome, error) { return execute(ctx, d, nil) })
 	outcomes := make([]topologyOutcome, len(devices))
 	for i, item := range collected {
-		if item.Started && item.Value.row != nil {
+		if item.Started && item.Value.state != "" {
 			outcomes[i] = item.Value
 		} else {
-			outcomes[i] = topologyOutcome{device: devices[i], row: map[string]any{"host": devices[i].Host, "vendor": devices[i].Vendor, "status": "not_started"}}
+			outcomes[i] = topologyOutcome{device: devices[i], state: topologyNotStarted}
 			if item.Started {
-				outcomes[i].row["status"] = "failed"
-				outcomes[i].row["diagnostic"] = map[string]any{"error_code": "internal_error", "phase": "callback"}
+				outcomes[i].state = topologyFailed
+				outcomes[i].diagnostic = topologyDiagnostic{code: "internal_error", phase: "callback"}
 			}
 		}
 	}
 	// Preserve every collected audit before any later persistence can fail.
-	collectedRows := make([]map[string]any, 0, len(outcomes))
-	for _, out := range outcomes {
-		collectedRows = append(collectedRows, out.row)
-	}
-
-	r.result = Result{Topology: &TopologyResult{Directory: directory, Outcomes: makeTopologyOutcomes(outcomes), Summary: map[string]any{"mode": mode, "success": false, "directory": directory, "inventory": inventoryRows, "devices": collectedRows}}}
+	report := &TopologyReport{Mode: mode, Directory: directory, inventory: inventoryRows, outcomes: outcomes}
+	r.result = Result{Topology: &TopologyResult{Directory: directory, Outcomes: makeTopologyOutcomes(outcomes), Report: report}}
 	// All review artifacts are durable before any application task is admitted.
-	_ = progress.Phase("正在保存拓扑计划")
+	_ = r.emit(PhaseEvent{Phase: PhaseTopologyPlan})
 	if e = saveTopologyPlan(context.WithoutCancel(ctx), directory, outcomes, runtime.Registry); e != nil {
-		r.result.Topology.Summary["report_error"] = "IOError"
-		_ = persistTopologySummary(context.WithoutCancel(ctx), directory, r.result.Topology.Summary)
+		report.ReportError = "IOError"
+		_ = persistTopologySummary(context.WithoutCancel(ctx), directory, report)
 		return r.fail(e)
 	}
 	if mode == "apply" && collectErr == nil {
 		pending := 0
 		for _, out := range outcomes {
-			if out.plan != nil && len(out.plan.Changes) > 0 && (out.row["status"] == "planned" || out.row["status"] == "partial_planned") {
+			if out.plan != nil && len(out.plan.Changes) > 0 && out.state.permitsApply() {
 				pending++
 			}
 		}
-		_ = progress.Phase("重新核验并应用拓扑计划")
-		_ = progress.BeginPhase(pending, workers)
+		_ = r.emit(PhaseEvent{Phase: PhaseTopologyApply})
+		_ = r.emit(BeginPhaseEvent{Total: pending, Workers: workers})
 		applied, applyErr := parallel.Map(ctx, workers, outcomes, func(ctx context.Context, out topologyOutcome) (topologyOutcome, error) {
-			if out.plan == nil || out.row["status"] != "planned" && out.row["status"] != "partial_planned" {
+			if out.plan == nil || !out.state.permitsApply() {
 				return out, nil
 			}
 			if len(out.plan.Changes) == 0 {
-				out.row["status"] = "unchanged"
+				out.state = topologyUnchanged
 				notify(&out)
 				return out, nil
 			}
 			return execute(ctx, out.device, &out)
 		})
 		for i, item := range applied {
-			if item.Started && item.Value.row != nil {
+			if item.Started && item.Value.state != "" {
 				outcomes[i] = item.Value
 			} else if item.Started {
-				outcomes[i].row["status"] = "failed"
-				outcomes[i].row["diagnostic"] = map[string]any{"error_code": "internal_error", "phase": "callback"}
+				outcomes[i].state = topologyFailed
+				outcomes[i].diagnostic = topologyDiagnostic{code: "internal_error", phase: "callback"}
 			}
 		}
 		collectErr = applyErr
 	}
-	counts := map[string]int{}
-	summaries := []map[string]any{}
-	success := !unexpected && ctx.Err() == nil
-	attempted := 0
-	stats := map[string]int{"collected": 0, "failed": 0, "unchanged": 0, "change_devices": 0, "changes": 0, "review_devices": 0, "review_interfaces": 0}
-	for _, out := range outcomes {
-		status, _ := out.row["status"].(string)
-		counts[status]++
-		summaries = append(summaries, out.row)
-		if status != "unsupported_operation" {
-			attempted++
-		}
-		changes, _ := out.row["changes"].(int)
-		items, _ := out.row["issues"].([]topology.Issue)
-		if changes > 0 {
-			stats["change_devices"]++
-			stats["changes"] += changes
-		}
-		if len(items) > 0 {
-			stats["review_devices"]++
-			stats["review_interfaces"] += len(items)
-		}
-		if (status == "planned" || status == "unchanged") && changes == 0 {
-			stats["unchanged"]++
-		}
-		bad := status == "persisted_with_error" || status == "failed" || status == "partial" || status == "missing_credentials" || status == "interrupted" || status == "not_started"
-		if bad || out.row["event_error_type"] != nil || out.row["progress_error_type"] != nil {
-			stats["failed"]++
-		} else if status != "unsupported_operation" {
-			stats["collected"]++
-		}
-		if status != "planned" && status != "discovered" && status != "applied" && status != "unchanged" && status != "unsupported_operation" || mode == "plan" && changes > 0 {
-			success = false
-		}
-	}
-	success = success && attempted > 0
-	summary := map[string]any{"mode": mode, "success": success, "directory": directory, "counts": counts, "statistics": stats, "inventory": inventoryRows, "devices": summaries}
-	if ctx.Err() != nil {
-		summary["interrupted"] = true
-	}
+	report.Interrupted = ctx.Err() != nil
+	report.summarize(unexpected)
 	if collectErr != nil {
-		summary["orchestration_error_type"] = "StandardError"
-		summary["success"] = false
+		report.OrchestrationError = "StandardError"
+		report.Success = false
 	}
 	if e = eventsFile.Sync(); eventError == nil {
 		eventError = e
 	}
 	if eventError != nil || progressError != nil {
-		summary["success"] = false
-		summary["report_error"] = "IOError"
+		report.Success = false
+		report.ReportError = "IOError"
 	}
 	if progressError != nil {
-		summary["progress_error"] = "IOError"
+		report.ProgressError = "IOError"
 	}
 	if mode == "apply" {
 		for _, out := range outcomes {
-			if out.row["status"] == "not_started" {
+			if out.state == topologyNotStarted {
 				continue
 			}
 			if e = writeTopologyDeviceReport(context.WithoutCancel(ctx), directory, out); e != nil {
-				summary["success"] = false
-				summary["report_error"] = "IOError"
+				report.Success = false
+				report.ReportError = "IOError"
 				break
 			}
 		}
 	}
-	_ = persistTopologySummary(context.WithoutCancel(ctx), directory, summary)
-	r.result = Result{Success: summary["success"] == true, Topology: &TopologyResult{Directory: directory, Summary: summary, Outcomes: makeTopologyOutcomes(outcomes)}}
-	_ = progress.Finish()
+	_ = persistTopologySummary(context.WithoutCancel(ctx), directory, report)
+	r.result = Result{Success: report.Success, Topology: &TopologyResult{Directory: directory, Report: report, Outcomes: makeTopologyOutcomes(outcomes)}}
+	r.finishBatch(ctx)
 	if ctx.Err() != nil {
 		return r.result, context.Canceled
 	}
-	if summary["success"] == true {
+	if report.Success {
 		return r.complete(true), nil
 	}
 	return r.complete(false), nil

@@ -10,13 +10,14 @@ import (
 
 	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/internal/display"
+	"github.com/gatework/go-net-connector/internal/topologyreport"
 	"golang.org/x/term"
 
 	"github.com/gatework/go-net-connector/internal/workflow"
 )
 
 func operationLabel(o options) string {
-	if o.inventoryOnly || o.action == "inventory" {
+	if o.action == "inventory" {
 		return "设备清单"
 	}
 	switch o.mode {
@@ -29,41 +30,35 @@ func operationLabel(o options) string {
 	}
 }
 
-func (r Runtime) displayTopology(data map[string]any, o options) error {
+func (r Runtime) displayTopology(result *workflow.TopologyResult, o options) error {
 	if o.json {
-		return writeReportOutput(r.Output, data)
+		return writeReportOutput(r.Output, result.Summary())
 	}
+	report := result.Report
 	var b strings.Builder
-	statistics, _ := data["statistics"].(map[string]int)
-	failed := statistics["failed"]
-	reviewInterfaces := statistics["review_interfaces"]
-	if failed > 0 || reviewInterfaces > 0 || data["report_error"] != nil || data["progress_error"] != nil || data["output_error"] != nil || data["interrupted"] == true {
+	statistics := report.Statistics
+	failed := statistics.Failed
+	reviewInterfaces := statistics.ReviewInterfaces
+	if failed > 0 || reviewInterfaces > 0 || report.ReportError != "" || report.ProgressError != "" || report.OutputError != "" || report.Interrupted {
 		b.WriteString(display.Section(r.Output, "异常与警告"))
 		if failed > 0 {
 			fmt.Fprintf(&b, "任务异常：%d 台设备执行失败；逐台诊断见报告。\n", failed)
 		}
 		if reviewInterfaces > 0 {
-			fmt.Fprintf(&b, "待核实接口：%d 个，涉及 %d 台设备。\n", reviewInterfaces, statistics["review_devices"])
+			fmt.Fprintf(&b, "待核实接口：%d 个，涉及 %d 台设备。\n", reviewInterfaces, statistics.ReviewDevices)
 		}
-		if data["interrupted"] == true {
+		if report.Interrupted {
 			b.WriteString("批次已中断；未完成设备未执行。\n")
 		}
-		if data["report_error"] != nil || data["progress_error"] != nil || data["output_error"] != nil {
+		if report.ReportError != "" || report.ProgressError != "" || report.OutputError != "" {
 			b.WriteString("报告或进度输出存在异常；请核对下方报告文件。\n")
 		}
 	}
 	b.WriteString(display.Section(r.Output, "执行结果"))
-	b.WriteString(workflow.TopologyResultLines(data))
-	if directory, ok := data["directory"].(string); ok {
+	b.WriteString(topologyreport.ResultLines(report.Presentation()))
+	if directory := report.Directory; directory != "" {
 		b.WriteString(display.Section(r.Output, "文件与报告"))
-		scripts := 0
-		if rows, ok := data["devices"].([]map[string]any); ok {
-			for _, row := range rows {
-				if script, ok := row["script_file"].(string); ok && script != "" {
-					scripts++
-				}
-			}
-		}
+		scripts := report.ScriptCount()
 		if scripts > 0 {
 			fmt.Fprintf(&b, "命令文件：%s（%d 台设备存在变更）\n", display.Text(filepath.Join(directory, "scripts")), scripts)
 		}
@@ -89,7 +84,7 @@ func (r Runtime) renderResult(result workflow.Result, o options, interrupted boo
 		if !o.json && result.Topology.Inventory != nil {
 			return r.inventoryTable(result.Topology.Inventory)
 		}
-		return r.displayTopology(result.Topology.Summary, o)
+		return r.displayTopology(result.Topology, o)
 	}
 	if result.Preview != nil {
 		if o.json {

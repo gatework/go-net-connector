@@ -1,8 +1,6 @@
 package bootstrap
 
 import (
-	"bytes"
-	"encoding/json"
 	"net/url"
 	"strings"
 
@@ -10,31 +8,6 @@ import (
 	"github.com/gatework/go-net-connector/netdisco"
 )
 
-func orderedConnectionIdentity(values map[string]any) (json.RawMessage, error) {
-	var b bytes.Buffer
-	b.WriteByte('{')
-	first := true
-	for _, key := range []string{"port", "connect_timeout", "sslmode", "sslrootcert", "host", "dbname", "user"} {
-		v, ok := values[key]
-		if !ok {
-			continue
-		}
-		data, e := json.Marshal(v)
-		if e != nil {
-			return nil, e
-		}
-		k, _ := json.Marshal(key)
-		if !first {
-			b.WriteByte(',')
-		}
-		first = false
-		b.Write(k)
-		b.WriteByte(':')
-		b.Write(data)
-	}
-	b.WriteByte('}')
-	return json.RawMessage(b.Bytes()), nil
-}
 func (s *Services) validatePolicy() error {
 	p := s.policy
 	for _, key := range []string{"page_size", "max_pages", "max_devices", "max_response_bytes", "max_inventory_bytes"} {

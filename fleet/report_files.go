@@ -67,13 +67,7 @@ func (r Report) Text(directory string, p Plan, workers int) string {
 	}
 	for _, o := range b.outcomes {
 		if a := o.Artifact.Backup; a != nil && a.TextWarning != nil {
-			committed, verified := false, false
-			if a.TextOnly {
-				committed, verified = a.HasSavedEvidence(), a.Complete()
-			} else if a.Source != nil {
-				committed = a.Source.File.Committed()
-				verified = a.Source.File.Durable() || a.Source.NoWriteVerified
-			}
+			committed, verified := a.SourceEvidence()
 			lines = append(lines, fmt.Sprintf("%s | 文本编码告警：%d 个字节；%s；详见 JSON 告警位置", o.Device.Host, a.TextWarning.Count, zh.SourceState(committed, verified)))
 		}
 	}

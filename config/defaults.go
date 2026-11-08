@@ -117,15 +117,5 @@ func InitializeSelected(s Snapshot, name string, createConfig, createEnv bool) (
 	return created, nil
 }
 func FromEnvironment(values map[string]string) (map[string]any, error) {
-	m := map[string]any{}
-	for path, f := range schema {
-		if value, ok := values[f.Env]; ok {
-			v, e := decodeEnv(value, f.Kind)
-			if e != nil {
-				return nil, ErrInvalid
-			}
-			setPath(m, path, v)
-		}
-	}
-	return m, nil
+	return environmentValues(values, nil, nil)
 }

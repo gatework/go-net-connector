@@ -2,8 +2,11 @@
 
 ```mermaid
 flowchart TD
-  CLI[netman 命令树与组合入口] --> Bootstrap[bootstrap: 构造依赖]
-  CLI --> Workflow[具体业务工作流]
+  CLI[cli: 命令解析与终端交互] --> Bootstrap[bootstrap: 配置与依赖组装]
+  CLI --> Workflow[workflow: 具体业务工作流]
+  CLI --> Presentation[topologyreport: 类型化文本呈现]
+  Workflow --> Presentation
+  Workflow -. 类型化事件 .-> CLI
   Bootstrap -. 注入消费端依赖 .-> Workflow
   Bootstrap --> Policy[不可变配置及纯规划]
   Bootstrap --> Source[HTTP / PostgreSQL / Cache]
@@ -21,6 +24,16 @@ flowchart TD
 ```
 
 Profile 只声明规则；Device 拥有当前会话和操作租约。transport 拥有进程组，expect 拥有单一输入泵。Topology 的发现、重验、修改、读回和保存共用一次租约。每次归档的目标锁覆盖旧文件保留、服务器时钟标记、设备上传、核验、双端持久化和清理。
+
+## 应用组合与呈现
+
+`internal/cli` 拥有 Cobra 命令树、参数转换、交互、退出码和终端文字。它把明确的命令意图交给 `internal/bootstrap`，由后者负责配置加载、命令默认值、备份策略、缓存模式、拓扑策略校验和依赖组装。Bootstrap 将配置快照转换成 `workflow.Runtime`、`TFTPSettings`、`TopologySettings`；工作流不读取配置键，也不解析命令参数。拓扑 apply 需要明确的 apply 命令，配置中的 mode 不能把 plan 提升为写操作。凭据仍在设备或归档资源实际构造时读取。
+
+`internal/workflow` 拥有业务步骤、报告持久化、保留证据和错误收尾。它通过串行的类型化 `Event` 回调报告计划、阶段、会话元数据和结果；`internal/cli` 将事件映射到 `progress.Reporter`，工作流不依赖终端 Reporter 或中文显示函数。回调失败会保留并在最终报告中降低成功状态；已确认的设备步骤、归档证明和存储回执继续保留，不重放设备写入。命令最终输出失败仍通过 `RecordOutputFailure` 回写报告。
+
+`internal/topologyreport` 拥有拓扑文本呈现的数据结构与渲染，CLI 摘要、持久化 summary.txt 和单设备报告共用这一实现。Workflow 的 `TopologyReport.Presentation` 返回与保留状态分离的类型化快照；调用方修改统计、命令、比较项或诊断不能改变后续执行资格和报告证据。执行状态与 apply 准入仍由 workflow 的私有类型负责，JSON schema 保持原有格式。
+
+共享清单配置由公开 `config.InventoryEnvironment` 与 `config.ValidateInventory` 处理，只接受 `netdisco` / `inventory` 范围，并复用 config 内部同一份字段定义和解码器。环境投影先按高优先级字段的存在性屏蔽，再解析剩余值；false、null、空列表和替换父节都属于明确覆盖。纯校验不发现文件、不解析路径、不补默认值，也不读取凭据，业务程序仍拥有自己的文件与参数入口。
 
 ## 厂商方言与能力
 

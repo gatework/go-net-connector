@@ -7,8 +7,6 @@ import (
 
 	"github.com/gatework/go-net-connector/internal/workflow"
 
-	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/netdisco"
 )
 
@@ -39,8 +37,8 @@ func TestCacheNamespaceFailureExplainsRequiredSetting(t *testing.T) {
 }
 
 func TestBackupProgressDoesNotClaimUncommittedSource(t *testing.T) {
-	out := fleet.Outcome{Status: "failed", Artifact: fleet.Artifact{Backup: &connector.BackupReceipt{TextWarning: &connector.TextWarning{Count: 1}}}}
-	if got := workflow.BackupProgress(out); strings.Contains(got, "原文已保留") || !strings.Contains(got, "原文保存未确认") {
+	out := workflow.OutcomeEvent{Status: "failed", TextWarningBytes: 1}
+	if got := backupProgress(out); strings.Contains(got, "原文已保留") || !strings.Contains(got, "原文保存未确认") {
 		t.Fatal(got)
 	}
 }

@@ -1,10 +1,7 @@
 package workflow
 
 import (
-	"fmt"
-
 	"github.com/gatework/go-net-connector/fleet"
-	"github.com/gatework/go-net-connector/internal/display"
 )
 
 func artifactView(a fleet.Artifact) any {
@@ -34,22 +31,4 @@ func artifactView(a fleet.Artifact) any {
 		return map[string]any{"archive": a.Archive.Clone()}
 	}
 	return nil
-}
-
-func BackupProgress(out fleet.Outcome) string {
-	text := display.Status(out.Status)
-	if b := out.Artifact.Backup; b != nil && b.TextWarning != nil && b.TextWarning.Count > 0 {
-		committed, verified := false, false
-		if b.TextOnly {
-			committed, verified = b.HasSavedEvidence(), b.Complete()
-		} else if b.Source != nil {
-			committed = b.Source.File.Committed()
-			verified = b.Source.File.Durable() || b.Source.NoWriteVerified
-		}
-		text += fmt.Sprintf("（文本编码告警：%d 个字节；%s）", b.TextWarning.Count, display.SourceState(committed, verified))
-	}
-	if out.ErrorCode != "" {
-		text += "；" + display.Error(out.ErrorCode)
-	}
-	return text
 }

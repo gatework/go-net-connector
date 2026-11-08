@@ -76,5 +76,5 @@ func (r Runtime) renderBatch(result workflow.Result, o options, interrupted bool
 	if interrupted {
 		exit = 130
 	}
-	return writeReportOutput(r.Output, map[string]any{"directory": b.Directory, "counts": summary["counts"], "text_warning_devices": summary["text_warning_devices"], "tasks_succeeded": b.Report.Success(), "success": b.Report.Success(), "policy": o.policy, "policy_success": b.Report.Success(), "exit_status": exit, "report_location": summary["report_location"], "report_error": summary["report_error"]})
+	return writeReportOutput(r.Output, map[string]any{"directory": b.Directory, "counts": summary["counts"], "text_warning_devices": summary["text_warning_devices"], "tasks_succeeded": b.Report.Success(), "success": b.Report.Success(), "policy": summary["policy"], "policy_success": b.Report.Success(), "exit_status": exit, "report_location": summary["report_location"], "report_error": summary["report_error"]})
 }

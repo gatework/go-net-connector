@@ -10,12 +10,9 @@ import (
 	"github.com/gatework/go-net-connector/fleet"
 )
 
-type journalBrokenProgress struct{ err error }
-
-func (p journalBrokenProgress) Write([]byte) (int, error) { return 0, p.err }
 func TestJournalPersistsEventWhenProgressFails(t *testing.T) {
 	cause := errors.New("progress unavailable")
-	j, err := openBatchJournal(t.TempDir(), journalBrokenProgress{cause})
+	j, err := openBatchJournal(t.TempDir(), func(fleet.Outcome) error { return cause })
 	if err != nil {
 		t.Fatal(err)
 	}

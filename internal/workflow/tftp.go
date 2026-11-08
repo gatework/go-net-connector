@@ -6,8 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,14 +13,13 @@ import (
 	"github.com/gatework/go-net-connector/archive"
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/fleet"
-	"github.com/gatework/go-net-connector/internal/progress"
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/storage"
 	"github.com/gatework/go-net-connector/transfer"
 )
 
 func (r *Runner) TFTP(ctx context.Context, runtime Runtime, settings TFTPSettings, rows []inventory.Device, o TFTPOptions) (Result, error) {
-	r.result = Result{}
+	r.begin()
 	if settings.Policy == nil {
 		return r.fail(errors.New("workflow: TFTP policy is not configured"))
 	}
@@ -82,8 +79,7 @@ func (r *Runner) TFTP(ctx context.Context, runtime Runtime, settings TFTPSetting
 		result.Preview.View = view
 		return result, nil
 	}
-	p := r.reporter()
-	_ = p.Plan(len(plan.Entries()), len(plan.Tasks()), runtime.Workers, plan.Mode())
+	_ = r.emit(PlanEvent{Total: len(plan.Entries()), Selected: len(plan.Tasks()), Workers: runtime.Workers, Mode: plan.Mode()})
 	observer := r.observe()
 	directory := runtime.Directory
 	if o.Layout != "flat" {
@@ -95,7 +91,7 @@ func (r *Runner) TFTP(ctx context.Context, runtime Runtime, settings TFTPSetting
 		return r.fail(e)
 	}
 	// Prepare every archive before resolving any device credentials.
-	_ = p.Phase("正在预检 TFTP 归档服务（SSH、归档程序及目录权限）")
+	_ = r.emit(PhaseEvent{Phase: PhaseArchivePreflight})
 	pools := map[string]*archive.Pool{}
 	archiveDirectories := []string{}
 	defer func() {
@@ -125,32 +121,25 @@ func (r *Runner) TFTP(ctx context.Context, runtime Runtime, settings TFTPSetting
 		}
 		pools[root] = pool
 		if e = pool.PrepareWithProgress(ctx, func(prepared archive.PrepareProgress) {
-			_ = p.ArchivePreflight(progress.ArchivePreflight{
-				Stage: archivePreflightLabel(prepared.Stage), Completed: prepared.Completed, Total: prepared.Total, Active: prepared.Active, Workers: prepared.Workers,
-				Group: index + 1, Groups: len(archiveRoots),
-			})
+			_ = r.emit(ArchivePreflightEvent{Progress: prepared, Group: index + 1, Groups: len(archiveRoots)})
 		}); e != nil {
 			return r.fail(errors.Join(ErrTFTPArchivePreflight, e))
 		}
 		archiveDirectories = append(archiveDirectories, pool.ArchiveDirectory())
-		_ = p.Notice("TFTP 服务器 " + target.Server + "；归档目录：" + pool.ArchiveDirectory())
+		_ = r.emit(ArchiveReadyEvent{Server: target.Server, Directory: pool.ArchiveDirectory()})
 	}
 	data, _ := json.MarshalIndent(view, "", "  ")
 	if _, e = storage.Write(ctx, filepath.Join(directory, "plan.json"), data); e != nil {
 		return r.fail(e)
 	}
-	var progress io.Writer
-	progress = r.Progress
-	events, e := openBatchJournal(directory, progress)
+	events, e := openBatchJournal(directory, r.outcome)
 	if e != nil {
 		return r.fail(e)
 	}
 	defer events.Close()
-	events.reporter = p
-	events.progress = nil
-	_ = p.Phase(fmt.Sprintf("正在执行 TFTP 备份（上传上限 %.0f 秒）", settings.ArchiveTimeouts.Upload.Seconds()))
+	_ = r.emit(PhaseEvent{Phase: PhaseTransfer, Timeout: settings.ArchiveTimeouts.Upload})
 	batch, runErr := fleet.Run(ctx, plan, fleet.RunOptions{Workers: runtime.Workers, Run: func(ctx context.Context, task fleet.Task) (artifact fleet.Artifact, err error) {
-		_ = p.Start(task.Device.Host, task.Device.Vendor)
+		_ = r.emit(StartEvent{Host: task.Device.Host, Vendor: task.Device.Vendor})
 		target := task.Target
 		filename := target.Path
 		upload := func(ctx context.Context, name string) (receipt transfer.Receipt, err error) {
@@ -163,10 +152,10 @@ func (r *Runner) TFTP(ctx context.Context, runtime Runtime, settings TFTPSetting
 			}()
 			opts := target.TFTPOptions
 			opts.Path = name
-			_ = p.Stage(task.Device.Host, "upload")
+			_ = r.emit(TransferStageEvent{Host: task.Device.Host, Stage: "upload"})
 			result, e := transfer.TFTP(ctx, runtime.Registry, device, opts)
 			if result.Receipt.Reported() {
-				_ = p.Stage(task.Device.Host, "archive")
+				_ = r.emit(TransferStageEvent{Host: task.Device.Host, Stage: "archive"})
 			}
 			return result.Receipt, e
 		}
@@ -204,28 +193,15 @@ func (r *Runner) TFTP(ctx context.Context, runtime Runtime, settings TFTPSetting
 	}
 	report = fleet.WriteReport(context.WithoutCancel(ctx), report, directory, plan, runtime.Workers)
 	r.result = Result{Success: report.Success(), Batch: &BatchResult{Directory: directory, Report: report, Plan: plan, Workers: runtime.Workers, ServerArchiveDirectories: archiveDirectories}}
-	r.finishBatch()
+	r.finishBatch(ctx)
 	if ctx.Err() != nil || errors.Is(runErr, context.Canceled) {
 		return r.result, context.Canceled
 	}
 	if runErr != nil {
 		return r.fail(runErr)
 	}
-	if report.Success() {
+	if r.result.Success {
 		return r.complete(true), nil
 	}
 	return r.complete(false), nil
-}
-
-func archivePreflightLabel(stage archive.PrepareStage) string {
-	switch stage {
-	case archive.PrepareStageSSH:
-		return "正在连接 TFTP 归档服务器 SSH"
-	case archive.PrepareStageProtocol:
-		return "正在验证归档程序与目录权限"
-	case archive.PrepareStageReady:
-		return "TFTP 归档预检完成"
-	default:
-		return "正在预检 TFTP 归档服务"
-	}
 }

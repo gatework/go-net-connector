@@ -3,11 +3,9 @@ package bootstrap
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math"
-	"net/http"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -319,9 +317,13 @@ func (s *Services) Inventory(ctx context.Context, mode string) (netdisco.CacheRe
 		mode = stringValue(p, "netdisco.cache_mode")
 	}
 	limits := s.limits()
-	var source netdisco.Source
-	var identity []byte
-	var e error
+	fetch := netdisco.FetchOptions{Mode: mode}
+	if boolValue(p, "netdisco.cache_enabled") {
+		ttl := durationValue(p, "netdisco.cache_ttl")
+		fetch.Cache = &netdisco.CachePolicy{Directory: stringValue(p, "netdisco.cache_directory"), Namespace: stringValue(p, "netdisco.cache_namespace"), TTL: &ttl}
+	} else if mode == "only" {
+		return netdisco.CacheResult{}, config.ErrInvalid
+	}
 	switch stringValue(p, "netdisco.source") {
 	case "http":
 		raw := stringValue(p, "netdisco.url")
@@ -329,12 +331,8 @@ func (s *Services) Inventory(ctx context.Context, mode string) (netdisco.CacheRe
 		if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") || (!boolValue(p, "netdisco.allow_insecure_http") && u.Scheme != "https") {
 			return netdisco.CacheResult{}, config.ErrInvalid
 		}
-		u.Scheme = strings.ToLower(u.Scheme)
-		u.Host = strings.ToLower(u.Host)
-		user, password, key := s.secret("ND_USERNAME"), "", s.secret("ND_API_KEY")
-		cacheEnabled := boolValue(p, "netdisco.cache_enabled")
-		namespace := stringValue(p, "netdisco.cache_namespace")
-		if key != "" && cacheEnabled && strings.TrimSpace(user) == "" && strings.TrimSpace(namespace) == "" {
+		user, key := s.secret("ND_USERNAME"), s.secret("ND_API_KEY")
+		if key != "" && fetch.Cache != nil && strings.TrimSpace(user) == "" && strings.TrimSpace(fetch.Cache.Namespace) == "" {
 			return netdisco.CacheResult{}, &netdisco.InventoryError{Code: "cache_namespace_required"}
 		}
 		if key == "" {
@@ -343,35 +341,24 @@ func (s *Services) Inventory(ctx context.Context, mode string) (netdisco.CacheRe
 			}
 		}
 		options := netdisco.HTTPOptions{URL: u.String(), Username: user, APIKey: key, RequireHTTPS: !boolValue(p, "netdisco.allow_insecure_http"), Limits: limits}
-		identity, e = httpSourceIdentity(options, namespace)
-		if e != nil {
-			return netdisco.CacheResult{}, e
-		}
 		if mode != "only" {
-			password = s.secret("ND_PASSWORD")
-			transport := http.DefaultTransport.(*http.Transport).Clone()
-			defer transport.CloseIdleConnections()
-			options.Client = &http.Client{Transport: transport}
-			options.Password = password
-			source, e = netdisco.NewHTTP(options)
+			options.Password = s.secret("ND_PASSWORD")
 		}
+		return netdisco.FetchHTTP(ctx, options, fetch)
 	case "postgres":
 		keys := []struct{ name, env string }{{"host", "ND_DB_HOST"}, {"dbname", "ND_DB_NAME"}, {"user", "ND_DB_USER"}}
-		values := map[string]any{}
 		dsn := []string{}
 		for _, k := range keys {
 			v := s.secret(k.env)
 			if v == "" || strings.ContainsRune(v, 0) {
 				return netdisco.CacheResult{}, ErrCredentials
 			}
-			values[k.name] = v
 			dsn = append(dsn, k.name+"="+quoteDSNValue(v))
 		}
 		for _, k := range []string{"port", "sslmode", "sslrootcert", "connect_timeout"} {
 			v := p.Value("netdisco.db_" + k)
 			if v != nil {
 				value := fmt.Sprint(v)
-				values[k] = v
 				dsn = append(dsn, k+"="+quoteDSNValue(value))
 			}
 		}
@@ -380,41 +367,17 @@ func (s *Services) Inventory(ctx context.Context, mode string) (netdisco.CacheRe
 		if params == nil {
 			params = []any{}
 		}
-		ordered, e := orderedConnectionIdentity(values)
-		if e != nil {
-			return netdisco.CacheResult{}, e
-		}
-		identity, _ = json.Marshal([]any{"postgres", ordered, map[string]any{"query": query, "query_params": params}})
 		if mode != "only" {
 			password := s.secret("ND_DB_PASS")
 			if password == "" {
 				return netdisco.CacheResult{}, ErrCredentials
 			}
 			dsn = append(dsn, "password="+quoteDSNValue(password))
-			source, e = netdisco.NewPostgres(netdisco.PostgresOptions{Connection: strings.Join(dsn, " "), Query: query, Parameters: params, Limits: limits})
-			if e != nil {
-				return netdisco.CacheResult{}, e
-			}
 		}
+		return netdisco.FetchPostgres(ctx, netdisco.PostgresOptions{Connection: strings.Join(dsn, " "), Query: query, Parameters: params, Limits: limits}, fetch)
 	default:
 		return netdisco.CacheResult{}, config.ErrInvalid
 	}
-	if e != nil {
-		return netdisco.CacheResult{}, e
-	}
-	if !boolValue(p, "netdisco.cache_enabled") {
-		if mode == "only" {
-			return netdisco.CacheResult{}, config.ErrInvalid
-		}
-		rows, e := source.Devices(ctx)
-		return netdisco.CacheResult{Rows: rows, Status: netdisco.CacheStatusDisabled}, e
-	}
-	ttl := durationValue(p, "netdisco.cache_ttl")
-	cache, e := netdisco.NewCache(source, netdisco.CacheOptions{Directory: stringValue(p, "netdisco.cache_directory"), Identity: netdisco.Identity(identity), TTL: &ttl, Limits: limits})
-	if e != nil {
-		return netdisco.CacheResult{}, e
-	}
-	return cache.Fetch(ctx, mode)
 }
 func quoteDSNValue(s string) string {
 	return "'" + strings.ReplaceAll(strings.ReplaceAll(s, "\\", "\\\\"), "'", "\\'") + "'"

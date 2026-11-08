@@ -60,8 +60,19 @@ type cacheEntry struct {
 	Rows      []inventory.Device `json:"rows"`
 }
 
+// ErrCacheRefreshRequired marks cache-only reads without a validated entry for
+// the requested identity. InventoryError.Code remains cache_unavailable.
+var ErrCacheRefreshRequired = errors.New("netdisco: refresh this source before using cache-only mode")
+
 func NewCache(source Source, o CacheOptions) (*Cache, error) {
-	if o.Directory == "" || o.Identity == "" || strings.ContainsRune(o.Directory, 0) {
+	if o.Identity == "" {
+		return nil, newInventoryError("invalid_cache", nil)
+	}
+	return newCache(source, o, Identity([]byte(o.Identity)))
+}
+
+func newCache(source Source, o CacheOptions, identity string) (*Cache, error) {
+	if o.Directory == "" || strings.ContainsRune(o.Directory, 0) {
 		return nil, newInventoryError("invalid_cache", nil)
 	}
 	limits, e := o.Limits.normalize()
@@ -87,8 +98,6 @@ func NewCache(source Source, o CacheOptions) (*Cache, error) {
 	if e != nil {
 		return nil, e
 	}
-	sum := sha256.Sum256([]byte(o.Identity))
-	identity := hex.EncodeToString(sum[:])
 	return &Cache{source, directory, identity, filepath.Join(directory, identity+".json"), filepath.Join(directory, identity+".lock"), ttl, lockTimeout, limits, now}, nil
 }
 func (c *Cache) Path() string { return c.path }
@@ -116,6 +125,9 @@ func (c *Cache) Fetch(ctx context.Context, mode string) (result CacheResult, err
 		}
 	}
 	directory, e := os.Lstat(c.directory)
+	if mode == "only" && errors.Is(e, os.ErrNotExist) {
+		return result, newInventoryError("cache_unavailable", ErrCacheRefreshRequired)
+	}
 	if e != nil || !isPrivateCacheEntry(directory, true) {
 		return result, newInventoryError("cache_unavailable", nil)
 	}
@@ -137,7 +149,7 @@ func (c *Cache) Fetch(ctx context.Context, mode string) (result CacheResult, err
 	}
 	if mode == "only" {
 		if previous == nil {
-			return result, newInventoryError("cache_unavailable", nil)
+			return result, newInventoryError("cache_unavailable", ErrCacheRefreshRequired)
 		}
 		status := CacheStatusStale
 		if fresh(previous) {

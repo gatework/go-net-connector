@@ -423,3 +423,51 @@ TFTP `upload_timeout` 现在同时限制平台的源文件发现和上传命令�
 首轮远端质量检查发现历史重构后未使用的函数、字段、正则与测试辅助函数，以及 CLI 两处无效赋值。删除死代码，`--all` 在环境参数转换前设置，省去重复转换及被覆盖的错误；交互式配置直接声明实际加载结果。按 CI 原有质量门禁修复，未降低检查标准。
 
 Linux Go 1.26 race 运行进一步暴露测试夹具的 20/80ms 总准备期限会被真实目录 fsync 和调度消耗。无 deadline 能力的通道拒绝用例恢复正常准备预算，仍以独立 watchdog 检查退出；已交付帧跨期限用例保留跨期条件，扩大为 1s 阶段/1.2s 延迟，留出真实文件同步空间。未调整生产默认期限或放宽成功断言。额外本地发布机制测试因 /dev/shm 缓存已满首次失败，换用根分区独立缓存后 11 项全部通过。
+
+## 2026-11-07 四仓模块实施：Connector 本地候选
+
+基线为已核查的 main / v0.3.0 `37aa1cb`，独立实施 worktree 为
+`/Users/crate/Works/go/.worktrees/network-modules-20261107-075052/go-net-connector`。
+本轮只实施并验证本地候选；原目录、参考 worktree、版本号和 go.mod/go.sum 未改动。
+
+- 新增 `netdisco.FetchHTTP` / `FetchPostgres`，输入保留来源各自的 Options，附加小型 `FetchOptions` / `CachePolicy`。模块内部解释模式、限额、来源身份与缓存，保留完整 CacheResult。HTTP 默认 transport 由 Fetch 收尾，注入 client / 自定义默认 transport 由 caller 所有。Bootstrap 删除本地 identity JSON、连接次序和缓存拼装；两个业务仓库使用同一入口。
+- 新身份包含版本、规范来源、主体、namespace 和查询形状，仅最终单次摘要写入缓存。显式 namespace 优先；库保留 key-only 无 namespace 调用方的 key 轮换失效行为，netman 原有非敏感账户标识校验保持。旧条目不迁移、不删除、不作为新身份回退；prefer/refresh 重新采集，only 缺失新身份保留 `cache_unavailable` 并通过 `ErrCacheRefreshRequired` 给出刷新提示。PG only 解析有效连接配置及本地 TLS/service 文件，不连接或查询来源。
+- Topology 用 typed state、diagnostic、统计与 Report 持有事实；apply 准入、成功判断和持久化不再读报告 map。JSON / text / events 单向生成，Summary 快照及返回的 Plan/Audit/Result 可变内容与保留证据分离。部分结果、回调 Goexit 身份、计划保存失败及文本报告失败后的 JSON 修复仍保留。
+- CLI 在命令树校验后生成一个具体 request，删除 init/show/plan/apply/discover/inventoryOnly/topologyMode 等衍生状态；配置不能将 plan 提升为 apply。保留现有 Cobra 命令树、参数、优先级、中文帮助、stdout/stderr、离线命令和退出码；未生成另一套命令框架。
+- BackupReceipt 统一解释 HasSavedEvidence、成对文件未核验及 SourceEvidence；Fleet、进度和文本报告复用。保存证据、完整备份和晚到错误保持分开，source-less legacy receipt 的 Fleet 行为不收紧。
+
+验证先在共享 Netdisco 边界独立完成，再验证内部结构变化，最后在冻结代码上重跑项目 gate。新增/扩展的关键断言覆盖旧缓存隔离及刷新、namespace/账号/分页/PG有效环境和绑定参数隔离、key轮换、stale/write-failure元数据、HTTP owned/borrowed 收尾、IPv6 zone 大小写、输出投影不能修改执行或保留证据、部分文件与晚到回调错误的备份状态。原 HTTP/PG、设备序列、CLI 行为和报告回归继续运行。
+
+最终本机环境为 darwin/arm64；项目脚本使用 Go 1.27.3，最低版本检查显式使用 Go 1.26.0。以下日志保存在任务根目录 `../`，未写入发行包：
+
+| 检查 | 结果与日志 |
+| --- | --- |
+| `scripts/ci`，GOWORK=off，GOFLAGS=-mod=readonly，Go 1.27.3 | PASS：`../connector-ci-final-go1.27.3.log`。包括 goimports、module verify/tidy diff、CLI build、全包 race/shuffle、vet、3 组各 100000 次 fuzz、源码消费者和仓库外 CLI。启用本机 PostgreSQL 18.6 临时实例与构建出的本地归档 worker；相应用例均 PASS，无集成用例 skip。 |
+| Go 1.26.0 `go test -count=1 -timeout=120s ./...` / `go vet ./...` | PASS：`../connector-final-go1.26-test.log`、`../connector-final-go1.26-vet.log`。 |
+| golangci-lint / gopls | 0 issues / 无诊断：`../connector-final-lint-go1.27.3.log`、`../connector-gopls-check.log`。`../connector-gopls-references.log` 确认共享 Fetch 的三个真实 caller 与 receipt 的两个报告 caller。 |
+| govulncheck，Go 1.27.3 | 未发现可达漏洞：`../connector-govulncheck-go1.27.3.log`。 |
+| 旧 Go 1.27.1 扫描基线 | `../connector-govulncheck-go1.27.1-baseline.log` 保留 10 个标准库可达问题，修复版本为 1.27.2/1.27.3；没有把该基线记为通过，也没有修改模块最低 Go 版本。 |
+
+源码消费者仍解析正式固定的 go-expect v0.4.0，没有外部依赖替换；这不是新版本已发布或业务仓库已消费发行版的证明。四仓 go.work 仅用于另行联合验证。当前没有提交、推送、发布、部署、真实设备、真实清单或远端归档证据。后续发布仍需依赖顺序、版本化无替换消费者、同一提交 CI 与精确产物核验。接口与缓存迁移见 `docs/api-migration.md`。
+
+## 2026-11-07：按责任收敛应用模块
+
+在上一轮候选的冻结快照上继续重构，保留所有既有工作。新增公开的 `config.InventoryEnvironment(values, higher)` 与 `config.ValidateInventory(document)`，复用已有私有 schema、解码器和资源预算；环境层先按高优先级字段存在性屏蔽再解析，校验只接受 `netdisco` / `inventory`，不触发文件发现、路径处理、默认值或凭据读取。新增回归覆盖 false/null/空列表/父节替换、无效低优先级值被屏蔽、无关变量忽略、预算与循环输入以及输入不变性。
+
+`internal/bootstrap` 负责应用配置加载、备份策略与缓存选择、拓扑策略校验以及类型化 Runtime/TFTP/Topology 设置组装；CLI 不再把解析后的设置来回装入 flags DTO。`internal/workflow` 通过串行类型化事件反馈阶段与结果，删除 `progress.Reporter` 和终端显示依赖，也不读取配置快照。`internal/cli/workflow_events.go` 统一把业务事件映射到终端进度。`internal/topologyreport` 拥有类型化文本呈现，CLI 与持久化报告共用完整渲染实现，保留状态与 apply 准入仍归 workflow。输出投影与保留证据分离，最终进度回调失败会修正已持久化报告，保留已确认的设备结果，不重放写入。
+
+本轮通过的本地检查：
+
+- Go 1.27.3 `scripts/ci`：PASS。使用 `GOWORK=off` 与固定 go-expect v0.4.0，包含 goimports、module verify/tidy diff、两个命令构建、全包 race/shuffle、vet、三组各 100000 次 fuzz、源码消费者与仓库外 CLI；启用本机 PostgreSQL 18.6 和构建的本地归档 worker。日志：`../organization-20261107-155459/connector-ci.log`。
+- Go 1.26.0 `GOWORK=off GOFLAGS=-mod=readonly go test -count=1 -timeout=120s ./...` 与 `go vet ./...`：PASS。
+- `golangci-lint run ./...`：0 issues；gopls 检查新增配置、bootstrap、事件、拓扑报告与工作流边界：无诊断。
+- 收尾删除备份设置的重复 CLI 转换后，`go test -race -shuffle=on -count=1 ./internal/cli ./internal/bootstrap ./internal/workflow` 与 golangci-lint 再次通过。
+- 依赖检查确认 workflow 不导入 cli/bootstrap/display/progress，生产工作流没有 `config.Snapshot` 或 `.Value` 读取；证据：`../organization-20261107-155459/connector-boundaries.log`。`git diff --check` 通过。
+
+该验收只覆盖本地库、CLI、模拟设备与临时服务，不代表真实网络设备、远端归档或发布版本验收。没有提交、推送、发布和部署；原始工作目录与其他模块由各自任务继续维护。
+
+## 2026-11-07 v0.4.0 发布依赖采纳
+
+用户随后明确授权发布四模块。go-expect v0.4.1 已从提交 `fe53190d8b1b3fedcd40d3bb345a7b84811bd133` 经完整 CI 发布；标签、源码树和下载附件与同一次 CI 的不可变制品一致。本模块固定该正式版本，保持 `GOWORK=off`、无 replace；原组织重构记录中的 v0.4.0 指当时 Expect 依赖，并非本次最终依赖。
+
+Connector 版本升为 v0.4.0，公开 API 与缓存身份迁移见 [发行说明](releases/v0.4.0.md)。发布须使用本提交完整 CI 的制品，经过草稿上传、附件读回验证后公开；此提交中的准备记录不预先声明自身已发布。发布账本与独立版本化消费者证据保存在 sibling `release-20261107-164506/`。本轮不连接生产设备或执行部署。

@@ -126,9 +126,15 @@ func TestTextOnlyReceiptNeedsDurableEvidence(t *testing.T) {
 	if !r.HasSavedEvidence() || r.Complete() {
 		t.Fatal("commit confused with durability")
 	}
+	if committed, verified := r.SourceEvidence(); !committed || verified {
+		t.Fatal("text-only warning evidence confused commit with durability")
+	}
 	r.File.State = "durable"
 	if !r.Complete() {
 		t.Fatal("durable text-only evidence rejected")
+	}
+	if committed, verified := r.SourceEvidence(); !committed || !verified {
+		t.Fatal("durable text-only warning evidence lost")
 	}
 }
 func TestSessionObserverFailureBeforeConnectionDoesNotOpenTransport(t *testing.T) {

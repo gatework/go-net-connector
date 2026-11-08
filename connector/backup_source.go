@@ -167,6 +167,26 @@ func (r BackupReceipt) Complete() bool {
 	return r.DeviceCompleted && (r.File.Durable() || (r.Change == "unchanged" && r.NoWriteVerified)) && (r.TextOnly || r.Source != nil && r.Source.Verified())
 }
 
+// HasUnverifiedPair reports incomplete raw/text file durability without treating
+// a committed file as a complete backup. Source-less legacy receipts have no
+// pair; Complete is the stricter contract for newly produced receipts.
+func (r BackupReceipt) HasUnverifiedPair() bool {
+	return r.Source != nil && (!(r.File.Durable() || r.NoWriteVerified) || !r.Source.Verified())
+}
+
+// SourceEvidence supplies the same persistence facts to progress and reports.
+// In text-only mode the text file is the retained source; otherwise its raw
+// sidecar supplies the evidence, including verified unchanged files.
+func (r BackupReceipt) SourceEvidence() (committed, verified bool) {
+	if r.TextOnly {
+		return r.HasSavedEvidence(), r.Complete()
+	}
+	if r.Source != nil {
+		return r.Source.File.Committed(), r.Source.Verified()
+	}
+	return false, false
+}
+
 // sourceWarning records positions from the same pass that produced diagnostic
 // text. Persistence consumes this immutable metadata without decoding again.
 func sourceWarning(raw string, count int, offsets []int) *TextWarning {

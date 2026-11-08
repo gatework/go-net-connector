@@ -49,9 +49,9 @@ func (r Runtime) Run(ctx context.Context) int {
 
 	return r.runCommands(ctx)
 }
-func (r Runtime) executeSelected(ctx context.Context, o options) int {
+func (r Runtime) executeSelected(ctx context.Context, o options, request commandRequest) int {
 	const program = "netman"
-	if o.action == "defaults" {
+	if request.kind == requestDefaults {
 		return r.renderDefaults(o.mode, o.json)
 	}
 	if r.Environment == nil {
@@ -64,7 +64,7 @@ func (r Runtime) executeSelected(ctx context.Context, o options) int {
 	var reporter *progress.Reporter
 	var stopUpdates func()
 	resumeSetup := func() {}
-	if !o.quiet && o.action != "init" && o.action != "show" && o.action != "check" && o.action != "export" {
+	if !o.quiet && request.startsProgress() {
 		reporter = progress.New(r.Error, o.verbose)
 		r.reporter = reporter
 		_ = reporter.Section(operationLabel(o))
@@ -74,55 +74,30 @@ func (r Runtime) executeSelected(ctx context.Context, o options) int {
 		stopUpdates = reporter.RunUpdates(ctx)
 		defer stopUpdates()
 	}
-	if o.action == "export" {
+	if request.kind == requestExport {
 		return r.exportBatch(ctx, o.export, o.batch, o.output, o.json)
 	}
-	if o.action == "init" {
-		o.init = true
-	}
-	if o.action == "show" {
-		o.show = true
-	}
-	o.inventoryOnly = o.action == "inventory"
-	if o.action == "plan" && o.mode != "topology" || o.inventoryOnly {
-		o.plan = true
-	}
-	if o.mode == "topology" {
-		o.apply = o.action == "apply"
-		o.discover = o.action == "discover"
-		o.topologyMode = o.action
-		if o.inventoryOnly {
-			o.topologyMode = "plan"
-		}
-	}
-	if o.all {
-		o.public["NC_SAMPLE_PER_VENDOR"] = "0"
-	}
-	overrides, e := config.FromEnvironment(o.public)
+	policy, e := bootstrap.LoadPolicy(bootstrap.PolicyOptions{
+		Mode: o.mode, CWD: r.CWD, Home: r.Home, Program: r.Program,
+		Directories: r.Directories, ConfigFile: o.config, EnvFile: o.envFile,
+		Environment: r.Environment, PublicOverrides: o.public,
+		AllowMissing: request.kind == requestInitialize || o.interactive,
+	})
 	if e != nil {
 		return r.fail(program, e)
 	}
-	defaults := config.Defaults(o.mode)
-
+	backup, e := bootstrap.BackupOptions(policy, o.mode, request.kind == requestInitialize || request.kind == requestShow)
+	if e != nil {
+		return r.fail(program, e)
+	}
 	name := "backup"
 	if o.mode == "topology" {
 		name = "topology"
 	}
-	policy, e := config.Load(config.Options{Name: name, CWD: r.CWD, Home: r.Home, Program: r.Program, Directories: r.Directories, ConfigFile: o.config, EnvFile: o.envFile, Environment: r.Environment, Overrides: overrides, Defaults: defaults, AllowMissing: o.init || o.interactive})
-	if e != nil {
-		return r.fail(program, e)
-	}
-	o.policy, _ = policy.Value("backup.success_policy").(string)
-	if o.policy != "strict" && o.policy != "selected" && o.policy != "verified" {
-		return r.fail(program, &config.FieldError{Field: "backup.success_policy", Problem: "invalid"})
-	}
-	if !o.init && !o.show && o.policy == "verified" && o.mode != "tftp" {
-		return r.fail(program, &config.FieldError{Field: "backup.success_policy", Problem: "invalid"})
-	}
-	if o.init || o.interactive {
+	if request.kind == requestInitialize || o.interactive {
 		createConfig, createEnv := true, true
 		reader := bufio.NewReader(contextInput(ctx, r.Input))
-		if o.init {
+		if request.kind == requestInitialize {
 			configPath, envPath := policy.InitPaths()
 			createConfig, e = missingSetupFile(configPath)
 			if e != nil {
@@ -146,7 +121,7 @@ func (r Runtime) executeSelected(ctx context.Context, o options) int {
 				return r.fail(program, e)
 			}
 		}
-		if o.init || createConfig || createEnv {
+		if request.kind == requestInitialize || createConfig || createEnv {
 			if o.interactive {
 				if createConfig {
 					policy, e = r.configure(policy, o, name, reader)
@@ -159,15 +134,15 @@ func (r Runtime) executeSelected(ctx context.Context, o options) int {
 			return r.renderInitialization(created, o.mode, e, o.json)
 		}
 	}
-	if o.mode == "tftp" && (o.action == "check" || !o.show && !o.plan && !o.inventoryOnly) {
-		if e := bootstrap.ValidateTFTP(policy, o.policy); e != nil {
+	if o.mode == "tftp" && (request.kind == requestCheck || request.kind == requestTFTPRun) {
+		if e := bootstrap.ValidateTFTP(policy, backup.Policy); e != nil {
 			return r.fail(program, e)
 		}
 	}
-	if o.action == "check" {
+	if request.kind == requestCheck {
 		if o.mode == "topology" {
 			mode, _ := policy.Value("topology.mode").(string)
-			if e := workflow.ValidateTopologyPolicy(policy, workflow.TopologyOptions{Mode: mode}); e != nil {
+			if e := bootstrap.ValidateTopology(policy, mode); e != nil {
 				return r.fail(program, e)
 			}
 		}
@@ -177,13 +152,13 @@ func (r Runtime) executeSelected(ctx context.Context, o options) int {
 		}
 		return r.renderConfiguration(map[string]any{"valid": true, "scope": o.mode}, o.mode, true, o.json)
 	}
-	if o.show {
+	if request.kind == requestShow {
 		data := policy.Public()
 		data["sources"] = policy.Sources()
 		return r.renderConfiguration(data, o.mode, false, o.json)
 	}
 	if o.mode == "topology" {
-		if e := workflow.ValidateTopologyPolicy(policy, topologyOptions(o)); e != nil {
+		if e := bootstrap.ValidateTopology(policy, request.topologyMode()); e != nil {
 			return r.fail(program, e)
 		}
 	}
@@ -261,7 +236,7 @@ func (r Runtime) executeSelected(ctx context.Context, o options) int {
 		rows, e = r.Source.Devices(ctx)
 	} else {
 		var result netdisco.CacheResult
-		result, e = services.Inventory(ctx, inventoryMode(policy, o))
+		result, e = services.Inventory(ctx, bootstrap.InventoryMode(policy, o.mode, o.refresh, o.flags.Changed("cache-only") || o.flags.Changed("cache-mode")))
 		rows = result.Rows
 		if result.RefreshErrorCode != "" {
 			reporter.Warning("设备清单刷新失败，已使用校验通过的缓存")
@@ -279,7 +254,7 @@ func (r Runtime) executeSelected(ctx context.Context, o options) int {
 	if reporter != nil {
 		_ = reporter.Phase(fmt.Sprintf("设备清单读取完成：%d 台；正在生成计划", len(rows)))
 	}
-	if o.stdin && !o.plan && (o.mode != "topology" || o.apply) {
+	if o.stdin && request.needsRunConfirmation() {
 		if reporter != nil {
 			_ = reporter.Phase("等待执行确认：请输入 RUN")
 		}
@@ -291,31 +266,23 @@ func (r Runtime) executeSelected(ctx context.Context, o options) int {
 			return r.fail(program, config.ErrInvalid)
 		}
 	}
-	layout, _ := policy.Value("backup.layout").(string)
-	if layout == "" {
-		layout = "batch"
-	}
-	o.layout = layout
-	w := &workflow.Runner{Reporter: reporter}
-	if !o.quiet {
-		w.Progress = r.Error
-	}
-	workflowRun := workflowRuntime(services)
+	w := &workflow.Runner{Observe: workflowObserver(reporter)}
+	workflowRun := services.WorkflowRuntime()
 	var result workflow.Result
 	if o.mode == "topology" {
 		var settings workflow.TopologySettings
-		settings, e = topologySettings(policy, services)
+		settings, e = services.WorkflowTopologySettings(request.topologyMode())
 		if e != nil {
 			return r.fail(program, e)
 		}
-		result, e = w.Topology(ctx, workflowRun, settings, rows, topologyOptions(o))
-	} else if o.mode == "tftp" && !o.inventoryOnly {
+		result, e = w.Topology(ctx, workflowRun, settings, rows, request.topology)
+	} else if request.kind == requestTFTPRun || request.kind == requestTFTPPlan {
 		var settings workflow.TFTPSettings
-		settings, e = tftpSettings(services)
+		settings, e = services.WorkflowTFTPSettings()
 		if e != nil {
 			return r.fail(program, e)
 		}
-		result, e = w.TFTP(ctx, workflowRun, settings, rows, workflow.TFTPOptions{BackupOptions: backupOptions(o), Plan: o.plan, All: o.all})
+		result, e = w.TFTP(ctx, workflowRun, settings, rows, workflow.TFTPOptions{BackupOptions: backup, Plan: request.kind == requestTFTPPlan, All: o.all})
 	} else {
 		limit := services.Limit()
 		if o.all {
@@ -325,10 +292,10 @@ func (r Runtime) executeSelected(ctx context.Context, o options) int {
 		if err != nil {
 			return r.fail(program, err)
 		}
-		if o.plan {
+		if request.inventoryPreview() {
 			result = workflow.Preview(plan)
 		} else {
-			result, e = w.Backup(ctx, workflowRun, plan, backupOptions(o))
+			result, e = w.Backup(ctx, workflowRun, plan, backup)
 		}
 	}
 	if stopUpdates != nil {
@@ -356,20 +323,6 @@ func (r Runtime) executeSelected(ctx context.Context, o options) int {
 	}
 	return 1
 
-}
-func inventoryMode(policy config.Snapshot, o options) string {
-	if o.refresh {
-		return "refresh"
-	}
-	if o.flags.Changed("cache-only") || o.flags.Changed("cache-mode") {
-		mode, _ := policy.Value("netdisco.cache_mode").(string)
-		return mode
-	}
-	if o.mode == "topology" {
-		mode, _ := policy.Value("topology.cache_mode").(string)
-		return mode
-	}
-	return ""
 }
 func readLine(reader *bufio.Reader, limit int) (string, error) {
 	var b strings.Builder
@@ -408,6 +361,9 @@ func (r Runtime) fail(program string, e error) int {
 	if errors.As(e, &inventoryError) && inventoryError.Code == "cache_namespace_required" {
 		message = display.Error(inventoryError.Code)
 	}
+	if errors.Is(e, netdisco.ErrCacheRefreshRequired) {
+		message = "离线清单缓存不可用，请先使用 prefer 或 refresh 模式刷新对应来源（cache_unavailable）"
+	}
 	if errors.Is(e, config.ErrInvalid) {
 		message = "配置或参数无效，请使用 --help 查看用法并检查配置文件"
 	}
@@ -428,11 +384,4 @@ func (r Runtime) fail(program string, e error) int {
 		fmt.Fprintln(r.Error, program+"："+message)
 	}
 	return 2
-}
-
-func backupOptions(o options) workflow.BackupOptions {
-	return workflow.BackupOptions{Policy: o.policy, Layout: o.layout}
-}
-func topologyOptions(o options) workflow.TopologyOptions {
-	return workflow.TopologyOptions{Mode: o.topologyMode, InventoryOnly: o.inventoryOnly, Limit: o.limit}
 }

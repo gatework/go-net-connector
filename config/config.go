@@ -326,17 +326,9 @@ func Load(o Options) (Snapshot, error) {
 		higher map[string]any
 		source string
 	}{{s.environment, mergeMaps(mergeMaps(yamlData, processPresence), o.Overrides), ".env"}, {process, o.Overrides, "environment"}} {
-		m := map[string]any{}
-		for path, f := range schema {
-			value, ok := layer.env[f.Env]
-			if !ok || hasPath(layer.higher, canonicalPath(path)) {
-				continue
-			}
-			v, e := decodeEnv(value, f.Kind)
-			if e != nil {
-				return s, ErrInvalid
-			}
-			setPath(m, path, v)
+		m, e := environmentValues(layer.env, layer.higher, nil)
+		if e != nil {
+			return s, e
 		}
 		normalizeSourceFiles(m)
 		if layer.source == ".env" {

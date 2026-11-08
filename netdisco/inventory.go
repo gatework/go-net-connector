@@ -76,31 +76,69 @@ type HTTP struct {
 	username, password, key string
 	client                  *http.Client
 	limits                  Limits
+	ownedTransport          *http.Transport
 }
 
 func NewHTTP(o HTTPOptions) (*HTTP, error) {
-	u, e := url.Parse(o.URL)
-	if e != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (o.RequireHTTPS && u.Scheme != "https") {
-		return nil, newInventoryError("invalid_url", nil)
-	}
-	if strings.ContainsAny(o.APIKey, "\r\n\x00") || strings.ContainsAny(o.Username, "\r\n\x00:") {
-		return nil, newInventoryError("invalid_credentials", nil)
-	}
-	if o.APIKey == "" && (o.Username == "" || o.Password == "") {
-		return nil, newInventoryError("missing_credentials", nil)
-	}
-	limits, e := o.Limits.normalize()
+	u, limits, e := httpSettings(o, true)
 	if e != nil {
 		return nil, e
 	}
 	client := o.Client
+	var transport *http.Transport
 	if client == nil {
-		client = &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}
+		// A custom DefaultTransport is borrowed: only a transport we cloned is ours.
+		client = &http.Client{Transport: http.DefaultTransport}
+		if standard, ok := http.DefaultTransport.(*http.Transport); ok {
+			transport = standard.Clone()
+			client.Transport = transport
+		}
 	}
 	ownedClient := *client
 	ownedClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &HTTP{u, o.Username, o.Password, o.APIKey, &ownedClient, limits}, nil
+	return &HTTP{base: u, username: o.Username, password: o.Password, key: o.APIKey, client: &ownedClient, limits: limits, ownedTransport: transport}, nil
 }
+
+func httpSettings(o HTTPOptions, requirePassword bool) (*url.URL, Limits, error) {
+	u, e := url.Parse(o.URL)
+	if e != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (o.RequireHTTPS && u.Scheme != "https") {
+		return nil, Limits{}, newInventoryError("invalid_url", nil)
+	}
+	if strings.ContainsAny(o.APIKey, "\r\n\x00") || strings.ContainsAny(o.Username, "\r\n\x00:") {
+		return nil, Limits{}, newInventoryError("invalid_credentials", nil)
+	}
+	if o.APIKey == "" && (o.Username == "" || requirePassword && o.Password == "") {
+		return nil, Limits{}, newInventoryError("missing_credentials", nil)
+	}
+	limits, e := o.Limits.normalize()
+	if e != nil {
+		return nil, Limits{}, e
+	}
+	u.Scheme, u.Host = strings.ToLower(u.Scheme), canonicalHost(u.Host)
+	u.Path, u.RawPath = strings.TrimRight(u.Path, "/"), ""
+	return u, limits, nil
+}
+
+func canonicalHost(host string) string {
+	// IPv6 zone identifiers name local interfaces and may be case-sensitive.
+	if zone := strings.IndexByte(host, '%'); zone >= 0 {
+		return strings.ToLower(host[:zone]) + host[zone:]
+	}
+	return strings.ToLower(host)
+}
+
+// CloseIdleConnections releases connections created by this source. Injected
+// clients and custom default transports are borrowed and are never closed.
+func (h *HTTP) CloseIdleConnections() {
+	if h.ownedTransport != nil {
+		h.ownedTransport.CloseIdleConnections()
+	}
+}
+
+const httpInventoryEndpoint = "api/v1/search/device"
+const httpInventoryFields = "ip,name,dns,vendor,os,model,os_ver,serial"
+const httpFallbackQuery = "%"
+
 func (h *HTTP) String() string   { return "netdisco.HTTP" }
 func (h *HTTP) GoString() string { return h.String() }
 func (h *HTTP) Devices(parent context.Context) ([]inventory.Device, error) {
@@ -166,8 +204,8 @@ func (h *HTTP) Devices(parent context.Context) ([]inventory.Device, error) {
 	unique := make(map[inventory.Device]bool)
 	rows := make([]inventory.Device, 0)
 	for page := 0; page < h.limits.MaxPages; page++ {
-		query := url.Values{"fields": {"ip,name,dns,vendor,os,model,os_ver,serial"}, "limit": {strconv.Itoa(h.limits.PageSize)}, "offset": {strconv.Itoa(page * h.limits.PageSize)}}
-		body, status, e := request("api/v1/search/device", http.MethodGet, query, key)
+		query := url.Values{"fields": {httpInventoryFields}, "limit": {strconv.Itoa(h.limits.PageSize)}, "offset": {strconv.Itoa(page * h.limits.PageSize)}}
+		body, status, e := request(httpInventoryEndpoint, http.MethodGet, query, key)
 		if e != nil {
 			return nil, e
 		}
@@ -176,7 +214,7 @@ func (h *HTTP) Devices(parent context.Context) ([]inventory.Device, error) {
 				Error string `json:"error"`
 			}
 			if json.Unmarshal(body, &message) == nil && message.Error == "Missing query" {
-				body, status, e = request("api/v1/search/device", http.MethodGet, url.Values{"q": {"%"}, "seeallcolumns": {"true"}}, key)
+				body, status, e = request(httpInventoryEndpoint, http.MethodGet, url.Values{"q": {httpFallbackQuery}, "seeallcolumns": {"true"}}, key)
 				if e != nil {
 					return nil, e
 				}

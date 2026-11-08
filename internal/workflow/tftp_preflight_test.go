@@ -1,4 +1,4 @@
-package workflow
+package workflow_test
 
 import (
 	"errors"
@@ -9,6 +9,7 @@ import (
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/internal/bootstrap"
+	"github.com/gatework/go-net-connector/internal/workflow"
 	"github.com/gatework/go-net-connector/inventory"
 )
 
@@ -34,9 +35,13 @@ func TestTFTPPreflightFailureNeverCreatesDevice(t *testing.T) {
 		t.Fatal("device created before preflight succeeded")
 		return nil, nil
 	})
-	r := &Runner{}
-	_, err = r.TFTP(t.Context(), runtimeForTest(s), tftpSettingsForTest(s), []inventory.Device{{IP: "192.0.2.1", Vendor: "h3c", Name: "edge"}}, TFTPOptions{BackupOptions: BackupOptions{Policy: "selected"}})
-	if !errors.Is(err, ErrTFTPArchivePreflight) {
+	settings, err := s.WorkflowTFTPSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &workflow.Runner{}
+	_, err = r.TFTP(t.Context(), s.WorkflowRuntime(), settings, []inventory.Device{{IP: "192.0.2.1", Vendor: "h3c", Name: "edge"}}, workflow.TFTPOptions{BackupOptions: workflow.BackupOptions{Policy: "selected"}})
+	if !errors.Is(err, workflow.ErrTFTPArchivePreflight) {
 		t.Fatalf("unclassified preflight failure: %v", err)
 	}
 }

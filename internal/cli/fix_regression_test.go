@@ -16,9 +16,9 @@ import (
 	"github.com/creack/pty"
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/internal/bootstrap"
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/netdisco"
-	"github.com/gatework/go-net-connector/topology"
 )
 
 type failingWriter struct{}
@@ -292,24 +292,6 @@ func TestInteractiveDeclinedOptionalEnvContinues(t *testing.T) {
 	}
 }
 
-func TestTopologyTextStdoutExplainsPendingPlan(t *testing.T) {
-	var output bytes.Buffer
-	r := Runtime{Output: &output}
-	dir := t.TempDir()
-	data := map[string]any{"mode": "plan", "success": false, "directory": dir,
-		"statistics": map[string]int{"collected": 1, "change_devices": 1, "changes": 1, "review_devices": 1, "review_interfaces": 1},
-		"devices":    []map[string]any{{"script_file": filepath.Join(dir, "scripts", "edge.cfg"), "issues": []topology.Issue{{Interface: "Gi1/0/2", Code: "unknown_neighbor_name"}}}},
-	}
-	if err := r.displayTopology(data, options{}); err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"结果：计划已生成，仍需修正或核验；模式：规划", "未核验原因：缺少邻居名称 1 个接口", "命令文件：" + filepath.Join(dir, "scripts") + "（1 台设备存在变更）"} {
-		if !strings.Contains(output.String(), want) {
-			t.Fatalf("missing %q in %s", want, output.String())
-		}
-	}
-}
-
 func TestHelpExamplesAreDistinctAndOffline(t *testing.T) {
 	views := map[string]string{}
 	for _, action := range []string{"plan", "apply"} {
@@ -373,7 +355,7 @@ func TestTopologyCacheModeSelection(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := inventoryMode(p, o); got != tc.want {
+		if got := bootstrap.InventoryMode(p, o.mode, o.refresh, o.flags.Changed("cache-only") || o.flags.Changed("cache-mode")); got != tc.want {
 			t.Fatalf("%v: got %s, want %s", tc.args, got, tc.want)
 		}
 	}

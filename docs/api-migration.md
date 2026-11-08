@@ -5,6 +5,71 @@ layer. Resolve the pinned GitHub dependency with GOWORK=off. Do not run the old
 workspace reconstruction scripts for current builds; retained baselines/patches
 are historical audit material.
 
+## Pending: shared inventory collection and evidence ownership
+
+The CLI arguments, configuration fields, report schema and device commands remain
+unchanged. Inventory cache identity has an explicitly approved migration: refresh
+the source under the new identity before depending on cache-only operation.
+
+Callers that currently assemble `NewHTTP`/`NewPostgres`, identity JSON and
+`NewCache` can replace that assembly with one collection call:
+
+```go
+result, err := netdisco.FetchHTTP(ctx, netdisco.HTTPOptions{
+    URL: url, Username: username, Password: password, APIKey: apiKey,
+    RequireHTTPS: true, Limits: limits,
+}, netdisco.FetchOptions{
+    Mode: "prefer",
+    Cache: &netdisco.CachePolicy{Directory: cacheDir, Namespace: account},
+})
+// Retain result.Status, FetchedAt, RefreshErrorCode and WriteErrorType with Rows.
+// Successful fresh rows can coexist with a cache-write error.
+if errors.Is(err, netdisco.ErrCacheRefreshRequired) {
+    // Explain that prefer/refresh must collect this source before only can work.
+}
+```
+
+`FetchPostgres` accepts the existing `PostgresOptions` and the same `FetchOptions`.
+An empty mode means `prefer`; a nil cache policy disables caching. Source limits
+also bound cached inventory. The existing low-level constructors and custom
+`Source` interface remain supported; they retain caller-owned identity behavior.
+
+The shared entry points compute one versioned digest from source kind, canonical
+URL or effective PostgreSQL connection, principal, namespace and query shape.
+The HTTP query shape includes fields, page size and fallback behavior. PostgreSQL
+includes effective endpoints, database/user, session parameters, query and bound
+parameters; passwords are excluded. Only the final opaque digest is persisted.
+
+- `prefer` and `refresh` collect under the new identity; they do not relabel,
+  copy, delete or fall back to legacy entries. Normal fresh/stale fallback applies
+  after an entry has been collected under the new identity.
+- `only` never connects or queries a source. A missing or invalid identity entry
+  remains `InventoryError.Code == "cache_unavailable"`; use `errors.Is` with
+  `ErrCacheRefreshRequired` to distinguish the actionable refresh condition from
+  unsafe cache permissions or links. PostgreSQL still parses effective connection
+  settings, including its environment and local TLS/service configuration.
+- For API keys, an explicit namespace identifies the account first; otherwise a
+  username does. If neither is present the library privately derives the principal
+  from the key, preserving callers that already supported key-only caches. Key
+  rotation then invalidates that cache. Raw keys and separate key fingerprints are
+  never persisted or formatted. `netman` retains its existing username/namespace
+  requirement; callers with stricter policy should keep it at their input boundary.
+- `FetchHTTP` closes its owned idle transport on every return. An injected client
+  or custom default transport is borrowed and is never closed. Low-level `NewHTTP`
+  users can call `CloseIdleConnections` to release an owned default transport.
+
+Backup consumers should use `HasSavedEvidence`, `Complete`, `HasUnverifiedPair`
+and `SourceEvidence` instead of reinterpreting storage receipts. Saved evidence
+does not imply a complete backup. `HasUnverifiedPair` applies only to paired
+raw/text receipts; source-less legacy receipts keep their existing Fleet behavior.
+Progress and file reports now use the same source-evidence interpretation.
+
+Internal workflows retain typed topology state, diagnostics and statistics.
+`TopologyResult.Summary()` returns a presentation snapshot; modifying it cannot
+change apply eligibility or later report persistence. Text and JSON derive from
+the same typed report. CLI action validation produces one concrete request;
+configuration cannot promote a planning command to apply.
+
 ## Borrowed session operations
 
 `Device.WithBorrowedOperation` holds the device lease across a sequential callback
@@ -343,3 +408,18 @@ its strings before the next driver row can reuse buffers.
 `ConnectionConfig.OnSessionEvent` 接收不可变的 `SessionEvent{Host,Name,Status}`，同步在操作租约下调用，与日志级别独立；不包含命令或设备响应。观察回调应配合context，错误保留原原因及已有完成步骤。
 
 `BackupOptions.TextOnly` 严格采集解码后的配置并省略raw旁车；`BackupReceipt.TextOnly` 记录该模式，完成状态仍依据采集和持久化证据。库默认保真行为保留，CLI默认启用TextOnly。未知编码不会被猜测或转义成成功配置。显式设置 `PreserveInvalidEncoding` 后，严格解码失败的配置保留原字节、标记 `original-bytes` 和 `TextWarning`，仍不创建旁车；CLI 采用此模式。普通 `RunningConfig`、命令和结构化解析保持严格。
+
+## 2026-11-07：清单配置与应用层组织
+
+新增两个公开的纯配置入口，供 VXLAN、Wireless 等应用复用清单字段规则：
+
+```go
+func InventoryEnvironment(values map[string]string, higher map[string]any) (map[string]any, error)
+func ValidateInventory(document map[string]any) error
+```
+
+`InventoryEnvironment` 只投影 `netdisco` / `inventory` 的公开环境变量，忽略其他模块参数和凭据。`higher` 是调用方已经确定的高优先级文档：按字段存在性屏蔽环境值后才解码，不按真值或非空判断。false、null、空列表及已替换的父节都能屏蔽无效的低优先级环境值。返回值是环境层，不会合并或修改 `higher`；调用方按自己的层级顺序合并后，再调用 `ValidateInventory`。
+
+`ValidateInventory` 复用 config 的字段与类型规则，拒绝这两个节之外的内容，不改变输入；它不会补默认值、发现文件、展开路径、连接清单源或读取凭据。来源连接和请求语义仍由相应 Netdisco API 校验。环境投影与文档校验沿用有限资源预算，被屏蔽或不相关的环境值不消耗投影预算。其他应用无需构造虚假的 Connector 配置快照来复用这些规则。
+
+内部应用代码按责任组织：bootstrap 统一加载策略、校验拓扑配置并构造类型化工作流设置；workflow 只消费这些设置和注入的资源工厂，通过类型化事件反馈进度。CLI 负责终端文字和 Reporter，`internal/topologyreport` 负责 CLI 与持久化报告共用的类型化拓扑呈现。CLI 参数、配置键、JSON schema、中文输出和退出码保持既有契约；这些内部包不是下游可导入的公开 API。晚到的进度或输出失败仍降低报告成功状态，并保留已经确认的设备和存储证据。

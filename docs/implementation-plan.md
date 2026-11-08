@@ -2,6 +2,18 @@
 
 Approved plan: the conversation plan of 2026-10-25. This file is its implementation ledger specification; no reduction of parity scope is authorized.
 
+2026-11-07 approved amendment: deepen the existing four modules while preserving
+their responsibilities, CLI/configuration/report formats and device behavior.
+Netdisco source/cache assembly moves into shared FetchHTTP/FetchPostgres entry
+points; their versioned identity supersedes Task 6's historical ordered/double-hash
+identity. Legacy cache files remain untouched; prefer/refresh recollect and only
+requires a validated entry for the new source. Typed topology reports, validated
+CLI requests and receipt-owned evidence interpretation preserve existing output.
+See `docs/api-migration.md` and the dated evidence in `docs/progress.md`. An isolated
+four-repository go.work is authorized for this implementation's local integration;
+standalone dependency and source-consumer checks still use GOWORK=off with pinned
+GitHub dependencies. This amendment authorizes no commit, publication or deployment.
+
 ## Global constraints
 
 Single module github.com/gatework/go-net-connector, Go >=1.26, Linux/macOS amd64/arm64. Idiomatic Go API, preserve built-in Ruby behavior, configuration, CLI, report schema and backup formats. Use go-expect plus system SSH/Telnet. Minimal opt-in generic additions to go-expect must preserve defaults. Use explicit constructor injection at the composition root; do not add a global service locator. Reimplement the remote archive worker in Go, administratively installed, preflight before device I/O. Do not commit, publish or deploy. Preserve original source workspaces.

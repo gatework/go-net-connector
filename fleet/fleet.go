@@ -168,12 +168,10 @@ func Run(ctx context.Context, p Plan, o RunOptions) (Batch, error) {
 			if e != nil {
 				out.Status = string(outcomeStatusReportedWithError)
 			}
-		case p.mode == modeBackup && a.Backup != nil && (a.Backup.File.Committed() || a.Backup.DeviceCompleted && a.Backup.Change == "unchanged" && a.Backup.NoWriteVerified || a.Backup.Source != nil && a.Backup.Source.File.Committed()):
+		case p.mode == modeBackup && a.Backup != nil && a.Backup.HasSavedEvidence():
 			out.Status = string(outcomeStatusBackedUp)
-			if a.Backup.Source != nil && (!(a.Backup.File.Durable() || a.Backup.NoWriteVerified) || !(a.Backup.Source.File.Durable() || a.Backup.Source.NoWriteVerified)) {
-				if e == nil {
-					e = connector.ErrIncomplete
-				}
+			if a.Backup.HasUnverifiedPair() && e == nil {
+				e = connector.ErrIncomplete
 			}
 			if e != nil {
 				out.Status = string(outcomeStatusSavedWithError)

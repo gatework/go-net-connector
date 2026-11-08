@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -60,9 +59,8 @@ func nullableString(s string) any {
 	return s
 }
 func (r *Runner) Backup(ctx context.Context, runtime Runtime, plan fleet.Plan, o BackupOptions) (Result, error) {
-	r.result = Result{}
-	p := r.reporter()
-	_ = p.Plan(len(plan.Entries()), len(plan.Tasks()), runtime.Workers, plan.Mode())
+	r.begin()
+	_ = r.emit(PlanEvent{Total: len(plan.Entries()), Selected: len(plan.Tasks()), Workers: runtime.Workers, Mode: plan.Mode()})
 	observer := r.observe()
 	directory := runtime.Directory
 	if o.Layout != "flat" {
@@ -93,17 +91,13 @@ func (r *Runner) Backup(ctx context.Context, runtime Runtime, plan fleet.Plan, o
 	if _, e := storage.Write(ctx, filepath.Join(directory, "plan.json"), data); e != nil {
 		return r.fail(e)
 	}
-	var progress io.Writer
-	progress = r.Progress
-	events, e := openBatchJournal(directory, progress)
+	events, e := openBatchJournal(directory, r.outcome)
 	if e != nil {
 		return r.fail(e)
 	}
 	defer events.Close()
-	events.reporter = p
-	events.progress = nil
 	batch, runErr := fleet.Run(ctx, plan, fleet.RunOptions{Workers: runtime.Workers, Run: func(ctx context.Context, task fleet.Task) (artifact fleet.Artifact, err error) {
-		_ = p.Start(task.Device.Host, task.Device.Vendor)
+		_ = r.emit(StartEvent{Host: task.Device.Host, Vendor: task.Device.Vendor})
 		device, closeDevice, e := openDevice(ctx, runtime, task.Device, runtime.logDir("backup", directory), observer)
 		if e != nil {
 			return artifact, e
@@ -128,14 +122,14 @@ func (r *Runner) Backup(ctx context.Context, runtime Runtime, plan fleet.Plan, o
 	}
 	report = fleet.WriteReport(context.WithoutCancel(ctx), report, directory, plan, runtime.Workers)
 	r.result = Result{Success: report.Success(), Batch: &BatchResult{Directory: directory, Report: report, Plan: plan, Workers: runtime.Workers}}
-	r.finishBatch()
+	r.finishBatch(ctx)
 	if ctx.Err() != nil || errors.Is(runErr, context.Canceled) {
 		return r.result, context.Canceled
 	}
 	if runErr != nil {
 		return r.fail(runErr)
 	}
-	if report.Success() {
+	if r.result.Success {
 		return r.complete(true), nil
 	}
 	return r.complete(false), nil

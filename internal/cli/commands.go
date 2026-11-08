@@ -79,6 +79,7 @@ func (r Runtime) commandTree(ctx context.Context, outputErr *error) *cobra.Comma
 	root.SetHelpCommand(help)
 	leaf := func(parent *cobra.Command, name, short, mode, action string, bind func(*cobra.Command, *options)) *cobra.Command {
 		o := options{mode: mode, action: action, policy: "selected", layout: "batch", public: map[string]string{}, secrets: map[string]string{}}
+		var request commandRequest
 		c := &cobra.Command{Use: name, Short: short, Long: short, Args: noArguments, Example: "  netman " + parent.Name() + " " + strings.Fields(name)[0] + " --help"}
 		bind(c, &o)
 		c.PreRunE = func(c *cobra.Command, args []string) error {
@@ -91,10 +92,12 @@ func (r Runtime) commandTree(ctx context.Context, outputErr *error) *cobra.Comma
 			if err := prepareCommandOptions(c, &o); err != nil {
 				return err
 			}
-			return nil
+			var err error
+			request, err = newCommandRequest(o)
+			return err
 		}
 		c.RunE = func(c *cobra.Command, _ []string) error {
-			if code := r.executeSelected(c.Context(), o); code != 0 {
+			if code := r.executeSelected(c.Context(), o, request); code != 0 {
 				return commandExit(code)
 			}
 			return nil

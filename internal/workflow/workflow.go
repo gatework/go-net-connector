@@ -3,16 +3,19 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"io"
+	"sync"
 
 	"github.com/gatework/go-net-connector/archive"
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/fleet"
-	"github.com/gatework/go-net-connector/internal/progress"
 	"github.com/gatework/go-net-connector/topology"
 	"github.com/gatework/go-net-connector/transfer"
 	"github.com/gatework/go-net-connector/vendors"
 )
+
+var ErrInvalidRequest = errors.New("workflow: invalid request")
 
 type BackupOptions struct{ Policy, Layout string }
 type TFTPOptions struct {
@@ -20,13 +23,12 @@ type TFTPOptions struct {
 	Plan, All bool
 }
 type TopologyOptions struct {
-	Mode          string
 	InventoryOnly bool
 	Limit         int
 }
 
 // Runtime contains the application dependencies shared by operation workflows.
-// The CLI composition root builds it from validated settings and resource factories.
+// Bootstrap builds it from validated settings and resource factories.
 type Runtime struct {
 	Rules        *fleet.Rules
 	Registry     *vendors.Registry
@@ -77,8 +79,18 @@ type TopologyResult struct {
 	Inventory []fleet.PlanEntry
 	Outcomes  []TopologyOutcome
 	Directory string
-	Summary   map[string]any
+	Report    *TopologyReport
 }
+
+// Summary returns a presentation snapshot. Changing it cannot change execution
+// eligibility, retained evidence, or later report persistence.
+func (t *TopologyResult) Summary() map[string]any {
+	if t == nil || t.Report == nil {
+		return nil
+	}
+	return t.Report.view()
+}
+
 type PreviewResult struct {
 	Plan fleet.Plan
 	View map[string]any
@@ -90,9 +102,10 @@ type Result struct {
 	Preview  *PreviewResult
 }
 type Runner struct {
-	Progress io.Writer
-	Reporter *progress.Reporter
-	result   Result
+	Observe     Observer
+	result      Result
+	progressMu  sync.Mutex
+	progressErr error
 }
 
 func (r *Runner) fail(err error) (Result, error) { return r.result, err }
@@ -112,10 +125,10 @@ func RecordOutputFailure(ctx context.Context, result Result, err error) {
 		b.Report = fleet.WriteReport(ctx, b.Report.WithReportError(err, loc), b.Directory, b.Plan, b.Workers)
 	}
 	if t := result.Topology; t != nil && t.Directory != "" {
-		t.Summary["success"] = false
-		t.Summary["output_error"] = "IOError"
-		t.Summary["report_error"] = "IOError"
-		_ = persistTopologySummary(ctx, t.Directory, t.Summary)
+		t.Report.Success = false
+		t.Report.OutputError = "IOError"
+		t.Report.ReportError = "IOError"
+		_ = persistTopologySummary(ctx, t.Directory, t.Report)
 	}
 }
 
@@ -131,9 +144,9 @@ func RecordProgressFailure(ctx context.Context, result *Result, err error) {
 		b.Report = fleet.WriteReport(ctx, b.Report.WithReportError(err, loc), b.Directory, b.Plan, b.Workers)
 	}
 	if t := result.Topology; t != nil && t.Directory != "" {
-		t.Summary["success"] = false
-		t.Summary["progress_error"] = "IOError"
-		t.Summary["report_error"] = "IOError"
-		_ = persistTopologySummary(ctx, t.Directory, t.Summary)
+		t.Report.Success = false
+		t.Report.ProgressError = "IOError"
+		t.Report.ReportError = "IOError"
+		_ = persistTopologySummary(ctx, t.Directory, t.Report)
 	}
 }
