@@ -48,7 +48,7 @@ func TestActualPTYPanelWidths(t *testing.T) {
 			t.Fatal("PTY not detected")
 		}
 		p.Plan(50, 50, 50, "backup")
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			p.Start("中文👩‍💻é交换机", "h3c")
 			p.Event("中文👩‍💻é交换机", "login_complete", "ok")
 			p.Outcome("中文👩‍💻é交换机", "backed_up", "", time.Second)

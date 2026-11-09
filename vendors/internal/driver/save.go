@@ -38,7 +38,7 @@ func validateSaveConfirmation(ctx context.Context, result connector.Result, conf
 			return connector.ErrUnconfirmed
 		}
 		confirmed := false
-		for _, line := range strings.Split(rendered, "\n") {
+		for line := range strings.SplitSeq(rendered, "\n") {
 			if confirmation.MatchString(strings.TrimSpace(line)) {
 				confirmed = true
 			}

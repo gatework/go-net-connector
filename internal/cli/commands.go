@@ -7,7 +7,11 @@ import (
 	"io"
 	"strings"
 
+	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/internal/batchreport"
 	"github.com/gatework/go-net-connector/internal/buildinfo"
+	"github.com/gatework/go-net-connector/inventory"
+	"github.com/gatework/go-net-connector/netdisco"
 	"github.com/spf13/cobra"
 )
 
@@ -37,13 +41,11 @@ func (r Runtime) runCommands(ctx context.Context) int {
 	if err == nil {
 		return 0
 	}
-	var exit commandExit
-	if errors.As(err, &exit) {
+	if exit, ok := errors.AsType[commandExit](err); ok {
 		return int(exit)
 	}
 	message := "命令或参数无效，请使用 netman help 查看用法"
-	var bad *commandUsage
-	if errors.As(err, &bad) {
+	if bad, ok := errors.AsType[*commandUsage](err); ok {
 		message = bad.message
 	}
 	fmt.Fprintln(r.Error, "netman："+message)
@@ -108,6 +110,7 @@ func (r Runtime) commandTree(ctx context.Context, outputErr *error) *cobra.Comma
 	addBackupCommands(root, leaf)
 	addInventoryCommands(root, leaf)
 	addTopologyCommands(root, leaf)
+	addPushCommands(root, leaf)
 	addConfigCommands(root, leaf)
 	addCompletionCommands(root)
 	root.AddCommand(&cobra.Command{Use: "version", Short: "显示版本与源码修订号", Long: "显示构建身份，不读取配置或凭据。", Example: "  netman version", Args: noArguments, RunE: func(c *cobra.Command, _ []string) error {
@@ -120,7 +123,7 @@ func (r Runtime) commandTree(ctx context.Context, outputErr *error) *cobra.Comma
 		if f := c.Flags().Lookup("help"); f != nil {
 			f.Usage = "显示当前命令的中文帮助"
 		}
-		for name, values := range map[string][]string{"layout": {"batch", "flat"}, "method": {"cli", "tftp"}, "success-policy": {"strict", "selected", "verified"}, "protocol": {"ssh", "telnet"}, "host-key-policy": {"strict", "accept_new", "replace"}, "cache-mode": {"prefer", "only", "refresh"}, "source": {"http", "postgres"}, "for": {"backup", "tftp", "topology"}, "name-match": {"contains", "prefix", "glob"}, "model-match": {"contains", "prefix", "glob"}} {
+		for name, values := range flagCompletions() {
 			if c.Flags().Lookup(name) != nil {
 				_ = c.RegisterFlagCompletionFunc(name, func(_ *cobra.Command, _ []string, prefix string) ([]string, cobra.ShellCompDirective) {
 					var matches []string
@@ -167,4 +170,21 @@ func (w *commandOutput) Write(p []byte) (int, error) {
 		*w.first = err
 	}
 	return n, err
+}
+
+// flagCompletions maps enumerated flags to their accepted values. Values come
+// from the packages that validate them so completion cannot drift.
+func flagCompletions() map[string][]string {
+	return map[string][]string{
+		"layout":          batchreport.Layouts(),
+		"method":          {"cli", "tftp"},
+		"success-policy":  batchreport.SuccessPolicies(),
+		"protocol":        {string(connector.ProtocolSSH), string(connector.ProtocolTelnet)},
+		"host-key-policy": {string(connector.HostKeyStrict), string(connector.HostKeyAcceptNew), string(connector.HostKeyReplace)},
+		"cache-mode":      netdisco.CacheModes(),
+		"source":          {"http", "postgres"},
+		"for":             {"backup", "tftp", "topology"},
+		"name-match":      inventory.MatchModes(),
+		"model-match":     inventory.MatchModes(),
+	}
 }

@@ -78,8 +78,7 @@ func TestDiagnosticTrustedOperationAndCallbackCauses(t *testing.T) {
 }
 func TestDiagnosticStorageFailureRetainsSafeCause(t *testing.T) {
 	_, err := storage.Write(t.Context(), filepath.Join(t.TempDir(), "missing", "report.json"), nil)
-	var we *storage.WriteError
-	if !errors.As(err, &we) {
+	if _, ok := errors.AsType[*storage.WriteError](err); !ok {
 		t.Fatalf("expected actual storage failure: %v", err)
 	}
 	d := diagnoseError(err, Artifact{})

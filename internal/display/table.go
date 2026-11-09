@@ -28,11 +28,12 @@ func Table(w io.Writer, rows [][5]string, width int) error {
 			}
 		}
 	}
-	border := "+"
+	var border strings.Builder
+	border.WriteString("+")
 	for _, n := range widths {
-		border += strings.Repeat("-", n+2) + "+"
+		border.WriteString(strings.Repeat("-", n+2) + "+")
 	}
-	border += "\n"
+	border.WriteString("\n")
 	writeRow := func(row [5]string) error {
 		address := []string{}
 		part := ""
@@ -49,7 +50,8 @@ func Table(w io.Writer, rows [][5]string, width int) error {
 		}
 		address = append(address, part)
 		for line, ip := range address {
-			s := "|"
+			var s strings.Builder
+			s.WriteString("|")
 			for i, value := range row {
 				if line > 0 {
 					value = ""
@@ -58,21 +60,21 @@ func Table(w io.Writer, rows [][5]string, width int) error {
 					value = ip
 				}
 				v := Clip(value, widths[i])
-				s += " " + v + strings.Repeat(" ", widths[i]-uniseg.StringWidth(v)) + " |"
+				s.WriteString(" " + v + strings.Repeat(" ", widths[i]-uniseg.StringWidth(v)) + " |")
 			}
-			if _, err := fmt.Fprintln(w, s); err != nil {
+			if _, err := fmt.Fprintln(w, s.String()); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
-	if _, err := io.WriteString(w, border); err != nil {
+	if _, err := io.WriteString(w, border.String()); err != nil {
 		return err
 	}
 	if err := writeRow([5]string{"IP", "名称", "厂商", "型号", "状态"}); err != nil {
 		return err
 	}
-	if _, err := io.WriteString(w, border); err != nil {
+	if _, err := io.WriteString(w, border.String()); err != nil {
 		return err
 	}
 	for _, row := range rows {
@@ -85,6 +87,6 @@ func Table(w io.Writer, rows [][5]string, width int) error {
 			return err
 		}
 	}
-	_, err := io.WriteString(w, border)
+	_, err := io.WriteString(w, border.String())
 	return err
 }

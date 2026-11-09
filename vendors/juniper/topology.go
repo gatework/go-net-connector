@@ -9,7 +9,7 @@ func topologyParser() topology.Parser {
 	return topology.Parser{
 		NeighborTemplate:    "juniper/show_lldp_neighbors_detail.textfsm",
 		DescriptionTemplate: "juniper/show_configuration_display_set.textfsm",
-		Protocol:            "lldp",
+		Protocol:            topology.ProtocolLLDP,
 		CountNeighbors:      neighborCount,
 		CanonicalInterface:  ifname.Key,
 		AppendInterfaceUnit: true,

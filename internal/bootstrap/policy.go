@@ -4,7 +4,9 @@ import (
 	"context"
 
 	"github.com/gatework/go-net-connector/config"
+	"github.com/gatework/go-net-connector/internal/batchreport"
 	"github.com/gatework/go-net-connector/internal/workflow"
+	"github.com/gatework/go-net-connector/netdisco"
 )
 
 // PolicyOptions describes the application input layer before configuration I/O.
@@ -44,23 +46,23 @@ func BackupOptions(policy config.Snapshot, mode string, inspect bool) (workflow.
 		Policy: stringValue(policy, "backup.success_policy"),
 		Layout: stringValue(policy, "backup.layout"),
 	}
-	valid := options.Policy == "strict" || options.Policy == "selected" || options.Policy == "verified"
-	if !valid || !inspect && options.Policy == "verified" && mode != "tftp" {
+	policyValue := batchreport.SuccessPolicy(options.Policy)
+	if !policyValue.Valid() || !inspect && !policyValue.AllowedFor(mode == "tftp") {
 		return workflow.BackupOptions{}, &config.FieldError{Field: "backup.success_policy", Problem: "invalid"}
 	}
 	return options, nil
 }
 
 // InventoryMode resolves explicit cache flags before command-specific defaults.
-func InventoryMode(policy config.Snapshot, mode string, refresh, explicit bool) string {
+func InventoryMode(policy config.Snapshot, mode string, refresh, explicit bool) netdisco.CacheMode {
 	if refresh {
-		return "refresh"
+		return netdisco.CacheRefresh
 	}
 	if explicit {
-		return stringValue(policy, "netdisco.cache_mode")
+		return netdisco.CacheMode(stringValue(policy, "netdisco.cache_mode"))
 	}
 	if mode == "topology" {
-		return stringValue(policy, "topology.cache_mode")
+		return netdisco.CacheMode(stringValue(policy, "topology.cache_mode"))
 	}
 	return ""
 }

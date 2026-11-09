@@ -77,6 +77,13 @@ func (r Runtime) executeSelected(ctx context.Context, o options, request command
 	if request.kind == requestExport {
 		return r.exportBatch(ctx, o.export, o.batch, o.output, o.json)
 	}
+	var pushScripts workflow.PushScripts
+	if request.kind == requestPushPlan || request.kind == requestPushRun {
+		var e error
+		if pushScripts, e = r.loadPushScripts(o); e != nil {
+			return r.fail(program, e)
+		}
+	}
 	policy, e := bootstrap.LoadPolicy(ctx, bootstrap.PolicyOptions{
 		Mode: o.mode, CWD: r.CWD, Home: r.Home, Program: r.Program,
 		Directories: r.Directories, ConfigFile: o.config, EnvFile: o.envFile,
@@ -276,6 +283,16 @@ func (r Runtime) executeSelected(ctx context.Context, o options, request command
 			return r.fail(program, e)
 		}
 		result, e = w.Topology(ctx, workflowRun, settings, rows, request.topology)
+	} else if request.kind == requestPushPlan || request.kind == requestPushRun {
+		var plan fleet.Plan
+		plan, e = fleet.NewPlan(rows, services.Rules(), fleet.PlanOptions{Mode: "backup"})
+		if e != nil {
+			return r.fail(program, e)
+		}
+		result, e = w.Push(ctx, workflowRun, plan, workflow.PushOptions{
+			Scripts: pushScripts, Save: o.pushSave, StopAfterFailures: o.pushStopAfter,
+			Plan: request.kind == requestPushPlan, Directory: r.pushDirectory(o),
+		})
 	} else if request.kind == requestTFTPRun || request.kind == requestTFTPPlan {
 		var settings workflow.TFTPSettings
 		settings, e = services.WorkflowTFTPSettings()
@@ -353,8 +370,10 @@ func (r Runtime) fail(program string, e error) int {
 		return 130
 	}
 	message := "操作失败（输入无效、数据源不可用或 I/O 错误）"
-	var classified *connector.Error
-	if errors.As(e, &classified) {
+	if usage, ok := errors.AsType[*commandUsage](e); ok {
+		message = usage.message
+	}
+	if classified, ok := errors.AsType[*connector.Error](e); ok {
 		message = display.Error(classified.Code)
 	}
 	var inventoryError *netdisco.InventoryError
@@ -367,13 +386,15 @@ func (r Runtime) fail(program string, e error) int {
 	if errors.Is(e, config.ErrInvalid) {
 		message = "配置或参数无效，请使用 --help 查看用法并检查配置文件"
 	}
-	var field *config.FieldError
-	if errors.As(e, &field) {
-		problem := "无效"
-		if field.Problem == "required" {
-			problem = "未设置"
+	if field, ok := errors.AsType[*config.FieldError](e); ok {
+		switch field.Problem {
+		case "removed":
+			message = "配置 " + display.Text(field.Field) + " 已移除；请改用 " + display.Text(field.Replacement)
+		case "required":
+			message = "配置 " + display.Text(field.Field) + " 未设置；请通过配置文件、环境变量或对应选项设置"
+		default:
+			message = "配置 " + display.Text(field.Field) + " 无效；请通过配置文件、环境变量或对应选项设置"
 		}
-		message = "配置 " + display.Text(field.Field) + " " + problem + "；请通过配置文件、环境变量或对应选项设置"
 	}
 	if errors.Is(e, workflow.ErrTFTPArchivePreflight) {
 		message = "TFTP 归档预检失败：请检查归档服务器 SSH 认证、远端 tftp-archive 是否已安装且协议兼容，以及归档目录权限；本次尚未开始设备上传"

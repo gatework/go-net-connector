@@ -31,10 +31,13 @@ func inventoryPath(path string) bool {
 }
 
 func environmentValues(values map[string]string, higher map[string]any, include func(string) bool) (map[string]any, error) {
+	if err := rejectRemovedEnvironment(values, include); err != nil {
+		return nil, err
+	}
 	result := map[string]any{}
 	remaining := MaxBytes
 	for path, field := range schema {
-		if include != nil && !include(path) || hasPath(higher, canonicalPath(path)) {
+		if include != nil && !include(path) || hasPath(higher, path) {
 			continue
 		}
 		value, present := values[field.Env]

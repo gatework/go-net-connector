@@ -114,16 +114,16 @@ func (r *Renderer) escape(b byte) error {
 	case 'c':
 		if b >= 0x40 && b <= 0x7e {
 			n := 1
-			digits := ""
+			var digits strings.Builder
 			for _, x := range r.params {
 				if x >= '0' && x <= '9' {
-					digits += string(x)
-				} else if digits != "" {
+					digits.WriteString(string(x))
+				} else if digits.String() != "" {
 					break
 				}
 			}
-			if digits != "" {
-				v, e := strconv.Atoi(digits)
+			if digits.String() != "" {
+				v, e := strconv.Atoi(digits.String())
 				if e != nil {
 					return ErrLimit
 				}
@@ -143,7 +143,7 @@ func (r *Renderer) escape(b byte) error {
 				}
 				r.cursor = max(0, n-1)
 			case 'K':
-				if digits == "" {
+				if digits.String() == "" {
 					n = 0
 				}
 				switch n {

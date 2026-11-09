@@ -11,25 +11,21 @@ import (
 
 var saveConfirmationPattern = driver.Regex(`(?i)^Saving configuration is finished\.?$`)
 
-type dialect struct {
+// Dialect is the built-in Hillstone platform.
+type Dialect struct {
 	driver.ProfiledPlatform
-	driver.NeighborPolicy
-	driver.DescriptionReader
-	driver.InterfaceIdentityPolicy
+	driver.TopologyReader
 	driver.DescriptionWriter
 	tftpPolicy
 }
 
 // New returns the built-in Hillstone dialect.
-func New() dialect {
-	parser := topologyParser()
-	return dialect{
-		ProfiledPlatform:        driver.NewProfiledPlatform(newProfile()),
-		NeighborPolicy:          driver.NewNeighborPolicy("show lldp neighbor-information", parser),
-		DescriptionReader:       driver.DescriptionReader{Parser: parser},
-		InterfaceIdentityPolicy: driver.InterfaceIdentityPolicy{Parser: parser},
-		DescriptionWriter:       driver.NewDescriptionWriter(dialectapi.WriteMode{Enter: "configure", Leave: "exit", InterfaceExit: "exit"}),
-		tftpPolicy:              newTFTPPolicy(),
+func New() Dialect {
+	return Dialect{
+		ProfiledPlatform:  driver.NewProfiledPlatform(newProfile()),
+		TopologyReader:    driver.NewTopologyReader("show lldp neighbor-information", topologyParser()),
+		DescriptionWriter: driver.NewDescriptionWriter(dialectapi.WriteMode{Enter: "configure", Leave: "exit", InterfaceExit: "exit"}),
+		tftpPolicy:        newTFTPPolicy(),
 	}
 }
 

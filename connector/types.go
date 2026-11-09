@@ -436,8 +436,7 @@ func joinCleanup(primary, cleanup error) error {
 type joinedFailure struct{ primary, secondary error }
 
 func (e *joinedFailure) Error() string {
-	var classified *Error
-	if errors.As(e.primary, &classified) {
+	if classified, ok := errors.AsType[*Error](e.primary); ok {
 		return classified.Error()
 	}
 	return "connector: multiple failures"

@@ -224,9 +224,7 @@ func (r *TopologyReport) view() map[string]any {
 			devices = append(devices, map[string]any{"host": d.Host, "name": nullableString(d.Name), "vendor": d.Vendor})
 		}
 		issues := make(map[string]int, len(p.issues))
-		for key, count := range p.issues {
-			issues[key] = count
-		}
+		maps.Copy(issues, p.issues)
 		return map[string]any{"total": p.total, "ready": p.ready, "issues": issues, "devices": devices}
 	}
 	devices := make([]map[string]any, 0, len(r.outcomes))
@@ -279,21 +277,21 @@ func (r *TopologyReport) Presentation() topologyreport.Summary {
 		OrchestrationError: r.OrchestrationError, Statistics: r.Statistics, Devices: devices,
 	}
 }
-func (out topologyOutcome) presentation() topologyreport.Device {
+func (o topologyOutcome) presentation() topologyreport.Device {
 	value := topologyreport.Device{
-		Name: out.device.Name, Named: out.named, Host: out.device.Host, Vendor: out.device.Vendor, Status: string(out.state),
-		ScriptFile: out.scriptFile, ScriptSHA256: out.scriptSHA256, DeviceReport: out.deviceReport,
-		Comparisons: cloneTopologyComparisons(out.audit.Comparisons),
-		Issues:      slices.Clone(out.audit.Issues), Commands: out.commands(),
+		Name: o.device.Name, Named: o.named, Host: o.device.Host, Vendor: o.device.Vendor, Status: string(o.state),
+		ScriptFile: o.scriptFile, ScriptSHA256: o.scriptSHA256, DeviceReport: o.deviceReport,
+		Comparisons: cloneTopologyComparisons(o.audit.Comparisons),
+		Issues:      slices.Clone(o.audit.Issues), Commands: o.commands(),
 	}
-	if out.audited {
-		value.Changes = new(out.audit.Changes())
+	if o.audited {
+		value.Changes = new(o.audit.Changes())
 	}
-	if out.audited || out.applied {
-		value.Steps = new(out.steps())
+	if o.audited || o.applied {
+		value.Steps = new(o.steps())
 	}
-	if out.diagnostic != (topologyDiagnostic{}) {
-		value.Diagnostic = &topologyreport.Diagnostic{Code: out.diagnostic.code}
+	if o.diagnostic != (topologyDiagnostic{}) {
+		value.Diagnostic = &topologyreport.Diagnostic{Code: o.diagnostic.code}
 	}
 	return value
 }

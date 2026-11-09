@@ -121,8 +121,8 @@ func (d *Device) execute(ctx context.Context, script Script, opts ExecuteOptions
 }
 func pureDeviceRejection(err error) bool {
 	// A joined observer, logging or cancellation failure must never qualify.
-	e, ok := err.(*Error)
-	return ok && e.Code == "device_error" && e.cause == ErrDevice
+	e, ok := err.(*Error)                                         //nolint:errorlint // only the unwrapped top-level classification qualifies.
+	return ok && e.Code == "device_error" && e.cause == ErrDevice //nolint:errorlint // the cause must be exactly ErrDevice, not a joined tree.
 }
 
 func (d *Device) runScript(ctx context.Context, script Script, opts ExecuteOptions, strategy ConfigStrategy) (result Result, rejection *Response, err error) {
@@ -302,8 +302,7 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 	}
 	attempted = true
 	if err = d.sendLine(cc, c.Text+d.config.LineEnding, c.Poll); err != nil {
-		var progress *expect.WriteError
-		if errors.As(err, &progress) {
+		if progress, ok := errors.AsType[*expect.WriteError](err); ok {
 			written = progress.Written
 		}
 		return step, writeFailure("command", c, err)
@@ -507,8 +506,7 @@ func (d *Device) readResponse(ctx context.Context, c Command, prompt expect.Patt
 	}
 	if err != nil && !completed {
 		phase := map[bool]string{true: "login", false: "command"}[login]
-		var classified *Error
-		if errors.As(err, &classified) {
+		if _, ok := errors.AsType[*Error](err); ok {
 			return StepResult{}, err
 		}
 		code := "transport_error"
@@ -542,8 +540,7 @@ func (d *Device) readResponse(ctx context.Context, c Command, prompt expect.Patt
 }
 
 func writeFailure(phase string, c Command, err error) error {
-	var classified *Error
-	if errors.As(err, &classified) {
+	if classified, ok := errors.AsType[*Error](err); ok {
 		metadata := *classified
 		metadata.cause = err
 		return &metadata

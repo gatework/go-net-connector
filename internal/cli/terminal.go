@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"strings"
@@ -138,9 +139,7 @@ func (r Runtime) configure(ctx context.Context, snapshot config.Snapshot, o opti
 		return snapshot, e
 	}
 	values := map[string]string{}
-	for key, value := range o.public {
-		values[key] = value
-	}
+	maps.Copy(values, o.public)
 	ask := func(key, label, defaultValue string, valid func(string) bool) error {
 		for {
 			value, err := answer(label, defaultValue)

@@ -98,7 +98,7 @@ func NewPool(o PoolOptions) (*Pool, error) {
 			client.batch = p.clients[0].batch
 		}
 		p.clients = append(p.clients, client)
-		for i := 0; i < count; i++ {
+		for range count {
 			p.available <- client
 		}
 		remaining -= count

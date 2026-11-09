@@ -74,8 +74,7 @@ func runChannel(ctx context.Context, launch Launcher, run func(*Protocol) error,
 
 func channelFailure(cause error) error {
 	phase := ""
-	var primary *Error
-	if errors.As(cause, &primary) {
+	if primary, ok := errors.AsType[*Error](cause); ok {
 		phase = primary.Phase
 	}
 	return &Error{Phase: phase, cause: cause}

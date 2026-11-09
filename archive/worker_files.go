@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -35,7 +36,7 @@ func openDirectories(root string) (*directories, error) {
 	if e != nil {
 		return nil, e
 	}
-	for _, part := range strings.Split(root, "/") {
+	for part := range strings.SplitSeq(root, "/") {
 		if part == "" {
 			continue
 		}
@@ -49,8 +50,8 @@ func openDirectories(root string) (*directories, error) {
 	return &directories{root: fd, path: root, fds: []int{fd}}, nil
 }
 func (d *directories) close() {
-	for i := len(d.fds) - 1; i >= 0; i-- {
-		unix.Close(d.fds[i])
+	for _, v := range slices.Backward(d.fds) {
+		unix.Close(v)
 	}
 }
 func sameEntry(parent int, name string, fd int) error {

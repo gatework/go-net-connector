@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gatework/go-net-connector/internal/batchreport"
+
 	"github.com/gatework/go-net-connector/archive"
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/connector"
@@ -85,7 +87,7 @@ func New(policy config.Snapshot, secret Secret) (*Services, error) {
 	if e != nil {
 		return nil, e
 	}
-	if mode := stringValue(policy, "netdisco.cache_mode"); mode != "prefer" && mode != "only" && mode != "refresh" {
+	if !netdisco.CacheMode(stringValue(policy, "netdisco.cache_mode")).Valid() {
 		return nil, config.ErrInvalid
 	}
 	if e = s.validatePolicy(); e != nil {
@@ -114,7 +116,7 @@ func resolveSettings(policy config.Snapshot) (resolvedSettings, error) {
 			Timeout:           durationValue(policy, "netdisco.inventory_timeout"),
 		},
 	}
-	if settings.backupLayout != "batch" && settings.backupLayout != "flat" || settings.parallel < 1 || settings.parallel > 500 || settings.limitPerVendor < 0 || settings.limitPerVendor > 5 {
+	if !batchreport.Layout(settings.backupLayout).Valid() || settings.parallel < 1 || settings.parallel > 500 || settings.limitPerVendor < 0 || settings.limitPerVendor > 5 {
 		return resolvedSettings{}, config.ErrInvalid
 	}
 	if policy.Value("tftp.upload_timeout") != nil {
@@ -293,35 +295,40 @@ func (s *Services) DeviceWithLogger(ctx context.Context, r fleet.Record, logger 
 	c.Host = r.Host
 	c.Logger = logger
 	c.OnSessionEvent = s.observer
-	prefix := "NC_" + strings.ToUpper(r.Vendor) + "_"
-	get := func(suffix, fallback string) string {
-		if v := s.secret(prefix + suffix); strings.TrimSpace(v) != "" {
-			return v
+	keys := credentialKeys(r.Vendor)
+	// A blank specific secret falls through; the shared fallback is returned
+	// as stored, so a deliberately blank-looking password is preserved.
+	get := func(names []string) string {
+		last := len(names) - 1
+		for _, name := range names[:last] {
+			if v := s.secret(name); strings.TrimSpace(v) != "" {
+				return v
+			}
 		}
-		return s.secret(fallback)
+		return s.secret(names[last])
 	}
-	c.Username = get("USERNAME", "NC_DEVICE_USERNAME")
+	c.Username = get(keys.username)
 	if strings.TrimSpace(c.Username) == "" {
 		return nil, ErrCredentials
 	}
-	c.Password = get("PASSWORD", "NC_DEVICE_PASSWORD")
-	c.EnablePassword = get("ENABLE_PASSWORD", "NC_ENABLE_PASSWORD")
+	c.Password = get(keys.password)
+	c.EnablePassword = get(keys.enablePassword)
 	return s.factory(p, c)
 }
 func (s *Services) limits() netdisco.Limits {
 	return s.settings.inventoryLimits
 }
-func (s *Services) Inventory(ctx context.Context, mode string) (netdisco.CacheResult, error) {
+func (s *Services) Inventory(ctx context.Context, mode netdisco.CacheMode) (netdisco.CacheResult, error) {
 	p := s.policy
 	if mode == "" {
-		mode = stringValue(p, "netdisco.cache_mode")
+		mode = netdisco.CacheMode(stringValue(p, "netdisco.cache_mode"))
 	}
 	limits := s.limits()
 	fetch := netdisco.FetchOptions{Mode: mode}
 	if boolValue(p, "netdisco.cache_enabled") {
 		ttl := durationValue(p, "netdisco.cache_ttl")
 		fetch.Cache = &netdisco.CachePolicy{Directory: stringValue(p, "netdisco.cache_directory"), Namespace: stringValue(p, "netdisco.cache_namespace"), TTL: &ttl}
-	} else if mode == "only" {
+	} else if mode == netdisco.CacheOnly {
 		return netdisco.CacheResult{}, config.ErrInvalid
 	}
 	switch stringValue(p, "netdisco.source") {
@@ -395,8 +402,23 @@ func (s *Services) LogDirectory(mode, directory string) string {
 	if explicit := s.settings.logDirectory; explicit != "" {
 		return explicit
 	}
-	if mode == "topology" || mode == "tftp" {
+	if mode == "topology" || mode == "tftp" || mode == "push" {
 		return filepath.Join(directory, "logs")
 	}
 	return ""
+}
+
+// deviceCredentialKeys lists secret names in lookup order: the most specific
+// name first, then the shared fallback.
+type deviceCredentialKeys struct{ username, password, enablePassword []string }
+
+// credentialKeys is the single place that names device credential secrets:
+// NC_<VENDOR>_<KIND> overrides NC_DEVICE_* (NC_ENABLE_PASSWORD for enable).
+func credentialKeys(vendor string) deviceCredentialKeys {
+	prefix := "NC_" + strings.ToUpper(vendor) + "_"
+	return deviceCredentialKeys{
+		username:       []string{prefix + "USERNAME", "NC_DEVICE_USERNAME"},
+		password:       []string{prefix + "PASSWORD", "NC_DEVICE_PASSWORD"},
+		enablePassword: []string{prefix + "ENABLE_PASSWORD", "NC_ENABLE_PASSWORD"},
+	}
 }

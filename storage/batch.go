@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -111,10 +112,8 @@ func batchBasename(path string) (string, error) {
 	if path == "" || strings.Contains(path, "\\") || strings.IndexFunc(path, unicode.IsControl) >= 0 {
 		return "", ErrBatchEvidence
 	}
-	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
-		if part == ".." {
-			return "", ErrBatchEvidence
-		}
+	if slices.Contains(strings.Split(filepath.ToSlash(path), "/"), "..") {
+		return "", ErrBatchEvidence
 	}
 	name := filepath.Base(path)
 	if name == "." || name == string(filepath.Separator) || !filepath.IsAbs(path) && name != path {

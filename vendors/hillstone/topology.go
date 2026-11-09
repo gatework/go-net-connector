@@ -12,7 +12,7 @@ func topologyParser() topology.Parser {
 	return topology.Parser{
 		NeighborTemplate:     "hillstone/show_lldp_neighbor_information.textfsm",
 		DescriptionTemplate:  "hillstone/show_configuration_running.textfsm",
-		Protocol:             "lldp",
+		Protocol:             topology.ProtocolLLDP,
 		CountNeighbors:       neighborCount,
 		ValidateDescriptions: topology.ValidateInterfaceRows,
 		CanonicalInterface:   ifname.Key,
@@ -21,7 +21,7 @@ func topologyParser() topology.Parser {
 
 func neighborCount(text string) (int, bool) {
 	lines := []string{}
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || line == "show lldp neighbor-information" || topology.Pattern(`(?i)^(?:System Name\s+Local Interface\b|Total lldp neighbor number:\s*\d+\.?$|[-=+ ]+$|\S+(?:#|\([MBF]\))$)`).MatchString(line) {
 			continue

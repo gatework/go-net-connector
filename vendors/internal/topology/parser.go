@@ -11,6 +11,12 @@ import (
 	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
+// Discovery protocols recorded on parsed neighbors.
+const (
+	ProtocolLLDP = "lldp"
+	ProtocolCDP  = "cdp"
+)
+
 // Parser holds the template and validation rules for one CLI platform.
 // Platform constructors live beside their vendor-specific parsing rules; the
 // methods here provide the shared TextFSM and evidence boundary.

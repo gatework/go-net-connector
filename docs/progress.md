@@ -485,3 +485,16 @@ Linux Go 1.26 race 运行进一步暴露测试夹具的 20/80ms 总准备期限�
 用户随后明确授权发布四模块。go-expect v0.4.1 已从提交 `fe53190d8b1b3fedcd40d3bb345a7b84811bd133` 经完整 CI 发布；标签、源码树和下载附件与同一次 CI 的不可变制品一致。本模块固定该正式版本，保持 `GOWORK=off`、无 replace；原组织重构记录中的 v0.4.0 指当时 Expect 依赖，并非本次最终依赖。
 
 Connector 版本升为 v0.4.0，公开 API 与缓存身份迁移见 [发行说明](releases/v0.4.0.md)。发布须使用本提交完整 CI 的制品，经过草稿上传、附件读回验证后公开；此提交中的准备记录不预先声明自身已发布。发布账本与独立版本化消费者证据保存在 sibling `release-20261107-164506/`。本轮不连接生产设备或执行部署。
+
+## 2026-11-09 Go 惯用法、去样板与批量下发
+
+按已批准方案（`~/.claude/plans/go-go-net-connector-dapper-grove.md`）在工作区实施，未提交、未发布。基线：除 `internal/cli` 的 `TestInteractiveDeclinedOptionalEnvContinues` 在本机 PTY 下挂起至超时（改动前即如此，未修改该用例）外，`GOWORK=off go test ./...` 全部通过。
+
+- 现代化：`GOWORK=off go fix ./...`（errors.AsType、maps.Copy、slices.ContainsFunc/Backward/Contains、strings.SplitSeq、range int），删除被内联后未使用的指针辅助函数；`.golangci.yml` 启用 modernize、errorlint（测试除外）与 revive 的 unexported-return、receiver-naming。`pureDeviceRejection`、`primaryDiagnosticError` 保留顶层判断并注明原因。未启用 revive `exported`：缺失文档注释数量大，另行处理。
+- 枚举单一拥有者：`batchreport.SuccessPolicy`/`Layout`、`netdisco.CacheMode`、`inventory.MatchMode`、`config.FieldKind`；config、bootstrap、CLI、fleet、display 与补全表改用这些定义，字符串值与 CLI 参考不变。`netdisco.FetchOptions.Mode`、`Cache.Fetch` 改为 `CacheMode`。
+- 厂商样板：家族构造函数返回导出类型（`h3c.Dialect`、`h3c.WirelessDialect`、`cisco.IOSDialect` 等）；`driver.TopologyReader` 组合三项只读拓扑能力；`driver.PositionMarkerCommandErrors`、`driver.YesNoConfirmations` 去除 H3C/Huawei 逐字重复；`TFTPBase` 直接持有 `TFTPOptions`，文件名长度与源接口名改为具名常量，参数错误包装 `ErrInvalid` 并只标明字段名。`vendors/profiles_test.go`、parity 与能力契约测试未改断言，全部通过。
+- 破坏性配置变更（用户确认）：删除 `tftp.h3c_source_file`、`tftp.h3c_wireless_source_file`、`tftp.huawei_source_file` 及对应环境变量；出现时返回 `FieldError{Problem:"removed", Replacement}`，CLI 提示改用 `tftp.source_files.<平台>`。迁移见 `docs/api-migration.md`。设备凭据键集中到 `credentialKeys`，查找顺序与空白回退语义不变。
+- 计划预览：`workflow.NewPlanView` 返回类型化 `PlanView`，TFTP 传输字段在同一处生成，去掉 `[]map[string]any` 类型断言；先录制 `internal/workflow/testdata/plan_view_*.json` golden，重构后字节一致。
+- 新增 `netman push plan|run`：连接前校验全部脚本；fleet 规划沿用设备筛选；每台设备一次操作租约内 `ExecuteScript`，可选 `SaveConfig`（仅 ValidateSave 正向回执算保存）；失败不重试、不重放；`--stop-after-failures` 只阻止未开始的设备；`report.json` 区分 AcceptedCommands 与 Attempts。指定 `--save` 时未声明保存脚本的平台在规划阶段记为 `save_unsupported` 并跳过；脚本中的 C0 控制字符（制表符除外）在连接前拒绝。
+
+发布准备：在 origin/main（v0.5.0，`f0772b2`）之上重新应用并解决 config、CLI 与迁移文档冲突，版本定为 v0.6.0（含破坏性配置变更）。随后将 go-expect 从 v0.4.1 升级为正式 v0.5.0：proxy.golang.org 与 sum.golang.org 哈希一致，标签指向发布说明记录的测试提交 `33bf675`；本模块无需源码改动，全包 race 测试与 vet 通过。验证：`GOWORK=off go test -skip TestInteractiveDeclinedOptionalEnvContinues ./...` PASS；`go test -race` 覆盖 internal/...、fleet、vendors/...、config、netdisco、inventory、storage、transfer PASS；`go vet ./...` PASS；golangci-lint v2.15.0 0 issues；`docs/cli-reference.md` 由 `-update-cli-reference` 重新生成。push 使用模拟传输验证拒绝后不再发送、保存未确认、失败上限与脚本无效时不读清单不建设备；不代表真实设备验收。

@@ -13,7 +13,7 @@ func topologyParser() topology.Parser {
 	return topology.Parser{
 		NeighborTemplate:     "h3c/display_lldp_neighbor_information_list.textfsm",
 		DescriptionTemplate:  "h3c/display_current_configuration.textfsm",
-		Protocol:             "lldp",
+		Protocol:             topology.ProtocolLLDP,
 		CountNeighbors:       neighborCount,
 		ValidateDescriptions: topology.ValidateInterfaceRows,
 		CanonicalInterface:   ifname.Key,

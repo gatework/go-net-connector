@@ -93,6 +93,13 @@ type Neighbor struct {
 // description commands.
 type WriteMode struct{ Enter, Leave, InterfaceExit string }
 
+// Named source interfaces accepted by platforms that distinguish their
+// management and data planes instead of taking a device interface name.
+const (
+	SourceInterfaceManagement = "management"
+	SourceInterfaceData       = "data"
+)
+
 // TFTPOptions carries target-specific upload choices across the package
 // boundary without importing transfer.
 type TFTPOptions struct {

@@ -18,7 +18,7 @@ type Report struct {
 }
 
 func NewReport(b Batch, policy string) (Report, error) {
-	if policy != "strict" && policy != "selected" && policy != "verified" || policy == "verified" && b.mode != modeTFTP {
+	if !batchreport.SuccessPolicy(policy).AllowedFor(b.mode == modeTFTP) {
 		return Report{}, ErrInvalidPlan
 	}
 	b.outcomes = b.Outcomes()
@@ -48,7 +48,7 @@ func (r Report) Success() bool {
 	for _, o := range b.outcomes {
 		if o.Success() {
 			success = true
-			if r.policy == "verified" && (o.Artifact.Archive == nil || !o.Artifact.Archive.Complete()) {
+			if batchreport.SuccessPolicy(r.policy) == batchreport.PolicyVerified && (o.Artifact.Archive == nil || !o.Artifact.Archive.Complete()) {
 				return false
 			}
 		} else if outcomeStatus(o.Status) != outcomeStatusFiltered && outcomeStatus(o.Status) != outcomeStatusSampleLimit {
@@ -224,10 +224,10 @@ func (r Report) devices() []batchreport.Device {
 		}
 		if receipt := outcome.Artifact.Backup; receipt != nil {
 			device.HasBackup = true
-			device.Path = stringPointer(receipt.Path)
-			device.Bytes = int64Pointer(int64(receipt.Bytes))
-			device.SHA256 = stringPointer(receipt.SHA256)
-			device.Change = stringPointer(receipt.Change)
+			device.Path = new(receipt.Path)
+			device.Bytes = new(int64(receipt.Bytes))
+			device.SHA256 = new(receipt.SHA256)
+			device.Change = new(receipt.Change)
 			device.PreviousSHA256 = optionalString(receipt.PreviousSHA256)
 			device.Source = reportBackupSource(receipt.Source)
 			device.Encoding = optionalString(receipt.Encoding)
@@ -237,22 +237,22 @@ func (r Report) devices() []batchreport.Device {
 			device.RemotePath = device.Path
 			device.ServerFileVerified = false
 			if receipt := outcome.Artifact.Transfer; receipt != nil {
-				device.Path = stringPointer(receipt.Path)
-				device.RemotePath = stringPointer(receipt.Path)
-				device.Server = stringPointer(receipt.Server)
+				device.Path = new(receipt.Path)
+				device.RemotePath = new(receipt.Path)
+				device.Server = new(receipt.Server)
 				device.ConfigurationKind = optionalString(receipt.ConfigurationKind)
 				device.SourceFile = optionalString(receipt.SourceFile)
-				device.Format = stringPointer(receipt.Format)
+				device.Format = new(receipt.Format)
 				device.Verification = optionalString(string(receipt.Verification))
 			}
 			if receipt := outcome.Artifact.Archive; receipt != nil {
 				device.Archive = reportArchiveReceipt(*receipt)
 				device.ServerFileVerified = receipt.Verified()
 				if receipt.Verified() {
-					device.Verification = stringPointer("server_verified")
-					device.ServerSHA256 = stringPointer(receipt.Server.SHA256)
+					device.Verification = new("server_verified")
+					device.ServerSHA256 = new(receipt.Server.SHA256)
 					device.SHA256 = device.ServerSHA256
-					device.Bytes = int64Pointer(receipt.Server.Bytes)
+					device.Bytes = new(receipt.Server.Bytes)
 				}
 				if receipt.Server != nil {
 					device.ServerArchiveFile = optionalString(receipt.Server.ArchivePath)
@@ -320,10 +320,6 @@ func optionalString(value string) *string {
 	}
 	return &value
 }
-
-func stringPointer(value string) *string { return &value }
-
-func int64Pointer(value int64) *int64 { return &value }
 
 func nullableString(value string) any {
 	if value == "" {

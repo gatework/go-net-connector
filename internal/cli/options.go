@@ -13,4 +13,9 @@ type options struct {
 	config, envFile, directory, export, output, policy, mode, description               string
 	public, secrets                                                                     map[string]string
 	flags                                                                               *pflag.FlagSet
+
+	pushScript    string
+	pushScriptFor []string
+	pushSave      bool
+	pushStopAfter int
 }

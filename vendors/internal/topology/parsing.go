@@ -42,7 +42,7 @@ func Count(expression, text string) int {
 func TableLines(output string, header *regexp.Regexp) ([]string, bool) {
 	seen := false
 	lines := []string{}
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		if header.MatchString(line) {
 			seen = true
 			continue

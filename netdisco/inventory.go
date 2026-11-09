@@ -337,8 +337,7 @@ func decodeHTTPInventory(ctx context.Context, b []byte, maxDevices int, count *i
 }
 
 func errorCode(e error) string {
-	var ie *InventoryError
-	if errors.As(e, &ie) {
+	if ie, ok := errors.AsType[*InventoryError](e); ok {
 		return ie.Code
 	}
 	if errors.Is(e, context.DeadlineExceeded) {

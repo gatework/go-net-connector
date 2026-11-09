@@ -5,6 +5,42 @@ layer. Resolve the pinned GitHub dependency with GOWORK=off. Do not run the old
 workspace reconstruction scripts for current builds; retained baselines/patches
 are historical audit material.
 
+## v0.6.0: typed enumerations, exported dialects and removed TFTP keys
+
+**Breaking configuration change.** The platform-specific TFTP source-file keys
+are removed. They are rejected with `config.FieldError{Problem: "removed"}`
+(CLI: `配置 … 已移除；请改用 …`) rather than ignored:
+
+| Removed key / variable | Use instead |
+| --- | --- |
+| `tftp.h3c_source_file` / `NC_H3C_TFTP_SOURCE_FILE` | `tftp.source_files.h3c` |
+| `tftp.h3c_wireless_source_file` / `NC_H3C_WIRELESS_TFTP_SOURCE_FILE` | `tftp.source_files.h3c_wireless` |
+| `tftp.huawei_source_file` / `NC_HUAWEI_TFTP_SOURCE_FILE` | `tftp.source_files.huawei` |
+
+```yaml
+tftp:
+  source_files:
+    huawei: flash:/vrpcfg.zip
+```
+
+or `NC_TFTP_SOURCE_FILES='{"huawei":"flash:/vrpcfg.zip"}'`.
+
+Go API changes (string values are unchanged):
+
+- `netdisco.FetchOptions.Mode` and `(*netdisco.Cache).Fetch` take
+  `netdisco.CacheMode` (`CachePrefer`, `CacheRefresh`, `CacheOnly`). Untyped
+  string constants still compile; convert variables with `netdisco.CacheMode(s)`.
+- `config.Field.Kind` is `config.FieldKind`; `config.FieldError` gains
+  `Replacement`.
+- Vendor constructors return exported types (`h3c.Dialect`,
+  `h3c.WirelessDialect`, `cisco.IOSDialect`, `cisco.NXOSDialect`, and
+  `<family>.Dialect` elsewhere) so callers can name them. Capability methods are
+  unchanged; the read-only topology methods are promoted from
+  `driver.TopologyReader`.
+- TFTP option validation still matches `errors.Is(err, connector.ErrInvalid)`
+  and now names the rejected option (for example `tftp source file`) without
+  echoing its value.
+
 ## Pending: shared configuration reads and cancellation
 
 Applications can reuse the configuration input boundary without adopting

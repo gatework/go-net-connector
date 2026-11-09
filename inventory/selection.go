@@ -122,7 +122,7 @@ type SelectionOptions struct {
 }
 type textRules struct {
 	include, exclude []string
-	mode             string
+	mode             MatchMode
 	globs            map[string]string
 }
 type Selection struct {
@@ -145,11 +145,11 @@ func NewSelection(o SelectionOptions) (Selection, error) {
 	if e != nil {
 		return s, e
 	}
-	makeRules := func(in, out []string, mode string) (textRules, error) {
+	makeRules := func(in, out []string, mode MatchMode) (textRules, error) {
 		if mode == "" {
-			mode = "contains"
+			mode = MatchContains
 		}
-		if mode != "contains" && mode != "prefix" && mode != "glob" && mode != "exact" {
+		if !mode.Valid() {
 			return textRules{}, ErrInvalid
 		}
 		r := textRules{mode: mode, globs: map[string]string{}}
@@ -158,7 +158,7 @@ func NewSelection(o SelectionOptions) (Selection, error) {
 				if !utf8.ValidString(v) || strings.TrimSpace(v) == "" || strings.IndexFunc(v, unicode.IsControl) >= 0 {
 					return r, ErrInvalid
 				}
-				if mode == "glob" {
+				if mode == MatchGlob {
 					r.globs[strings.ToLower(v)] = translateGlob(strings.ToLower(v))
 				}
 				if idx == 0 {
@@ -170,15 +170,15 @@ func NewSelection(o SelectionOptions) (Selection, error) {
 		}
 		return r, nil
 	}
-	s.names, e = makeRules(o.IncludeNames, o.ExcludeNames, o.NameMatch)
+	s.names, e = makeRules(o.IncludeNames, o.ExcludeNames, MatchMode(o.NameMatch))
 	if e != nil {
 		return s, e
 	}
-	s.models, e = makeRules(o.IncludeModels, o.ExcludeModels, o.ModelMatch)
+	s.models, e = makeRules(o.IncludeModels, o.ExcludeModels, MatchMode(o.ModelMatch))
 	if e != nil {
 		return s, e
 	}
-	s.vendors, e = makeRules(o.IncludeVendors, o.ExcludeVendors, "exact")
+	s.vendors, e = makeRules(o.IncludeVendors, o.ExcludeVendors, MatchExact)
 	return s, e
 }
 func (s Selection) Evaluate(d Device) Decision {
@@ -194,25 +194,25 @@ func (s Selection) Evaluate(d Device) Decision {
 	}{{"vendor", d.Vendor, s.vendors}, {"name", d.Name, s.names}, {"model", d.Model, s.models}} {
 		value := strings.ToLower(strings.ToValidUTF8(field.value, ""))
 		globValue := value
-		if field.rules.mode == "glob" {
+		if field.rules.mode == MatchGlob {
 			globValue = strings.ReplaceAll(value, "/", "\x00")
 		}
 		matches := func(list []string) bool {
 			for _, p := range list {
 				switch field.rules.mode {
-				case "exact":
+				case MatchExact:
 					if value == p {
 						return true
 					}
-				case "contains":
+				case MatchContains:
 					if strings.Contains(value, p) {
 						return true
 					}
-				case "prefix":
+				case MatchPrefix:
 					if strings.HasPrefix(value, p) {
 						return true
 					}
-				case "glob":
+				case MatchGlob:
 					if !strings.HasPrefix(value, ".") || strings.HasPrefix(p, ".") {
 						ok, e := path.Match(field.rules.globs[p], globValue)
 						if e == nil && ok {

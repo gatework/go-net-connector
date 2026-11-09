@@ -21,6 +21,8 @@ func operationLabel(o options) string {
 		return "设备清单"
 	}
 	switch o.mode {
+	case "push":
+		return "脚本下发"
 	case "tftp":
 		return "TFTP 备份"
 	case "topology":
@@ -85,6 +87,9 @@ func (r Runtime) renderResult(result workflow.Result, o options, interrupted boo
 			return r.inventoryTable(result.Topology.Inventory)
 		}
 		return r.displayTopology(result.Topology, o)
+	}
+	if result.Push != nil {
+		return r.renderPush(result.Push, o)
 	}
 	if result.Preview != nil {
 		if o.json {

@@ -108,3 +108,26 @@ func copyProfile(profile connector.Profile) connector.Profile {
 	profile.SaveCommands = append([]string(nil), profile.SaveCommands...)
 	return profile
 }
+
+// PositionMarkerCommandErrors returns the rejection rules of CLIs that report
+// errors with "% ... found at '^' position." plus a bare caret marker line.
+func PositionMarkerCommandErrors() []*regexp.Regexp {
+	return Regexps(
+		`(?im)^[ \t]*%[ \t]+(?:(?:Unrecognized|Ambiguous|Incomplete)\s+command|Too\s+many\s+parameters)\s+found\s+at\s+'\^'\s+position\.`,
+		`(?im)^[ \t]*error:`,
+		`(?im)^[ \t]*Permission\s+denied\.`,
+		`(?m)^\s*\^`,
+	)
+}
+
+// YesNoConfirmations returns the replies for [Y/N] confirmations, the
+// "press the enter key" pause and the default *.cfg file-name prompt.
+func YesNoConfirmations() []connector.Interaction {
+	return []connector.Interaction{
+		Interaction(`(?i)Are\s+you\s+sure\?\s*\[Y/N\]`, "y\n"),
+		Interaction(`(?i)press\s+the\s+enter\s+key\)`, "\n"),
+		Interaction(`(?i)Continue\?\s*\[Y/N\]`, "y\n"),
+		Interaction(`(?i)Please\s+input\s+the\s+file\s+name\(\*\.cfg\)\[[^\]]+\]\s*\z`, "\n"),
+		Interaction(`(?i)overwrite\?\s*\[Y/N\]`, "y\n"),
+	}
+}

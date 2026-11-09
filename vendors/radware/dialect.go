@@ -11,7 +11,9 @@ import (
 
 var haStatePattern = driver.Regex(`(?im)^\s*HA\s+State:\s*(\S+)`)
 
-type dialect struct {
+// Dialect is the built-in Radware ADC platform. It reads interface
+// descriptions but does not discover neighbors.
+type Dialect struct {
 	driver.ProfiledPlatform
 	driver.DescriptionReader
 	driver.InterfaceIdentityPolicy
@@ -19,9 +21,9 @@ type dialect struct {
 }
 
 // New returns the built-in Radware ADC dialect.
-func New() dialect {
+func New() Dialect {
 	parser := topologyParser()
-	return dialect{
+	return Dialect{
 		ProfiledPlatform:        driver.NewProfiledPlatform(newProfile()),
 		DescriptionReader:       driver.DescriptionReader{Parser: parser},
 		InterfaceIdentityPolicy: driver.InterfaceIdentityPolicy{Parser: parser},

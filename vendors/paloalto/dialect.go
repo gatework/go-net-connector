@@ -8,25 +8,22 @@ import (
 	"github.com/gatework/go-net-connector/vendors/internal/driver"
 )
 
-type dialect struct {
+// Dialect is the built-in Palo Alto Networks platform. Description writes stay
+// unavailable because the platform lacks an isolated candidate.
+type Dialect struct {
 	driver.ProfiledPlatform
-	driver.NeighborPolicy
-	driver.DescriptionReader
-	driver.InterfaceIdentityPolicy
+	driver.TopologyReader
 	driver.WriteRestriction
 	tftpPolicy
 }
 
 // New returns the built-in Palo Alto Networks dialect.
-func New() dialect {
-	parser := topologyParser()
-	return dialect{
-		ProfiledPlatform:        driver.NewProfiledPlatform(newProfile()),
-		NeighborPolicy:          driver.NewNeighborPolicy("show lldp neighbors all", parser),
-		DescriptionReader:       driver.DescriptionReader{Parser: parser},
-		InterfaceIdentityPolicy: driver.InterfaceIdentityPolicy{Parser: parser},
-		WriteRestriction:        driver.WriteRestriction{Code: "candidate_isolation_unavailable"},
-		tftpPolicy:              newTFTPPolicy(),
+func New() Dialect {
+	return Dialect{
+		ProfiledPlatform: driver.NewProfiledPlatform(newProfile()),
+		TopologyReader:   driver.NewTopologyReader("show lldp neighbors all", topologyParser()),
+		WriteRestriction: driver.WriteRestriction{Code: "candidate_isolation_unavailable"},
+		tftpPolicy:       newTFTPPolicy(),
 	}
 }
 

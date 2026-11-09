@@ -10,14 +10,15 @@ import (
 
 var saveConfirmationPattern = driver.Regex(`(?i)^(?:\[OK\]|Copy complete\.)$`)
 
-type dialect struct {
+// Dialect is the built-in Centec platform.
+type Dialect struct {
 	driver.ProfiledPlatform
 	tftpPolicy
 }
 
 // New returns the built-in Centec dialect.
-func New() dialect {
-	return dialect{ProfiledPlatform: driver.NewProfiledPlatform(newProfile()), tftpPolicy: newTFTPPolicy()}
+func New() Dialect {
+	return Dialect{ProfiledPlatform: driver.NewProfiledPlatform(newProfile()), tftpPolicy: newTFTPPolicy()}
 }
 
 func newProfile() connector.Profile {

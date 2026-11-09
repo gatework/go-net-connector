@@ -6,7 +6,7 @@
 
 ## 构建
 
-当前模块固定使用正式发布的 go-expect `v0.4.1`。本地构建和测试通过 Go 模块解析正式依赖，不需要候选源码或本地替换。
+当前模块固定使用正式发布的 go-expect `v0.5.0`。本地构建和测试通过 Go 模块解析正式依赖，不需要候选源码或本地替换。
 
 ```sh
 GOWORK=off go mod download
@@ -14,7 +14,7 @@ GOWORK=off go test ./...
 GOWORK=off go build -o bin/ ./cmd/...
 ```
 
-当前版本为 [v0.5.0](docs/releases/v0.5.0.md)，新增统一的接受回执、正文及有界配置读取 API。公开 Go API 的变更见 [迁移说明](docs/api-migration.md)。配置使用平铺的 `net-connector.yml`，归档协议为 v2。
+当前版本为 [v0.6.0](docs/releases/v0.6.0.md)，新增 `netman push` 批量脚本下发，并移除厂商专用 TFTP 源文件配置键（改用 `tftp.source_files`）。公开 Go API 的变更见 [迁移说明](docs/api-migration.md)。配置使用平铺的 `net-connector.yml`，归档协议为 v2。
 
 系统需要 `ssh`；Telnet 连接另需系统 `telnet`。SSH 归档服务器需要管理员安装 `tftp-archive`，默认路径 `/usr/local/bin/tftp-archive`。客户端只探测协议版本和能力，不上传或安装 worker。
 
@@ -36,11 +36,15 @@ bin/netman backup run --json
 bin/netman backup tftp --tftp-server 192.0.2.9 --tftp-root /srv/tftp --success-policy verified --json
 bin/netman topology plan --hosts 192.0.2.1 --json
 bin/netman topology apply --hosts 192.0.2.1 --json
+bin/netman push plan --script-for h3c=vlan.txt --hosts 192.0.2.0/28
+bin/netman push run --script ntp.txt --vendor cisco --save --stop-after-failures 1
 bin/netman backup export 192.0.2.1 --batch ./backups/具体批次 --output ./saved.cfg
 bin/netman completion zsh
 ```
 
 备份默认全量选择和批次归档。配置采集默认 selected；TFTP 默认 verified，要求服务器核验并取回文件、本地持久化及暂存清理确认成功。`--success-policy selected` 可显式选择以设备报告判断上传结果。文本文件统一为 `设备名称-IP.txt`；可使用 `--sample` 抽样、`--success-policy strict` 严格判定及 `--layout flat` 平铺。设备名缺失时使用 `unnamed`。CLI 不生成 `.raw` 旁车：正常编码转换为 UTF-8；设备配置本身无法无损解码时保留原编码字节并报告编码警告，不猜字、不丢字，也不伪装成有效 UTF-8。
+
+`push` 批量下发命令脚本：`--script` 适用于所有平台，`--script-for 平台=文件` 按规范平台键覆盖；缺少对应脚本的设备跳过且不连接。全部脚本在读取配置、凭据与清单之前完成校验（NUL、控制字符、非 UTF-8 均拒绝并报告行号），`push plan` 只预览不连接。`run` 逐台在一次操作租约内顺序发送，设备拒绝或结果不确定即停止该设备，不重试、不重放；`--save` 只以平台的正向保存回执为成功，否则报告 `save_unconfirmed`；未声明保存脚本的平台（如 Juniper、Palo Alto、Topsec）在指定 `--save` 时于规划阶段跳过，不会先改配置再发现无法保存。`--stop-after-failures N` 只阻止尚未开始的设备，不打断进行中的会话。批次目录（默认 `./pushes`）保留 `plan.json`、`report.json` 和会话日志；报告区分已接受命令数与包括失败命令在内的写入尝试。被拒绝或保存未确认的设备可能已部分生效，应按报告逐台核对而不是整份重跑。
 
 帮助、版本、补全、默认配置打印、配置查看和初始化不访问设备或清单；清单预览和备份规划可访问清单但不连接设备。拓扑规划需要只读访问设备，应用前会重新核验。
 

@@ -38,7 +38,7 @@ var knownVerifications = stringSet(`device_reported server_verified`)
 
 func stringSet(s string) map[string]bool {
 	m := map[string]bool{}
-	for _, v := range strings.Fields(s) {
+	for v := range strings.FieldsSeq(s) {
 		m[v] = true
 	}
 	return m
@@ -136,8 +136,7 @@ func diagnoseError(e error, a Artifact) Diagnostic {
 		d.ArtifactPhase = se.Receipt.Phase
 		d.UnderlyingType = trustedCauseType(se.Cause)
 	}
-	var persistence *connector.BackupPersistenceError
-	if errors.As(e, &persistence) {
+	if _, ok := errors.AsType[*connector.BackupPersistenceError](e); ok {
 		d.ErrorType = "Net::Connector::BackupPersistenceError"
 	}
 	var te *transfer.Error
@@ -188,11 +187,11 @@ func diagnoseError(e error, a Artifact) Diagnostic {
 // carrier along the primary branch; callers still receive the full error tree.
 func primaryDiagnosticError(err error) error {
 	for err != nil {
-		switch err.(type) {
+		switch err.(type) { //nolint:errorlint // walks the primary branch one level at a time.
 		case *connector.Error, *connector.BackupPersistenceError, *storage.WriteError, *transfer.Error:
 			return err
 		}
-		switch wrapped := err.(type) {
+		switch wrapped := err.(type) { //nolint:errorlint // inspects this level's unwrap shape.
 		case interface{ Unwrap() []error }:
 			causes := wrapped.Unwrap()
 			if len(causes) == 0 {
@@ -225,8 +224,7 @@ var connectorKinds = map[string]string{
 // It never reads error messages or accepts a callback's self-reported type name.
 func trustedCauseType(err error) string {
 	err = primaryDiagnosticError(err)
-	var errno syscall.Errno
-	if errors.As(err, &errno) {
+	if errno, ok := errors.AsType[syscall.Errno](err); ok {
 		for _, entry := range []struct {
 			code syscall.Errno
 			name string

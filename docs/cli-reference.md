@@ -16,6 +16,7 @@
   config             打印默认值、初始化、查看和检查本地配置
   help               显示指定命令的中文帮助
   inventory          查看设备清单，不连接设备
+  push               批量下发命令脚本，可选保存配置
   topology           发现、规划和重新核验后应用拓扑变更
   version            显示版本与源码修订号
 
@@ -584,6 +585,161 @@
 
 示例：
   netman inventory list --for topology --hosts 192.0.2.0/24 --json
+
+使用 netman help <命令路径> 查看详细帮助。
+```
+
+## netman push
+
+```text
+批量下发命令脚本，可选保存配置
+
+用法：
+  netman push [子命令] [选项]
+
+子命令：
+  plan               校验脚本并预览下发目标，不连接设备
+  run                逐台下发脚本；失败设备不重试、不重放
+
+常用选项：
+  -h, --help                 显示当前命令的中文帮助
+
+全局选项：
+  --config <文件>              最后加载的配置文件；相对路径从启动目录解析
+  --env-file <文件>            最后加载的环境文件；不修改进程环境
+
+使用 netman help <命令路径> 查看详细帮助。
+```
+
+## netman push plan
+
+```text
+校验脚本并预览下发目标，不连接设备
+
+用法：
+  netman push plan [选项]
+
+常用选项：
+  --directory <目录>           下发计划与报告输出目录（默认：./pushes）
+  -h, --help                 显示当前命令的中文帮助
+  --json                     以 JSON 输出结果
+  --non-interactive          禁止读取交互输入
+  -p, --parallel <数量>        设备并发数量，范围 1 至 500；未指定时使用配置
+  --quiet                    隐藏进度提示
+  --save                     全部命令被接受后保存配置；仅以设备的保存确认为成功
+  --script <文件>              适用于所有平台的命令脚本文件；每行一条命令，# 开头为注释
+  --script-for <平台=文件>       指定平台的脚本，格式 平台=文件，优先于 --script；可重复
+  --stop-after-failures <数量> 失败设备达到该数量后不再启动新设备；0 表示不限制
+
+设备筛选：
+  --exclude-hosts <范围>       排除的设备地址或范围；可重复
+  --exclude-model <条件>       排除设备型号条件；可重复
+  --exclude-name <条件>        排除设备名称条件；可重复
+  --exclude-vendor <名称>      排除厂商名称；可重复
+  --host <地址>                精确设备 IP 地址；可重复
+  --hosts <范围>               设备 IP、CIDR 或地址范围；可重复
+  --model <条件>               设备型号筛选条件；可重复
+  --model-match <方式>         设备型号匹配方式：contains、prefix 或 glob
+  --name <条件>                设备名称筛选条件；可重复
+  --name-match <方式>          设备名称匹配方式：contains、prefix 或 glob
+  --vendor <名称>              厂商筛选名称；可重复
+
+连接与认证：
+  --ask-netdisco-password    在终端隐藏输入清单服务密码
+  --ask-password             在终端隐藏输入设备密码
+  --enable-password <密码>     设备权限提升密码
+  --host-key-policy <策略>     主机密钥策略：strict、accept_new 或 replace
+  --known-hosts <文件>         SSH 主机密钥信任文件
+  --netdisco-password <密码>   清单服务登录密码
+  --netdisco-username <用户名>  清单服务登录用户名
+  --password <密码>            显式设备登录密码，优先于环境变量
+  --protocol <协议>            设备连接协议：ssh 或 telnet
+  --stdin-credentials        先读取一行凭据 JSON；备份执行或拓扑应用前再读取 RUN
+  --username <用户名>           显式设备登录用户名
+
+高级选项：
+  --cache-mode <模式>          清单缓存模式：prefer、only 或 refresh
+  --cache-only               仅使用已校验的清单缓存
+  --max-script-output-bytes <上限> 脚本响应累计字节上限
+  --netdisco-url <地址>        清单 HTTP 服务地址
+  --query <语句>               PostgreSQL 清单查询语句
+  --query-params <数组>        查询参数 JSON 数组
+  --refresh-inventory        刷新设备清单
+  --source <类型>              清单来源类型：http 或 postgres
+
+全局选项：
+  --config <文件>              最后加载的配置文件；相对路径从启动目录解析
+  --env-file <文件>            最后加载的环境文件；不修改进程环境
+
+示例：
+  netman push plan --script-for h3c=vlan.txt --hosts 192.0.2.0/28 --json
+
+使用 netman help <命令路径> 查看详细帮助。
+```
+
+## netman push run
+
+```text
+逐台下发脚本；失败设备不重试、不重放
+
+用法：
+  netman push run [选项]
+
+常用选项：
+  --directory <目录>           下发计划与报告输出目录（默认：./pushes）
+  -h, --help                 显示当前命令的中文帮助
+  --json                     以 JSON 输出结果
+  --non-interactive          禁止读取交互输入
+  -p, --parallel <数量>        设备并发数量，范围 1 至 500；未指定时使用配置
+  --quiet                    隐藏进度提示
+  --save                     全部命令被接受后保存配置；仅以设备的保存确认为成功
+  --script <文件>              适用于所有平台的命令脚本文件；每行一条命令，# 开头为注释
+  --script-for <平台=文件>       指定平台的脚本，格式 平台=文件，优先于 --script；可重复
+  --stop-after-failures <数量> 失败设备达到该数量后不再启动新设备；0 表示不限制
+
+设备筛选：
+  --exclude-hosts <范围>       排除的设备地址或范围；可重复
+  --exclude-model <条件>       排除设备型号条件；可重复
+  --exclude-name <条件>        排除设备名称条件；可重复
+  --exclude-vendor <名称>      排除厂商名称；可重复
+  --host <地址>                精确设备 IP 地址；可重复
+  --hosts <范围>               设备 IP、CIDR 或地址范围；可重复
+  --model <条件>               设备型号筛选条件；可重复
+  --model-match <方式>         设备型号匹配方式：contains、prefix 或 glob
+  --name <条件>                设备名称筛选条件；可重复
+  --name-match <方式>          设备名称匹配方式：contains、prefix 或 glob
+  --vendor <名称>              厂商筛选名称；可重复
+
+连接与认证：
+  --ask-netdisco-password    在终端隐藏输入清单服务密码
+  --ask-password             在终端隐藏输入设备密码
+  --enable-password <密码>     设备权限提升密码
+  --host-key-policy <策略>     主机密钥策略：strict、accept_new 或 replace
+  --known-hosts <文件>         SSH 主机密钥信任文件
+  --netdisco-password <密码>   清单服务登录密码
+  --netdisco-username <用户名>  清单服务登录用户名
+  --password <密码>            显式设备登录密码，优先于环境变量
+  --protocol <协议>            设备连接协议：ssh 或 telnet
+  --stdin-credentials        先读取一行凭据 JSON；备份执行或拓扑应用前再读取 RUN
+  --username <用户名>           显式设备登录用户名
+
+高级选项：
+  --cache-mode <模式>          清单缓存模式：prefer、only 或 refresh
+  --cache-only               仅使用已校验的清单缓存
+  --max-script-output-bytes <上限> 脚本响应累计字节上限
+  --netdisco-url <地址>        清单 HTTP 服务地址
+  --query <语句>               PostgreSQL 清单查询语句
+  --query-params <数组>        查询参数 JSON 数组
+  --refresh-inventory        刷新设备清单
+  --source <类型>              清单来源类型：http 或 postgres
+  --verbose                  在原地进度面板中显示连接和采集详情，不显示设备原始回显
+
+全局选项：
+  --config <文件>              最后加载的配置文件；相对路径从启动目录解析
+  --env-file <文件>            最后加载的环境文件；不修改进程环境
+
+示例：
+  netman push run --script ntp.txt --vendor cisco --save --stop-after-failures 1
 
 使用 netman help <命令路径> 查看详细帮助。
 ```

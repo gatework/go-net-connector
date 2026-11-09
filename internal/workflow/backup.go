@@ -13,51 +13,81 @@ import (
 	"github.com/gatework/go-net-connector/storage"
 )
 
-func PlanView(p fleet.Plan) map[string]any {
-	ready := 0
-	skipped := map[string]int{}
-	issues := map[string]int{}
-	vendors := map[string]int{}
-	selected := []map[string]any{}
+// PlanView is the JSON preview of a batch plan written to plan.json and
+// printed by plan commands. Field order follows the established sorted keys.
+type PlanView struct {
+	Issues   map[string]int  `json:"issues"`
+	Ready    int             `json:"ready"`
+	Selected []PlannedDevice `json:"selected"`
+	Skipped  map[string]int  `json:"skipped"`
+	Total    int             `json:"total"`
+	Vendors  map[string]int  `json:"vendors"`
+}
+
+// PlannedDevice is one selected device in a plan preview.
+type PlannedDevice struct {
+	BackupFilename string           `json:"backup_filename"`
+	Host           string           `json:"host"`
+	Name           *string          `json:"name"`
+	Transfer       *PlannedTransfer `json:"transfer,omitempty"`
+	Vendor         string           `json:"vendor"`
+}
+
+// PlannedTransfer is the resolved TFTP target of a planned device. Unset
+// values are null so a preview distinguishes them from empty strings.
+type PlannedTransfer struct {
+	Server           *string `json:"server"`
+	SourceFile       *string `json:"source_file"`
+	SourceInterface  *string `json:"source_interface"`
+	VerificationRoot *string `json:"verification_root"`
+	VRF              *string `json:"vrf"`
+}
+
+// NewPlanView summarizes a plan without opening devices.
+func NewPlanView(p fleet.Plan) PlanView {
+	view := PlanView{Issues: map[string]int{}, Skipped: map[string]int{}, Vendors: map[string]int{}, Selected: []PlannedDevice{}, Total: len(p.Entries())}
 	for _, e := range p.Entries() {
 		if e.Device.Issue == "" {
-			ready++
+			view.Ready++
 		} else {
-			issues[e.Device.Issue]++
+			view.Issues[e.Device.Issue]++
 		}
 		v := e.Device.Vendor
 		if v == "" {
 			v = "unmapped"
 		}
-		vendors[v]++
+		view.Vendors[v]++
 		if e.Status != "ready" {
-			skipped[e.Status]++
+			view.Skipped[e.Status]++
 		}
 	}
+	tftp := p.Mode() == "tftp"
 	for _, task := range p.Tasks() {
 		r := task.Device
-		style := "hostname_ip"
-		filename, _ := r.BackupFilename(style)
-		if p.Mode() == "tftp" {
-			filename = task.Target.Path
+		row := PlannedDevice{Host: r.Host, Name: optionalString(r.Name), Vendor: r.Vendor}
+		row.BackupFilename, _ = r.BackupFilename("hostname_ip")
+		if tftp {
+			target := task.Target
+			row.BackupFilename = target.Path
+			row.Transfer = &PlannedTransfer{
+				Server: optionalString(target.Server), SourceFile: optionalString(target.SourceFile),
+				SourceInterface: optionalString(target.SourceInterface), VerificationRoot: optionalString(target.Root),
+				VRF: optionalString(target.VRF),
+			}
 		}
-
-		row := map[string]any{"host": r.Host, "name": nullableString(r.Name), "vendor": r.Vendor, "backup_filename": filename}
-		if p.Mode() == "tftp" {
-			row["transfer"] = task.Target
-		}
-		selected = append(selected, row)
+		view.Selected = append(view.Selected, row)
 	}
-	result := map[string]any{"total": len(p.Entries()), "ready": ready, "selected": selected}
-	result["vendors"], result["issues"], result["skipped"] = vendors, issues, skipped
-	return result
+	return view
 }
-func nullableString(s string) any {
+
+// optionalString maps an unset value to a JSON null.
+func optionalString(s string) *string {
 	if s == "" {
 		return nil
 	}
-	return s
+	return &s
 }
+
 func (r *Runner) Backup(ctx context.Context, runtime Runtime, plan fleet.Plan, o BackupOptions) (Result, error) {
 	r.begin()
 	_ = r.emit(PlanEvent{Total: len(plan.Entries()), Selected: len(plan.Tasks()), Workers: runtime.Workers, Mode: plan.Mode()})
@@ -87,7 +117,7 @@ func (r *Runner) Backup(ctx context.Context, runtime Runtime, plan fleet.Plan, o
 		}
 		paths[task.Index] = path
 	}
-	data, _ := json.MarshalIndent(PlanView(plan), "", "  ")
+	data, _ := json.MarshalIndent(NewPlanView(plan), "", "  ")
 	if _, e := storage.Write(ctx, filepath.Join(directory, "plan.json"), data); e != nil {
 		return r.fail(e)
 	}
@@ -133,4 +163,11 @@ func (r *Runner) Backup(ctx context.Context, runtime Runtime, plan fleet.Plan, o
 		return r.complete(true), nil
 	}
 	return r.complete(false), nil
+}
+
+func nullableString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }

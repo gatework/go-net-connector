@@ -180,8 +180,7 @@ func (r *Runner) Topology(ctx context.Context, runtime Runtime, settings Topolog
 						out.state = topologyFailed
 					}
 				}
-				var te *topology.Error
-				if errors.As(err, &te) {
+				if te, ok := errors.AsType[*topology.Error](err); ok {
 					out.diagnostic = topologyDiagnostic{te.Code, te.Phase, "Net::Connector::Error"}
 				} else {
 					out.diagnostic = topologyDiagnostic{errorType: "StandardError"}

@@ -13,7 +13,7 @@ func topologyParser() topology.Parser {
 	return topology.Parser{
 		NeighborTemplate:     "fortinet/diagnose_lldp_rx_neighbor.textfsm",
 		DescriptionTemplate:  "fortinet/show_full_configuration.textfsm",
-		Protocol:             "lldp",
+		Protocol:             topology.ProtocolLLDP,
 		CountNeighbors:       neighborCount,
 		ValidateDescriptions: validateInterfaceRows,
 		CanonicalInterface:   identityInterface,

@@ -13,11 +13,13 @@ var (
 	iosOS        = regexp.MustCompile(`\bios\b|\bios\s*xe\b`)
 )
 
-func (nxosDialect) MatchInventory(identity dialect.InventoryIdentity) bool {
+// MatchInventory reports whether an inventory identity is Cisco NX-OS.
+func (NXOSDialect) MatchInventory(identity dialect.InventoryIdentity) bool {
 	return labelPattern.MatchString(identity.Vendor) &&
 		(nxOS.MatchString(identity.OS) || nexusModel.MatchString(identity.Model))
 }
 
-func (iosDialect) MatchInventory(identity dialect.InventoryIdentity) bool {
+// MatchInventory reports whether an inventory identity is Cisco IOS.
+func (IOSDialect) MatchInventory(identity dialect.InventoryIdentity) bool {
 	return labelPattern.MatchString(identity.Vendor) && iosOS.MatchString(identity.OS)
 }

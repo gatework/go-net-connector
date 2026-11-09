@@ -69,7 +69,7 @@ func TestCacheEmptyInventoryRoundTrip(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	for _, mode := range []string{"refresh", "prefer", "only"} {
+	for _, mode := range []CacheMode{CacheRefresh, CachePrefer, CacheOnly} {
 		r, e := c.Fetch(t.Context(), mode)
 		if e != nil || r.Rows == nil || len(r.Rows) != 0 || r.WriteErrorType != "" || calls != 1 {
 			t.Fatalf("%s: %+v %v calls=%d", mode, r, e, calls)
@@ -121,7 +121,7 @@ func TestCacheOversizedEntryRecoveryAndSafety(t *testing.T) {
 				if e != nil {
 					t.Fatal(e)
 				}
-				r, e := c.Fetch(t.Context(), mode)
+				r, e := c.Fetch(t.Context(), CacheMode(mode))
 				if kind == "private" && mode != "only" {
 					if e != nil || r.Status != "refreshed" || r.WriteErrorType != "" || calls != 1 {
 						t.Fatalf("recover: %+v %v calls=%d", r, e, calls)

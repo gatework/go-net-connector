@@ -12,46 +12,30 @@ import (
 	"github.com/gatework/go-net-connector/vendors/internal/driver"
 )
 
-type dialect struct {
+// Dialect is the built-in H3C Comware switch platform.
+type Dialect struct {
 	driver.ProfiledPlatform
-	driver.NeighborPolicy
-	driver.DescriptionReader
-	driver.InterfaceIdentityPolicy
+	driver.TopologyReader
 	driver.DescriptionWriter
 	tftpPolicy
 }
-type wirelessDialect struct {
-	driver.ProfiledPlatform
-	driver.NeighborPolicy
-	driver.DescriptionReader
-	driver.InterfaceIdentityPolicy
-	driver.DescriptionWriter
-	tftpPolicy
-}
+
+// WirelessDialect is the built-in H3C wireless controller platform. It shares
+// Comware behavior and differs only in its profile name and inventory match.
+type WirelessDialect struct{ Dialect }
 
 // New returns the built-in Comware switch dialect.
-func New() dialect {
-	parser := topologyParser()
-	return dialect{
-		ProfiledPlatform:        driver.NewProfiledPlatform(newProfile("h3c")),
-		NeighborPolicy:          driver.NewNeighborPolicy("display lldp neighbor-information list", parser),
-		DescriptionReader:       driver.DescriptionReader{Parser: parser},
-		InterfaceIdentityPolicy: driver.InterfaceIdentityPolicy{Parser: parser},
-		DescriptionWriter:       driver.NewDescriptionWriter(dialectapi.WriteMode{Enter: "system-view", Leave: "return", InterfaceExit: "quit"}),
-		tftpPolicy:              newTFTPPolicy(),
-	}
-}
+func New() Dialect { return newDialect("h3c") }
 
 // Wireless returns the built-in H3C wireless controller dialect.
-func Wireless() wirelessDialect {
-	parser := topologyParser()
-	return wirelessDialect{
-		ProfiledPlatform:        driver.NewProfiledPlatform(newProfile("h3c_wireless")),
-		NeighborPolicy:          driver.NewNeighborPolicy("display lldp neighbor-information list", parser),
-		DescriptionReader:       driver.DescriptionReader{Parser: parser},
-		InterfaceIdentityPolicy: driver.InterfaceIdentityPolicy{Parser: parser},
-		DescriptionWriter:       driver.NewDescriptionWriter(dialectapi.WriteMode{Enter: "system-view", Leave: "return", InterfaceExit: "quit"}),
-		tftpPolicy:              newTFTPPolicy(),
+func Wireless() WirelessDialect { return WirelessDialect{newDialect("h3c_wireless")} }
+
+func newDialect(profileName string) Dialect {
+	return Dialect{
+		ProfiledPlatform:  driver.NewProfiledPlatform(newProfile(profileName)),
+		TopologyReader:    driver.NewTopologyReader("display lldp neighbor-information list", topologyParser()),
+		DescriptionWriter: driver.NewDescriptionWriter(dialectapi.WriteMode{Enter: "system-view", Leave: "return", InterfaceExit: "quit"}),
+		tftpPolicy:        newTFTPPolicy(),
 	}
 }
 
@@ -64,8 +48,8 @@ func newProfile(name string) connector.Profile {
 	p.UsernamePrompt = driver.Pattern(`(?i)(?:login|Username):\s*\z`)
 	p.LoginPrompt = driver.Pattern(`(?:\A|[\r\n])(?:[^\S\n]|\x00)*\S+[>\]](?:[^\S\n]|\x00)*\z`)
 	p.CommandPrompt = driver.Pattern(`(?:\A|[\r\n])(?:[^\S\n]|\x00)*[^\r\n]+[>\]](?:[^\S\n]|\x00)*\z`)
-	p.CommandErrors = driver.Regexps(`(?im)^[ \t]*%[ \t]+(?:(?:Unrecognized|Ambiguous|Incomplete)\s+command|Too\s+many\s+parameters)\s+found\s+at\s+'\^'\s+position\.`, `(?im)^[ \t]*error:`, `(?im)^[ \t]*Permission\s+denied\.`, `(?m)^\s*\^`)
-	p.Interactions = []connector.Interaction{driver.Interaction(`(?i)Are\s+you\s+sure\?\s*\[Y/N\]`, "y\n"), driver.Interaction(`(?i)press\s+the\s+enter\s+key\)`, "\n"), driver.Interaction(`(?i)Continue\?\s*\[Y/N\]`, "y\n"), driver.Interaction(`(?i)Please\s+input\s+the\s+file\s+name\(\*\.cfg\)\[[^\]]+\]\s*\z`, "\n"), driver.Interaction(`(?i)overwrite\?\s*\[Y/N\]`, "y\n")}
+	p.CommandErrors = driver.PositionMarkerCommandErrors()
+	p.Interactions = driver.YesNoConfirmations()
 	p.Prepare = prepareCommand
 	p.AfterCommand = captureAssignedRuleID
 	return driver.FinishProfile(p, 60*time.Second, driver.BaseConfigFactory(), saveConfirmationPattern)

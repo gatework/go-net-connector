@@ -13,13 +13,13 @@ var (
 	labelPattern         = regexp.MustCompile(`\bh3c\b`)
 )
 
-func (dialect) MatchInventory(identity dialectapi.InventoryIdentity) bool {
+// MatchInventory reports whether an inventory identity belongs to H3C Comware.
+func (Dialect) MatchInventory(identity dialectapi.InventoryIdentity) bool {
 	return labelPattern.MatchString(identity.Vendor) ||
 		identity.OS == "comware" && modelPattern.MatchString(identity.Model)
 }
 
-func (wirelessDialect) MatchInventory(identity dialectapi.InventoryIdentity) bool {
-	isH3C := labelPattern.MatchString(identity.Vendor) ||
-		identity.OS == "comware" && modelPattern.MatchString(identity.Model)
-	return isH3C && (wirelessOSPattern.MatchString(identity.OS) || wirelessModelPattern.MatchString(identity.Model))
+// MatchInventory reports whether an H3C identity is a wireless controller.
+func (w WirelessDialect) MatchInventory(identity dialectapi.InventoryIdentity) bool {
+	return w.Dialect.MatchInventory(identity) && (wirelessOSPattern.MatchString(identity.OS) || wirelessModelPattern.MatchString(identity.Model))
 }

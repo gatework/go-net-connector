@@ -210,7 +210,7 @@ func TestH3CAssignedRuleIDAndScope(t *testing.T) {
 }
 func TestHuaweiPrivilegeOncePerConnection(t *testing.T) {
 	d, check := dialogue(t, "huawei", "<Huawei>", []exchange{{"su\n", "privilege level is 3\n<Huawei>"}, {"dis cur\n", "sysname Huawei\n<Huawei>"}, {"dis cur\n", "sysname Huawei\n<Huawei>"}})
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if _, e := d.RunningConfig(t.Context()); e != nil {
 			t.Fatal(e)
 		}
@@ -219,7 +219,7 @@ func TestHuaweiPrivilegeOncePerConnection(t *testing.T) {
 }
 func TestRadwareMenuIdentityPrivateKeysAndHA(t *testing.T) {
 	d, check := dialogue(t, "radware", "HA State: ACTIVE\n>> Standalone ADC - Main#", []exchange{{"/cfg/dump\n", "Display private keys? [y/n]: "}, {"n\n", "/c/sys\n name adc\n#\n>> Another ADC - Configuration#\n/c/l3\n>> Standalone ADC - Configuration#"}, {"/cfg/dump\n", "/c/sys\n name adc\n#\n>> Standalone ADC - Configuration#"}})
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		r, e := d.RunningConfig(t.Context())
 		if e != nil {
 			t.Fatal(e)

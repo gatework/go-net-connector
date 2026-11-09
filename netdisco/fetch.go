@@ -13,7 +13,7 @@ import (
 // FetchOptions selects the cache mode for one complete inventory collection.
 // An empty Mode means prefer. A nil Cache disables caching; only then fails.
 type FetchOptions struct {
-	Mode  string
+	Mode  CacheMode
 	Cache *CachePolicy
 }
 
@@ -36,7 +36,7 @@ func FetchHTTP(ctx context.Context, source HTTPOptions, options FetchOptions) (C
 	if err != nil {
 		return CacheResult{}, err
 	}
-	u, limits, err := httpSettings(source, mode != "only")
+	u, limits, err := httpSettings(source, mode != CacheOnly)
 	if err != nil {
 		return CacheResult{}, err
 	}
@@ -45,7 +45,7 @@ func FetchHTTP(ctx context.Context, source HTTPOptions, options FetchOptions) (C
 		return CacheResult{}, err
 	}
 	var input Source
-	if mode != "only" {
+	if mode != CacheOnly {
 		httpSource, err := NewHTTP(source)
 		if err != nil {
 			return CacheResult{}, err
@@ -75,15 +75,15 @@ func FetchPostgres(ctx context.Context, source PostgresOptions, options FetchOpt
 	return fetchInventory(ctx, postgres, identity, postgres.limits, mode, options.Cache)
 }
 
-func (o FetchOptions) mode() (string, error) {
+func (o FetchOptions) mode() (CacheMode, error) {
 	mode := o.Mode
 	if mode == "" {
-		mode = "prefer"
+		mode = CachePrefer
 	}
-	if mode != "prefer" && mode != "refresh" && mode != "only" {
+	if !mode.Valid() {
 		return "", newInventoryError("invalid_cache_mode", nil)
 	}
-	if mode == "only" && o.Cache == nil {
+	if mode == CacheOnly && o.Cache == nil {
 		return "", newInventoryError("cache_disabled", nil)
 	}
 	return mode, nil
@@ -96,7 +96,7 @@ func (o FetchOptions) namespace() string {
 	return o.Cache.Namespace
 }
 
-func fetchInventory(ctx context.Context, source Source, identity string, limits Limits, mode string, policy *CachePolicy) (CacheResult, error) {
+func fetchInventory(ctx context.Context, source Source, identity string, limits Limits, mode CacheMode, policy *CachePolicy) (CacheResult, error) {
 	if err := ctx.Err(); err != nil {
 		return CacheResult{}, err
 	}

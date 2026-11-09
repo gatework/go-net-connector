@@ -4,6 +4,9 @@ import (
 	"net/netip"
 	"strings"
 
+	"github.com/gatework/go-net-connector/internal/batchreport"
+	"github.com/gatework/go-net-connector/netdisco"
+
 	"github.com/spf13/cobra"
 )
 
@@ -42,10 +45,10 @@ func prepareCommandOptions(c *cobra.Command, o *options) error {
 	if o.nonInteractive && o.interactive || o.all && o.sample != 0 || o.sample < 0 || o.sample > 5 || f.Changed("sample") && o.sample == 0 || o.parallel < 0 || o.parallel > 500 || f.Changed("parallel") && o.parallel == 0 || o.limit < 0 || f.Changed("limit") && o.limit == 0 {
 		return usageError("抽样、并发、数量上限或交互选项无效")
 	}
-	if o.layout != "batch" && o.layout != "flat" {
+	if !batchreport.Layout(o.layout).Valid() {
 		return usageError("目录布局必须为 batch 或 flat")
 	}
-	if o.policy != "" && o.policy != "strict" && o.policy != "selected" && o.policy != "verified" || o.policy == "verified" && o.mode != "tftp" {
+	if o.policy != "" && !batchreport.SuccessPolicy(o.policy).AllowedFor(o.mode == "tftp") {
 		return usageError("成功策略无效；verified 仅适用于 TFTP")
 	}
 	if f.Changed("host") && f.Changed("hosts") {
@@ -74,7 +77,7 @@ func prepareCommandOptions(c *cobra.Command, o *options) error {
 	if f.Changed("cache-mode") {
 		cacheMode, _ := f.GetString("cache-mode")
 		only, _ := f.GetBool("cache-only")
-		if o.refresh && cacheMode != "refresh" || only && cacheMode != "only" {
+		if o.refresh && netdisco.CacheMode(cacheMode) != netdisco.CacheRefresh || only && netdisco.CacheMode(cacheMode) != netdisco.CacheOnly {
 			return usageError("清单缓存选项互相冲突")
 		}
 	}
@@ -101,9 +104,9 @@ func prepareCommandOptions(c *cobra.Command, o *options) error {
 		return usageError("stdin 凭据不能与显式凭据同时使用")
 	}
 	if only, _ := f.GetBool("cache-only"); only {
-		o.public["ND_CACHE_MODE"] = "only"
+		o.public["ND_CACHE_MODE"] = string(netdisco.CacheOnly)
 	}
-	if o.directory != "" {
+	if o.directory != "" && o.mode != "push" {
 		key := "NC_BACKUP_DIRECTORY"
 		if o.mode == "topology" {
 			key = "NC_TOPOLOGY_DIRECTORY"

@@ -13,8 +13,8 @@ func (p configPolicy) Clean(_ connector.StepResult, visible, prompt string) (str
 	for _, echo := range []string{"show running-config\n", prompt + "show running-config\n"} {
 		visible = strings.TrimPrefix(visible, echo)
 	}
-	if strings.HasSuffix(visible, prompt) {
-		visible = strings.TrimSuffix(visible, prompt)
+	if before, ok := strings.CutSuffix(visible, prompt); ok {
+		visible = before
 		if !strings.HasSuffix(visible, "\n") {
 			visible += "\n"
 		}

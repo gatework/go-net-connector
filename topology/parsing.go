@@ -36,12 +36,10 @@ func structuredParseError(err error, fallbackPhase string) error {
 	if err == nil {
 		return nil
 	}
-	var existing *Error
-	if errors.As(err, &existing) {
+	if _, ok := errors.AsType[*Error](err); ok {
 		return err
 	}
-	var metadata dialect.DiagnosticMetadata
-	if errors.As(err, &metadata) {
+	if metadata, ok := errors.AsType[dialect.DiagnosticMetadata](err); ok {
 		code, phase := metadata.DiagnosticCode(), metadata.DiagnosticPhase()
 		if code != "" && phase != "" {
 			return newError(code, phase, err)

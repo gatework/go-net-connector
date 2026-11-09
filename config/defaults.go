@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/gatework/go-net-connector/internal/batchreport"
+
 	"github.com/gatework/go-net-connector/archive"
 	"go.yaml.in/yaml/v3"
 )
@@ -33,11 +35,11 @@ func Defaults(mode string) map[string]any {
 	m["topology"] = map[string]any{"mode": "plan", "cache_mode": "prefer", "directory": "./topologys", "description_format": "To_%{neighbor}_%{port}", "abbreviate_ports": true, "lowercase_ports": false, "neighbor_name_prefixes": []any{}}
 	timeouts := archive.DefaultTimeouts()
 	m["tftp"] = map[string]any{"ssh_worker_path": archive.DefaultWorkerPath, "upload_timeout": int(timeouts.Upload / time.Second), "archive_prepare_timeout": int(timeouts.Prepare / time.Second), "archive_verify_timeout": int(timeouts.Verify / time.Second), "archive_cleanup_timeout": int(timeouts.Cleanup / time.Second)}
-	policy := "selected"
+	policy := batchreport.PolicySelected
 	if mode == "tftp" {
-		policy = "verified"
+		policy = batchreport.PolicyVerified
 	}
-	setPath(m, "backup.success_policy", policy)
+	setPath(m, "backup.success_policy", string(policy))
 	return m
 }
 

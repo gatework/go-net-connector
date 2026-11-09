@@ -9,46 +9,43 @@ import (
 	"github.com/gatework/go-net-connector/vendors/internal/driver"
 )
 
-type iosDialect struct {
+// IOSDialect is the built-in Cisco IOS platform.
+type IOSDialect struct {
 	driver.ProfiledPlatform
-	driver.NeighborPolicy
-	driver.DescriptionReader
-	driver.InterfaceIdentityPolicy
+	driver.TopologyReader
 	driver.DescriptionWriter
 	iosTFTPPolicy
 }
-type nxosDialect struct {
+
+// NXOSDialect is the built-in Cisco NX-OS platform.
+type NXOSDialect struct {
 	driver.ProfiledPlatform
-	driver.NeighborPolicy
-	driver.DescriptionReader
-	driver.InterfaceIdentityPolicy
+	driver.TopologyReader
 	driver.DescriptionWriter
 	nxosTFTPPolicy
 }
 
+const neighborCommand = "show cdp neighbors detail"
+
+var writeMode = dialect.WriteMode{Enter: "configure terminal", Leave: "end", InterfaceExit: "exit"}
+
 // IOS returns the built-in Cisco IOS dialect.
-func IOS() iosDialect {
-	parser := iosTopologyParser()
-	return iosDialect{
-		ProfiledPlatform:        driver.NewProfiledPlatform(newIOSProfile()),
-		NeighborPolicy:          driver.NewNeighborPolicy("show cdp neighbors detail", parser),
-		DescriptionReader:       driver.DescriptionReader{Parser: parser},
-		InterfaceIdentityPolicy: driver.InterfaceIdentityPolicy{Parser: parser},
-		DescriptionWriter:       driver.NewDescriptionWriter(dialect.WriteMode{Enter: "configure terminal", Leave: "end", InterfaceExit: "exit"}),
-		iosTFTPPolicy:           newIOSTFTPPolicy(),
+func IOS() IOSDialect {
+	return IOSDialect{
+		ProfiledPlatform:  driver.NewProfiledPlatform(newIOSProfile()),
+		TopologyReader:    driver.NewTopologyReader(neighborCommand, iosTopologyParser()),
+		DescriptionWriter: driver.NewDescriptionWriter(writeMode),
+		iosTFTPPolicy:     newIOSTFTPPolicy(),
 	}
 }
 
 // NXOS returns the built-in Cisco NX-OS dialect.
-func NXOS() nxosDialect {
-	parser := nxosTopologyParser()
-	return nxosDialect{
-		ProfiledPlatform:        driver.NewProfiledPlatform(newNXOSProfile()),
-		NeighborPolicy:          driver.NewNeighborPolicy("show cdp neighbors detail", parser),
-		DescriptionReader:       driver.DescriptionReader{Parser: parser},
-		InterfaceIdentityPolicy: driver.InterfaceIdentityPolicy{Parser: parser},
-		DescriptionWriter:       driver.NewDescriptionWriter(dialect.WriteMode{Enter: "configure terminal", Leave: "end", InterfaceExit: "exit"}),
-		nxosTFTPPolicy:          newNXOSTFTPPolicy(),
+func NXOS() NXOSDialect {
+	return NXOSDialect{
+		ProfiledPlatform:  driver.NewProfiledPlatform(newNXOSProfile()),
+		TopologyReader:    driver.NewTopologyReader(neighborCommand, nxosTopologyParser()),
+		DescriptionWriter: driver.NewDescriptionWriter(writeMode),
+		nxosTFTPPolicy:    newNXOSTFTPPolicy(),
 	}
 }
 

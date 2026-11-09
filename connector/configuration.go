@@ -102,8 +102,8 @@ func (d *Device) collectConfigWithMode(ctx context.Context, mode configTextMode)
 			}
 			body = strings.TrimSuffix(strings.TrimSpace(body), strings.TrimSpace(prompt))
 			body = strings.TrimSpace(body)
-			if strings.HasPrefix(body, step.command.Text) {
-				body = strings.TrimSpace(strings.TrimPrefix(body, step.command.Text))
+			if after, ok := strings.CutPrefix(body, step.command.Text); ok {
+				body = strings.TrimSpace(after)
 			}
 			if body != "" {
 				hasBody = true
@@ -282,8 +282,7 @@ func (e *BackupPersistenceError) GoString() string { return e.Error() }
 func (e *BackupPersistenceError) Unwrap() error    { return e.failure }
 
 func configurationFailure(c Command, err error) error {
-	var classified *Error
-	if errors.As(err, &classified) {
+	if _, ok := errors.AsType[*Error](err); ok {
 		return err
 	}
 	if errors.Is(err, ErrIncomplete) {

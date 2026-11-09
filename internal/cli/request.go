@@ -19,6 +19,8 @@ const (
 	requestTopologyPlan
 	requestTopologyDiscover
 	requestTopologyApply
+	requestPushPlan
+	requestPushRun
 )
 
 // commandRequest is the validated action selected by the command tree. Parsed
@@ -30,7 +32,7 @@ type commandRequest struct {
 }
 
 func newCommandRequest(o options) (commandRequest, error) {
-	if o.mode != "backup" && o.mode != "tftp" && o.mode != "topology" {
+	if o.mode != "backup" && o.mode != "tftp" && o.mode != "topology" && o.mode != "push" {
 		return commandRequest{}, usageError("用途无效，请查看 --for 选项")
 	}
 	request := commandRequest{}
@@ -67,6 +69,10 @@ func newCommandRequest(o options) (commandRequest, error) {
 			request.kind = requestTopologyDiscover
 		case "topology/apply":
 			request.kind = requestTopologyApply
+		case "push/plan":
+			request.kind = requestPushPlan
+		case "push/run":
+			request.kind = requestPushRun
 		}
 		if o.mode == "topology" {
 			request.topology = workflow.TopologyOptions{Limit: o.limit}
@@ -92,7 +98,7 @@ func (r commandRequest) inventoryPreview() bool {
 }
 
 func (r commandRequest) needsRunConfirmation() bool {
-	return r.kind == requestBackupRun || r.kind == requestTFTPRun || r.kind == requestTopologyApply
+	return r.kind == requestBackupRun || r.kind == requestTFTPRun || r.kind == requestTopologyApply || r.kind == requestPushRun
 }
 
 func (r commandRequest) topologyMode() string {

@@ -12,7 +12,8 @@ var (
 	fortigateModel = regexp.MustCompile(`^(fortigate|fgt)\s*\d`)
 )
 
-func (dialect) MatchInventory(identity dialectapi.InventoryIdentity) bool {
+// MatchInventory reports whether an inventory identity belongs to this platform.
+func (Dialect) MatchInventory(identity dialectapi.InventoryIdentity) bool {
 	return labelPattern.MatchString(identity.Vendor) &&
 		(identity.OS == "fortios" || fortigateLabel.MatchString(identity.Vendor) || fortigateModel.MatchString(identity.Model))
 }

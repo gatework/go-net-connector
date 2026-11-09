@@ -16,13 +16,13 @@ func TestTableCellWidthsAndAddresses(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, line := range strings.Split(b.String(), "\n") {
+		for line := range strings.SplitSeq(b.String(), "\n") {
 			if uniseg.StringWidth(line) >= width {
 				t.Fatalf("width %d: %q", width, line)
 			}
 		}
 		var joined strings.Builder
-		for _, line := range strings.Split(b.String(), "\n") {
+		for line := range strings.SplitSeq(b.String(), "\n") {
 			if strings.HasPrefix(line, "| ") && strings.TrimSpace(strings.Split(line, "|")[1]) != "IP" {
 				joined.WriteString(strings.TrimSpace(strings.Split(line, "|")[1]))
 			}

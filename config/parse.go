@@ -39,13 +39,13 @@ func parseYAML(data []byte, requireMapping bool) (map[string]any, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var root yaml.Node
 	if e := dec.Decode(&root); e != nil {
-		if e == io.EOF && !requireMapping {
+		if errors.Is(e, io.EOF) && !requireMapping {
 			return map[string]any{}, nil
 		}
 		return nil, ErrInvalid
 	}
 	var extra yaml.Node
-	if dec.Decode(&extra) != io.EOF {
+	if e := dec.Decode(&extra); !errors.Is(e, io.EOF) {
 		return nil, ErrInvalid
 	}
 	remaining := maxNodes
@@ -451,29 +451,29 @@ func integerValue(value any) (int, bool) {
 	}
 	return 0, false
 }
-func decodeEnv(s, kind string) (any, error) {
+func decodeEnv(s string, kind FieldKind) (any, error) {
 	switch kind {
-	case "integer", "optional_integer":
+	case KindInteger, KindOptionalInteger:
 		n, e := strconv.Atoi(s)
 		return n, e
-	case "number":
+	case KindNumber:
 		n, e := strconv.ParseFloat(s, 64)
 		return n, e
-	case "boolean":
+	case KindBoolean:
 		if s != "true" && s != "false" {
 			return nil, ErrInvalid
 		}
 		return s == "true", nil
-	case "list":
+	case KindList:
 		a := []any{}
 		if s == "" {
 			return a, nil
 		}
-		for _, v := range strings.Split(s, ",") {
+		for v := range strings.SplitSeq(s, ",") {
 			a = append(a, strings.TrimSpace(v))
 		}
 		return a, nil
-	case "json", "json_array":
+	case KindJSON, KindJSONArray:
 		return decodeJSON(s)
 	default:
 		return s, nil

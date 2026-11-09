@@ -8,11 +8,12 @@ import (
 	"github.com/gatework/go-net-connector/vendors/internal/driver"
 )
 
-type dialect struct{ driver.ProfiledPlatform }
+// Dialect is the built-in Topsec platform.
+type Dialect struct{ driver.ProfiledPlatform }
 
 // New returns the built-in Topsec dialect.
-func New() dialect {
-	return dialect{ProfiledPlatform: driver.NewProfiledPlatform(newProfile())}
+func New() Dialect {
+	return Dialect{ProfiledPlatform: driver.NewProfiledPlatform(newProfile())}
 }
 
 func newProfile() connector.Profile {

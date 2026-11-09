@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"errors"
+	"maps"
 	"net/netip"
 	"regexp"
 	"sort"
@@ -237,9 +238,7 @@ func (p Plan) Entries() []PlanEntry { return append([]PlanEntry(nil), p.entries.
 func (p Plan) Tasks() []Task        { return append([]Task(nil), p.tasks...) }
 func (p Plan) Transfers() map[int]transfer.Target {
 	m := make(map[int]transfer.Target, len(p.transfers))
-	for k, v := range p.transfers {
-		m[k] = v
-	}
+	maps.Copy(m, p.transfers)
 	return m
 }
 func NewPlan(rows []inventory.Device, rules *Rules, o PlanOptions) (Plan, error) {

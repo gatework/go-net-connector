@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/gatework/go-net-connector/netdisco"
+
 	"github.com/gatework/go-net-connector/config"
 )
 
@@ -27,7 +29,7 @@ func ValidateTopology(p config.Snapshot, requested string) error {
 			}
 		}
 	}
-	if cacheMode, ok := p.Value("topology.cache_mode").(string); ok && cacheMode != "prefer" && cacheMode != "only" && cacheMode != "refresh" {
+	if cacheMode, ok := p.Value("topology.cache_mode").(string); ok && !netdisco.CacheMode(cacheMode).Valid() {
 		return config.ErrInvalid
 	}
 	return nil

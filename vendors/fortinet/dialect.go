@@ -8,26 +8,23 @@ import (
 	"github.com/gatework/go-net-connector/vendors/internal/driver"
 )
 
-type dialect struct {
+// Dialect is the built-in Fortinet platform.
+type Dialect struct {
 	driver.ProfiledPlatform
-	driver.NeighborPolicy
-	driver.DescriptionReader
-	driver.InterfaceIdentityPolicy
+	driver.TopologyReader
 	tftpPolicy
 }
 
-// New returns the built-in Fortinet dialect.
-func New() dialect {
-	parser := topologyParser()
-	return dialect{
+// New returns the built-in Fortinet dialect. Its neighbor command depends
+// on the device status, so the reader selects it at run time.
+func New() Dialect {
+	reader := driver.NewTopologyReader("", topologyParser())
+	reader.StatusCommand = "get system status"
+	reader.SelectNeighborCommand = neighborCommand
+	return Dialect{
 		ProfiledPlatform: driver.NewProfiledPlatform(newProfile()),
-		NeighborPolicy: driver.NeighborPolicy{
-			StatusCommand: "get system status", Parser: parser,
-			SelectNeighborCommand: neighborCommand,
-		},
-		DescriptionReader:       driver.DescriptionReader{Parser: parser},
-		InterfaceIdentityPolicy: driver.InterfaceIdentityPolicy{Parser: parser},
-		tftpPolicy:              newTFTPPolicy(),
+		TopologyReader:   reader,
+		tftpPolicy:       newTFTPPolicy(),
 	}
 }
 

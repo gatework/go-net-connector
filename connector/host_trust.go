@@ -79,7 +79,7 @@ func (t *hostTrust) keys(ctx context.Context, path string) ([]string, error) {
 		return nil, newError("host_key_lookup_failed", "login", Command{}, errors.Join(ctx.Err(), e))
 	}
 	var keys []string
-	for _, line := range strings.Split(string(output), "\n") {
+	for line := range strings.SplitSeq(string(output), "\n") {
 		if line != "" && !strings.HasPrefix(line, "#") {
 			keys = append(keys, line)
 		}

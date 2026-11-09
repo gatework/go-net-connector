@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/gatework/go-net-connector/config"
@@ -95,5 +96,17 @@ func TestDeviceTemplateDoesNotRetainHostOrSecrets(t *testing.T) {
 	}
 	if c := services.templates["h3c"]; c.Host != "" || c.Username != "" || c.Password != "" {
 		t.Fatal("template retained per-device credentials")
+	}
+}
+
+func TestCredentialKeysPreferVendorThenShared(t *testing.T) {
+	keys := credentialKeys("huawei")
+	want := deviceCredentialKeys{
+		username:       []string{"NC_HUAWEI_USERNAME", "NC_DEVICE_USERNAME"},
+		password:       []string{"NC_HUAWEI_PASSWORD", "NC_DEVICE_PASSWORD"},
+		enablePassword: []string{"NC_HUAWEI_ENABLE_PASSWORD", "NC_ENABLE_PASSWORD"},
+	}
+	if !reflect.DeepEqual(keys, want) {
+		t.Fatalf("credential keys = %#v", keys)
 	}
 }

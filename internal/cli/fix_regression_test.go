@@ -355,7 +355,7 @@ func TestTopologyCacheModeSelection(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := bootstrap.InventoryMode(p, o.mode, o.refresh, o.flags.Changed("cache-only") || o.flags.Changed("cache-mode")); got != tc.want {
+		if got := bootstrap.InventoryMode(p, o.mode, o.refresh, o.flags.Changed("cache-only") || o.flags.Changed("cache-mode")); string(got) != tc.want {
 			t.Fatalf("%v: got %s, want %s", tc.args, got, tc.want)
 		}
 	}

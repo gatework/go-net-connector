@@ -67,13 +67,7 @@ func (r *Runner) TFTP(ctx context.Context, runtime Runtime, settings TFTPSetting
 	if e != nil {
 		return r.fail(e)
 	}
-	view := PlanView(plan)
-	if selected, ok := view["selected"].([]map[string]any); ok {
-		for i, task := range plan.Tasks() {
-			target := task.Target
-			selected[i]["transfer"] = map[string]any{"server": nullableString(target.Server), "verification_root": nullableString(target.Root), "source_file": nullableString(target.SourceFile), "source_interface": nullableString(target.SourceInterface), "vrf": nullableString(target.VRF)}
-		}
-	}
+	view := NewPlanView(plan)
 	if o.Plan {
 		result := Preview(plan)
 		result.Preview.View = view

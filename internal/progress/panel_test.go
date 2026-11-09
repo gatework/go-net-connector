@@ -13,7 +13,7 @@ func TestSuccessfulTasksDoNotAppendLogs(t *testing.T) {
 	var b bytes.Buffer
 	p := New(&b, true)
 	p.Plan(1000, 1000, 50, "backup")
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		p.Start("host", "h3c")
 		p.Event("host", "login_complete", "ok")
 		p.Outcome("host", "backed_up", "", time.Second)
@@ -29,7 +29,7 @@ func TestPanelScreenKeepsErrorsAndDoesNotScrollSuccesses(t *testing.T) {
 		p := New(&b, verbose)
 		p.tty = true
 		p.Plan(1000, 1000, 50, "backup")
-		for i := 0; i < 1000; i++ {
+		for range 1000 {
 			p.Start("交换机👩‍💻", "h3c")
 			p.Event("交换机👩‍💻", "login_complete", "ok")
 			p.lastRender = time.Time{}

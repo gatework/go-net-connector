@@ -18,7 +18,7 @@ Inventory 设备厂商/系统/型号
 
 ## Go 命名约定
 
-包内名称使用家族包、接收者和能力接口已经提供的上下文，不重复厂商前缀；多个平台变体只保留区分它们的名称，例如 `iosDialect`、`nxosDialect` 和 `wirelessDialect`。配置采集使用 Go 常见缩写 `Config`。跨包能力名保持描述准确，只有上下文已充分表达时才省略限定词。导出 API 直接迁移并更新调用方，不添加旧名转发别名；CLI、配置字段和协议字面量保持既有名称。
+包内名称使用家族包、接收者和能力接口已经提供的上下文，不重复厂商前缀；平台类型导出为 `Dialect`；多个平台变体只保留区分它们的名称，例如 `cisco.IOSDialect`、`cisco.NXOSDialect` 和 `h3c.WirelessDialect`。配置采集使用 Go 常见缩写 `Config`。跨包能力名保持描述准确，只有上下文已充分表达时才省略限定词。导出 API 直接迁移并更新调用方，不添加旧名转发别名；CLI、配置字段和协议字面量保持既有名称。
 
 ## 目录职责
 
@@ -71,7 +71,7 @@ H3C/Wireless 和 IOS/NX-OS 在家族包内共享稳定规则，同时保留各�
 ## 新增或扩展平台
 
 1. 先确认权威的平台键、厂商/OS/型号字段和 Ruby 对照行为。没有可靠证据的能力先不声明。
-2. 在现有家族包中新增平台类型；只有业务规则确实属于不同家族时才新建包。构造函数返回 `dialect.Platform`，共享 Profile 基础项，平台差异留在当前家族包。
+2. 在现有家族包中新增平台类型；只有业务规则确实属于不同家族时才新建包。构造函数返回导出的具体平台类型（满足 `dialect.Platform`），使调用方可以命名该类型并断言能力接口。读取类拓扑能力用 `driver.NewTopologyReader` 组合；共享 Profile 基础项及 `driver.PositionMarkerCommandErrors`、`driver.YesNoConfirmations` 等按 CLI 机制命名的规则，平台差异留在当前家族包。
 3. 在 `inventory.go` 实现平台私有的 inventory matcher。Registry 会将厂商、OS、型号统一转换为小写 ASCII 词组后再调用；保留 `registry.go` 的平台声明顺序，以免重叠标签改变既有归属。fleet 消费 `fleet.PlatformResolver`。
 4. 只实现设备实际支持的消费端能力接口：拓扑接口定义在 `topology`，传输接口定义在 `transfer`。配置采集策略负责提示符切换、结果选择和文本清理；保存成功必须匹配正向签名，单独看到命令提示符不算成功。
 5. 若支持拓扑，在家族 `topology.go` 组装模板、记录计数、配置校验、接口规范化及写入模式；把模板放入对应目录并补足完整/空结果/异常输出夹具。

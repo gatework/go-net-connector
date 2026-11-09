@@ -32,6 +32,24 @@ func (p NeighborPolicy) ParseNeighbors(output string) ([]dialect.Neighbor, error
 	return p.Parser.ParseNeighbors(output)
 }
 
+// TopologyReader groups the read-only topology capabilities that share one
+// parser: neighbor discovery, description parsing and interface identity.
+type TopologyReader struct {
+	NeighborPolicy
+	DescriptionReader
+	InterfaceIdentityPolicy
+}
+
+// NewTopologyReader declares the read-only topology capabilities for a
+// platform whose neighbor command does not depend on device status.
+func NewTopologyReader(neighborCommand string, parser topology.Parser) TopologyReader {
+	return TopologyReader{
+		NeighborPolicy:          NewNeighborPolicy(neighborCommand, parser),
+		DescriptionReader:       DescriptionReader{Parser: parser},
+		InterfaceIdentityPolicy: InterfaceIdentityPolicy{Parser: parser},
+	}
+}
+
 // DescriptionReader parses a platform's running configuration.
 type DescriptionReader struct{ Parser topology.Parser }
 

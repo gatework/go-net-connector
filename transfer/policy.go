@@ -67,7 +67,7 @@ func VerificationRoot(root string) (string, error) {
 				return "", ErrInvalid
 			}
 		}
-		for _, part := range strings.Split(u.Path, "/") {
+		for part := range strings.SplitSeq(u.Path, "/") {
 			if part == "." || part == ".." {
 				return "", ErrInvalid
 			}

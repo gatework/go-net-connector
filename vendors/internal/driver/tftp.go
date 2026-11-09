@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,25 +24,17 @@ type TFTPOptions struct {
 }
 
 // TFTPBase implements transfer validation and common filename/receipt rules.
-type TFTPBase struct {
-	extension, kind, format, fixedPath  string
-	defaultVRF                          string
-	acceptSourceFile, requireSourceFile bool
-	acceptVRF, flatPath                 bool
-	allowDestinationReuse               bool
-	requireVerificationRoot             bool
-	validateSourceInterface             func(deviceHost, sourceInterface string) error
-}
+type TFTPBase struct{ options TFTPOptions }
 
 // NewTFTPBase constructs the shared portion of a platform's transfer policy.
-func NewTFTPBase(options TFTPOptions) TFTPBase {
-	return TFTPBase{
-		extension: options.Extension, kind: options.Kind, format: options.Format, fixedPath: options.FixedPath,
-		defaultVRF: options.DefaultVRF, acceptSourceFile: options.AcceptSourceFile, requireSourceFile: options.RequireSourceFile,
-		acceptVRF: options.AcceptVRF, flatPath: options.FlatPath, allowDestinationReuse: options.AllowDestinationReuse,
-		requireVerificationRoot: options.RequireVerificationRoot, validateSourceInterface: options.ValidateSourceInterface,
-	}
-}
+func NewTFTPBase(options TFTPOptions) TFTPBase { return TFTPBase{options: options} }
+
+// Remote filename limits keep generated names within the shortest path limit
+// accepted by the supported device TFTP clients.
+const (
+	maxFilenameLength = 220
+	maxSuffixLength   = maxFilenameLength - 2 // leaves room for a label and "-".
+)
 
 var (
 	deviceFilePattern      = regexp.MustCompile(`^[A-Za-z0-9._:/-]+$`)
@@ -67,69 +60,75 @@ func ParseDeviceInterface(value string) (kind, number string, ok bool) {
 // ValidateManagementOrDataSource accepts the two named source interfaces used
 // by platforms that distinguish management and data planes.
 func ValidateManagementOrDataSource(_ string, source string) error {
-	if source != "management" && source != "data" {
-		return connector.ErrInvalid
+	if source != dialect.SourceInterfaceManagement && source != dialect.SourceInterfaceData {
+		return invalidOption("source interface")
 	}
 	return nil
+}
+
+// invalidOption names the rejected option without echoing its value.
+func invalidOption(name string) error {
+	return fmt.Errorf("%w: tftp %s", connector.ErrInvalid, name)
 }
 
 // ValidateOptions checks the source, VRF and destination constraints declared
 // by a platform before any device command is sent.
 func (b TFTPBase) ValidateOptions(deviceHost string, options dialect.TFTPOptions) error {
-	if options.SourceFile != "" && (!b.acceptSourceFile || !deviceFilePattern.MatchString(options.SourceFile) || strings.Contains(options.SourceFile, "..")) {
-		return connector.ErrInvalid
+	o := b.options
+	if options.SourceFile != "" && (!o.AcceptSourceFile || !deviceFilePattern.MatchString(options.SourceFile) || strings.Contains(options.SourceFile, "..")) {
+		return invalidOption("source file")
 	}
-	if b.requireSourceFile && options.SourceFile == "" {
-		return connector.ErrInvalid
+	if o.RequireSourceFile && options.SourceFile == "" {
+		return invalidOption("source file")
 	}
-	if options.VRF != "" && (!b.acceptVRF || !deviceVRFPattern.MatchString(options.VRF)) {
-		return connector.ErrInvalid
+	if options.VRF != "" && (!o.AcceptVRF || !deviceVRFPattern.MatchString(options.VRF)) {
+		return invalidOption("vrf")
 	}
-	if b.flatPath && strings.Contains(options.Path, "/") {
-		return connector.ErrInvalid
+	if o.FlatPath && strings.Contains(options.Path, "/") {
+		return invalidOption("path")
 	}
-	if b.fixedPath != "" && options.Path != "" && options.Path != b.fixedPath {
-		return connector.ErrInvalid
+	if o.FixedPath != "" && options.Path != "" && options.Path != o.FixedPath {
+		return invalidOption("path")
 	}
 	if options.SourceInterface == "" {
 		return nil
 	}
-	if b.validateSourceInterface == nil {
-		return connector.ErrInvalid
+	if o.ValidateSourceInterface == nil {
+		return invalidOption("source interface")
 	}
-	return b.validateSourceInterface(deviceHost, options.SourceInterface)
+	return o.ValidateSourceInterface(deviceHost, options.SourceInterface)
 }
 
 // DefaultVRF returns the platform's preferred transfer routing instance.
-func (b TFTPBase) DefaultVRF() string { return b.defaultVRF }
+func (b TFTPBase) DefaultVRF() string { return b.options.DefaultVRF }
 
 // AllowsConcurrentDestinationReuse reports whether a fixed remote filename is reusable.
-func (b TFTPBase) AllowsConcurrentDestinationReuse() bool { return b.allowDestinationReuse }
+func (b TFTPBase) AllowsConcurrentDestinationReuse() bool { return b.options.AllowDestinationReuse }
 
 // RequiresSourceFile reports whether the source file must be resolved explicitly.
-func (b TFTPBase) RequiresSourceFile() bool { return b.requireSourceFile }
+func (b TFTPBase) RequiresSourceFile() bool { return b.options.RequireSourceFile }
 
 // RequiresVerificationRoot reports whether server-side archive verification is mandatory.
-func (b TFTPBase) RequiresVerificationRoot() bool { return b.requireVerificationRoot }
+func (b TFTPBase) RequiresVerificationRoot() bool { return b.options.RequireVerificationRoot }
 
 // Filename returns a safe default remote filename for this platform.
 func (b TFTPBase) Filename(host, label string) (string, error) {
-	if b.fixedPath != "" {
-		return b.fixedPath, nil
+	if b.options.FixedPath != "" {
+		return b.options.FixedPath, nil
 	}
 	address := deviceFilenameAddress.ReplaceAllString(host, "_")
-	suffix := address + "." + b.extension
-	if len(suffix) > 218 {
-		suffix = fmt.Sprintf("%x.%s", sha256.Sum256([]byte(host)), b.extension)
+	suffix := address + "." + b.options.Extension
+	if len(suffix) > maxSuffixLength {
+		suffix = fmt.Sprintf("%x.%s", sha256.Sum256([]byte(host)), b.options.Extension)
 	}
 	name := suffix
 	if label != "" {
 		for _, character := range label {
 			if character > 127 {
-				return "", connector.ErrInvalid
+				return "", invalidOption("label")
 			}
 		}
-		if maximum := 220 - len(suffix) - 1; len(label) > maximum {
+		if maximum := maxFilenameLength - len(suffix) - 1; len(label) > maximum {
 			label = label[:maximum]
 		}
 		name = label + "-" + suffix
@@ -145,8 +144,8 @@ func (b TFTPBase) ResolveSourceFile(string) (string, error) { return "", dialect
 
 // Receipt returns the common archive metadata for this platform.
 func (b TFTPBase) Receipt(options dialect.TFTPOptions, explicitSource, _ bool) dialect.TFTPReceipt {
-	receipt := dialect.TFTPReceipt{ConfigurationKind: b.kind, Format: b.format, SourceFile: options.SourceFile, IncludeRequestedPath: true}
-	if explicitSource && b.acceptSourceFile {
+	receipt := dialect.TFTPReceipt{ConfigurationKind: b.options.Kind, Format: b.options.Format, SourceFile: options.SourceFile, IncludeRequestedPath: true}
+	if explicitSource && b.options.AcceptSourceFile {
 		receipt.ConfigurationKind = "saved_file"
 	}
 	return receipt
@@ -178,12 +177,7 @@ func TransferReply(expression, response string) connector.Interaction {
 
 // AnyMatch reports whether any response line matches a compiled completion rule.
 func AnyMatch(lines []string, pattern *regexp.Regexp) bool {
-	for _, line := range lines {
-		if pattern.MatchString(line) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(lines, pattern.MatchString)
 }
 
 // FileTransferred recognizes generic positive byte-count and completion output.

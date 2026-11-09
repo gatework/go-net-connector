@@ -1,46 +1,51 @@
 package config
 
-import "strings"
+import (
+	"maps"
+	"slices"
+	"strings"
+)
 
-// normalizeSourceFiles makes legacy inputs participate in the same layer merge
-// as structured inputs. An explicit structured value in the same layer wins.
-func normalizeSourceFiles(data map[string]any) {
-	tftp, _ := data["tftp"].(map[string]any)
-	for _, vendor := range []string{"h3c", "h3c_wireless", "huawei"} {
-		key := vendor + "_source_file"
-		value, exists := tftp[key]
-		if !exists {
-			continue
-		}
-		structured, provided := tftp["source_files"]
-		files, ok := structured.(map[string]any)
-		if provided && !ok {
-			delete(tftp, key)
-			continue
-		}
-		if files == nil {
-			files = map[string]any{}
-			tftp["source_files"] = files
-		}
-		if _, exists := files[vendor]; !exists {
-			files[vendor] = value
-		}
-		delete(tftp, key)
-	}
+// removedFields maps configuration keys removed after v0.4.0 to their
+// replacements. They are rejected instead of ignored so an old configuration
+// cannot silently fall back to a platform default source file.
+var removedFields = map[string]struct{ env, replacement string }{
+	"tftp.h3c_source_file":          {"NC_H3C_TFTP_SOURCE_FILE", "tftp.source_files.h3c"},
+	"tftp.h3c_wireless_source_file": {"NC_H3C_WIRELESS_TFTP_SOURCE_FILE", "tftp.source_files.h3c_wireless"},
+	"tftp.huawei_source_file":       {"NC_HUAWEI_TFTP_SOURCE_FILE", "tftp.source_files.huawei"},
 }
 
-func canonicalPath(path string) string {
-	for _, vendor := range []string{"h3c", "h3c_wireless", "huawei"} {
-		if path == "tftp."+vendor+"_source_file" {
-			return "tftp.source_files." + vendor
+// rejectRemovedFields reports the first removed key present in a parsed layer.
+func rejectRemovedFields(data map[string]any) error {
+	for _, path := range sortedRemovedFields() {
+		if hasPath(data, path) {
+			return &FieldError{Field: path, Problem: "removed", Replacement: removedFields[path].replacement}
 		}
 	}
-	return path
+	return nil
+}
+
+// rejectRemovedEnvironment reports the first removed variable that is set and
+// belongs to the projection selected by include (nil selects every field).
+func rejectRemovedEnvironment(values map[string]string, include func(string) bool) error {
+	for _, path := range sortedRemovedFields() {
+		if include != nil && !include(path) {
+			continue
+		}
+		if _, present := values[removedFields[path].env]; present {
+			return &FieldError{Field: removedFields[path].env, Problem: "removed", Replacement: removedFields[path].replacement}
+		}
+	}
+	return nil
+}
+
+func sortedRemovedFields() []string {
+	return slices.Sorted(maps.Keys(removedFields))
 }
 
 func valueAtPath(values map[string]any, path string) any {
 	var value any = values
-	for _, part := range strings.Split(path, ".") {
+	for part := range strings.SplitSeq(path, ".") {
 		child, ok := value.(map[string]any)
 		if !ok {
 			return nil

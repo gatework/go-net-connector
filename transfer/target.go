@@ -3,6 +3,7 @@ package transfer
 import (
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/gatework/go-net-connector/connector"
@@ -27,7 +28,7 @@ func ValidatePath(path string) error {
 	if len(path) > 220 || !pathPattern.MatchString(path) {
 		return ErrInvalid
 	}
-	for _, part := range strings.Split(path, "/") {
+	for part := range strings.SplitSeq(path, "/") {
 		if part == "." || part == ".." {
 			return ErrInvalid
 		}
@@ -38,10 +39,8 @@ func ValidateSource(source string) error {
 	if !sourcePattern.MatchString(source) {
 		return ErrInvalid
 	}
-	for _, part := range strings.Split(source, "/") {
-		if part == ".." {
-			return ErrInvalid
-		}
+	if slices.Contains(strings.Split(source, "/"), "..") {
+		return ErrInvalid
 	}
 	return nil
 }

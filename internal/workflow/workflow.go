@@ -93,13 +93,14 @@ func (t *TopologyResult) Summary() map[string]any {
 
 type PreviewResult struct {
 	Plan fleet.Plan
-	View map[string]any
+	View PlanView
 }
 type Result struct {
 	Success  bool
 	Batch    *BatchResult
 	Topology *TopologyResult
 	Preview  *PreviewResult
+	Push     *PushResult
 }
 type Runner struct {
 	Observe     Observer
@@ -111,7 +112,7 @@ type Runner struct {
 func (r *Runner) fail(err error) (Result, error) { return r.result, err }
 func (r *Runner) complete(success bool) Result   { r.result.Success = success; return r.result }
 func Preview(plan fleet.Plan) Result {
-	return Result{Success: len(plan.Tasks()) > 0, Preview: &PreviewResult{Plan: plan, View: PlanView(plan)}}
+	return Result{Success: len(plan.Tasks()) > 0, Preview: &PreviewResult{Plan: plan, View: NewPlanView(plan)}}
 }
 
 // RecordOutputFailure persists output diagnostics without losing committed artifacts.

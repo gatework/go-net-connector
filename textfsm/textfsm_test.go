@@ -54,7 +54,7 @@ func TestParseMissingAndExactIndex(t *testing.T) {
 }
 func TestParseTemplateFreshAndStrict(t *testing.T) {
 	template := "Value Required NAME (\\S+)\nValue STATE (up|down)\n\nStart\n  ^${NAME}\\s+${STATE}$$ -> Record\n"
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		t.Run(string(rune('a'+i)), func(t *testing.T) {
 			t.Parallel()
 			r, e := ParseTemplate(template, "\x1b[32mport1 up\x1b[0m\r\n")

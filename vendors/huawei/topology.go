@@ -13,7 +13,7 @@ func topologyParser() topology.Parser {
 	return topology.Parser{
 		NeighborTemplate:     "huawei/display_lldp_neighbor_brief.textfsm",
 		DescriptionTemplate:  "huawei/display_current_configuration.textfsm",
-		Protocol:             "lldp",
+		Protocol:             topology.ProtocolLLDP,
 		CountNeighbors:       neighborCount,
 		ValidateDescriptions: topology.ValidateInterfaceRows,
 		CanonicalInterface: func(name string) string {

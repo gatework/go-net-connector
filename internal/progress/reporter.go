@@ -462,7 +462,7 @@ func (p *Reporter) activityLocked() string {
 }
 func isSuccessfulStatus(status string) bool {
 	switch status {
-	case "backed_up", "reported_uploaded", "discovered", "planned", "applied", "unchanged":
+	case "backed_up", "reported_uploaded", "discovered", "planned", "applied", "unchanged", "pushed", "saved":
 		return true
 	}
 	return false
@@ -481,14 +481,14 @@ func (p *Reporter) Outcome(host, status, errorCode string, duration time.Duratio
 	switch {
 	case isSuccessfulStatus(status):
 		p.succeeded++
-	case status == "unsupported_operation", status == "filtered", status == "sample_limit":
+	case status == "unsupported_operation", status == "filtered", status == "sample_limit", status == "stopped":
 		p.skipped++
 	case status == "partial_planned", status == "interrupted":
 		p.pending++
 	default:
 		p.failed++
 	}
-	isFailure := !isSuccessfulStatus(status) && status != "unsupported_operation" && status != "filtered" && status != "sample_limit" && status != "interrupted"
+	isFailure := !isSuccessfulStatus(status) && status != "unsupported_operation" && status != "filtered" && status != "sample_limit" && status != "stopped" && status != "interrupted"
 	if isFailure {
 		message := display.Status(status)
 		if errorCode != "" {

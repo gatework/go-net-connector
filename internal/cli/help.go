@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -92,17 +93,15 @@ func renderChineseHelp(c *cobra.Command, w io.Writer) error {
 
 // Flag categories are presentation metadata; every flag remains available.
 var flagHelpGroups = map[string][]string{
-	"常用选项":  {"help", "version", "config", "env-file", "for", "method", "directory", "output", "batch", "json", "quiet", "parallel", "interactive", "non-interactive", "tftp-server", "tftp-root"},
+	"常用选项":  {"help", "version", "config", "env-file", "for", "method", "directory", "output", "batch", "json", "quiet", "parallel", "interactive", "non-interactive", "tftp-server", "tftp-root", "script", "script-for", "save", "stop-after-failures"},
 	"设备筛选":  {"host", "hosts", "exclude-hosts", "name", "exclude-name", "vendor", "exclude-vendor", "model", "exclude-model", "name-match", "model-match", "all", "sample", "limit"},
 	"连接与认证": {"protocol", "username", "password", "enable-password", "ask-password", "netdisco-username", "netdisco-password", "ask-netdisco-password", "known-hosts", "host-key-policy", "stdin-credentials"},
 }
 
 func flagHelpGroup(name string) string {
 	for group, names := range flagHelpGroups {
-		for _, candidate := range names {
-			if candidate == name {
-				return group
-			}
+		if slices.Contains(names, name) {
+			return group
 		}
 	}
 	return "高级选项"

@@ -102,30 +102,30 @@ func newCache(source Source, o CacheOptions, identity string) (*Cache, error) {
 }
 func (c *Cache) Path() string { return c.path }
 func (c *Cache) Devices(ctx context.Context) ([]inventory.Device, error) {
-	mode := "prefer"
+	mode := CachePrefer
 	if c.source == nil {
-		mode = "only"
+		mode = CacheOnly
 	}
 	r, e := c.Fetch(ctx, mode)
 	return r.Rows, e
 }
-func (c *Cache) Fetch(ctx context.Context, mode string) (result CacheResult, err error) {
-	if mode != "prefer" && mode != "refresh" && mode != "only" {
+func (c *Cache) Fetch(ctx context.Context, mode CacheMode) (result CacheResult, err error) {
+	if !mode.Valid() {
 		return result, newInventoryError("invalid_cache_mode", nil)
 	}
-	if c.source == nil && mode != "only" {
+	if c.source == nil && mode != CacheOnly {
 		return result, newInventoryError("cache_unavailable", nil)
 	}
 	if e := ctx.Err(); e != nil {
 		return result, e
 	}
-	if mode != "only" {
+	if mode != CacheOnly {
 		if e := os.MkdirAll(c.directory, 0700); e != nil {
 			return result, e
 		}
 	}
 	directory, e := os.Lstat(c.directory)
-	if mode == "only" && errors.Is(e, os.ErrNotExist) {
+	if mode == CacheOnly && errors.Is(e, os.ErrNotExist) {
 		return result, newInventoryError("cache_unavailable", ErrCacheRefreshRequired)
 	}
 	if e != nil || !isPrivateCacheEntry(directory, true) {
@@ -147,7 +147,7 @@ func (c *Cache) Fetch(ctx context.Context, mode string) (result CacheResult, err
 	deliver := func(entry *cacheEntry, status string) CacheResult {
 		return CacheResult{Rows: append([]inventory.Device{}, entry.Rows...), Status: status, FetchedAt: time.Unix(0, int64(entry.FetchedAt*1e9)).UTC()}
 	}
-	if mode == "only" {
+	if mode == CacheOnly {
 		if previous == nil {
 			return result, newInventoryError("cache_unavailable", ErrCacheRefreshRequired)
 		}
@@ -157,7 +157,7 @@ func (c *Cache) Fetch(ctx context.Context, mode string) (result CacheResult, err
 		}
 		return deliver(previous, status), nil
 	}
-	if mode == "prefer" && fresh(previous) {
+	if mode == CachePrefer && fresh(previous) {
 		return deliver(previous, CacheStatusFresh), nil
 	}
 	lock, e := storage.AcquireLockFile(ctx, c.lockPath, c.lockTimeout)
@@ -173,7 +173,7 @@ func (c *Cache) Fetch(ctx context.Context, mode string) (result CacheResult, err
 	if e != nil {
 		return result, e
 	}
-	if mode == "prefer" && fresh(previous) {
+	if mode == CachePrefer && fresh(previous) {
 		return deliver(previous, CacheStatusFresh), nil
 	}
 	rows, e := c.source.Devices(ctx)

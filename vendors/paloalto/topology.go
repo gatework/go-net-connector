@@ -11,7 +11,7 @@ func topologyParser() topology.Parser {
 	return topology.Parser{
 		NeighborTemplate:    "palo_alto/show_lldp_neighbors_all.textfsm",
 		DescriptionTemplate: "palo_alto/show.textfsm",
-		Protocol:            "lldp",
+		Protocol:            topology.ProtocolLLDP,
 		CountNeighbors:      neighborCount,
 		CanonicalInterface:  ifname.Key,
 		StrictDescription:   true,
@@ -31,7 +31,7 @@ func neighborCount(text string) (int, bool) {
 			continue
 		}
 		blank := true
-		for _, line := range strings.Split(parts[1], "\n") {
+		for line := range strings.SplitSeq(parts[1], "\n") {
 			line = strings.TrimSpace(line)
 			if line != "" && !topology.Pattern(`^\S+[>#]\s*$`).MatchString(line) {
 				blank = false

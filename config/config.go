@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/gatework/go-net-connector/internal/batchreport"
 )
 
 type Options struct {
@@ -30,7 +33,7 @@ type Snapshot struct {
 func (s Snapshot) Public() map[string]any { return cloneValue(s.data).(map[string]any) }
 func (s Snapshot) Value(path string) any {
 	var v any = s.data
-	for _, key := range strings.Split(path, ".") {
+	for key := range strings.SplitSeq(path, ".") {
 		m, ok := v.(map[string]any)
 		if !ok {
 			return nil
@@ -42,16 +45,12 @@ func (s Snapshot) Value(path string) any {
 func (s Snapshot) Secret(key string) string { return s.environment[key] }
 func (s Snapshot) Environment() map[string]string {
 	m := map[string]string{}
-	for k, v := range s.environment {
-		m[k] = v
-	}
+	maps.Copy(m, s.environment)
 	return m
 }
 func (s Snapshot) Sources() map[string]any {
 	fields := map[string]string{}
-	for k, v := range s.fields {
-		fields[k] = v
-	}
+	maps.Copy(fields, s.fields)
 	return map[string]any{"configuration_files": append([]string{}, s.files...), "environment_files": append([]string{}, s.envFiles...), "fields": fields}
 }
 func (s Snapshot) Missing() bool                { return !s.applicable }
@@ -184,7 +183,9 @@ func LoadContext(ctx context.Context, o Options) (snapshot Snapshot, err error) 
 			return s, e
 		}
 		*layer = owned.(map[string]any)
-		normalizeSourceFiles(*layer)
+		if e := rejectRemovedFields(*layer); e != nil {
+			return s, e
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return s, err
@@ -208,9 +209,7 @@ func LoadContext(ctx context.Context, o Options) (snapshot Snapshot, err error) 
 	}
 	o.CWD = absolutePath(o.CWD, actualCWD, o.Home)
 	process := map[string]string{}
-	for k, v := range o.Environment {
-		process[k] = v
-	}
+	maps.Copy(process, o.Environment)
 	if e := resolveEnvironmentPaths(process, o.CWD, o.Home); e != nil {
 		return s, e
 	}
@@ -286,7 +285,9 @@ func LoadContext(ctx context.Context, o Options) (snapshot Snapshot, err error) 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		normalizeSourceFiles(m)
+		if e := rejectRemovedFields(m); e != nil {
+			return e
+		}
 		if e := resolvePaths(m, filepath.Dir(source), o.Home, ""); e != nil {
 			return e
 		}
@@ -320,7 +321,7 @@ func LoadContext(ctx context.Context, o Options) (snapshot Snapshot, err error) 
 	processPresence := map[string]any{}
 	for path, f := range schema {
 		if _, ok := process[f.Env]; ok {
-			setPath(processPresence, canonicalPath(path), true)
+			setPath(processPresence, path, true)
 		}
 	}
 	s.data = map[string]any{}
@@ -351,12 +352,11 @@ func LoadContext(ctx context.Context, o Options) (snapshot Snapshot, err error) 
 		if e != nil {
 			return s, e
 		}
-		normalizeSourceFiles(m)
 		if layer.source == ".env" {
 			for path, f := range schema {
-				if origin := envOrigins[f.Env]; origin != "" && hasPath(m, canonicalPath(path)) {
+				if origin := envOrigins[f.Env]; origin != "" && hasPath(m, path) {
 					part := map[string]any{}
-					setPath(part, canonicalPath(path), valueAtPath(m, canonicalPath(path)))
+					setPath(part, path, valueAtPath(m, path))
 					recordFields(s.fields, s.data, part, origin, "")
 				}
 			}
@@ -386,9 +386,7 @@ func LoadContext(ctx context.Context, o Options) (snapshot Snapshot, err error) 
 	if e := validateValues(s.data); e != nil {
 		return s, e
 	}
-	for k, v := range process {
-		s.environment[k] = v
-	}
+	maps.Copy(s.environment, process)
 	if _, e := environmentSize(s.environment); e != nil {
 		return s, e
 	}
@@ -472,33 +470,33 @@ func validateValues(values map[string]any) error {
 			}
 			valid := false
 			switch f.Kind {
-			case "string", "optional_string":
+			case KindString, KindOptionalString:
 				s, ok := v.(string)
-				valid = ok && (f.Kind == "optional_string" || strings.TrimSpace(s) != "")
-				if section == "backup" && key == "success_policy" && s != "strict" && s != "selected" && s != "verified" {
+				valid = ok && (f.Kind == KindOptionalString || strings.TrimSpace(s) != "")
+				if section == "backup" && key == "success_policy" && !batchreport.SuccessPolicy(s).Valid() {
 					return &FieldError{Field: "backup.success_policy", Problem: "invalid"}
 				}
-			case "integer", "optional_integer":
+			case KindInteger, KindOptionalInteger:
 				n, ok := integerValue(v)
-				valid = ok && (n > 0 || section == "backup" && key == "limit_per_vendor" && n == 0) || v == nil && f.Kind == "optional_integer"
-			case "number":
+				valid = ok && (n > 0 || section == "backup" && key == "limit_per_vendor" && n == 0) || v == nil && f.Kind == KindOptionalInteger
+			case KindNumber:
 				n, ok := v.(float64)
 				if i, iok := integerValue(v); iok {
 					n = float64(i)
 					ok = true
 				}
 				valid = ok && n > 0 && !math.IsInf(n, 0) && !math.IsNaN(n)
-			case "boolean":
+			case KindBoolean:
 				_, valid = v.(bool)
-			case "list":
+			case KindList:
 				a, ok := v.([]any)
 				valid = ok
 				for _, item := range a {
 					s, ok := item.(string)
 					valid = valid && ok && strings.TrimSpace(s) != "" && !strings.Contains(s, ",")
 				}
-			case "json", "json_array":
-				if f.Kind == "json_array" || key == "device_rules" {
+			case KindJSON, KindJSONArray:
+				if f.Kind == KindJSONArray || key == "device_rules" {
 					_, valid = v.([]any)
 				} else {
 					_, valid = v.(map[string]any)
