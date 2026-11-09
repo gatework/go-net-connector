@@ -28,7 +28,7 @@ func (w *eventFailWriter) Write(p []byte) (int, error) {
 }
 func textLogDevice(t *testing.T, level string, sink io.Writer, response string) *Device {
 	t.Helper()
-	d, err := New(fixtureProfile(), ConnectionConfig{Host: "fixture", LogLevel: level, Logger: sink}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
+	d, err := New(fixtureDriver(), ConnectionConfig{Host: "fixture", LogLevel: level, Logger: sink}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 		a, b := net.Pipe()
 		go func() {
 			defer b.Close()
@@ -96,7 +96,7 @@ func TestTextLogConnectMessageRedactsAndCleansHost(t *testing.T) {
 	for _, host := range []string{"prefixPRIVATE_HOSTsuffix", "\x1b[31mfixture"} {
 		t.Run(host, func(t *testing.T) {
 			var sink bytes.Buffer
-			d, err := New(fixtureProfile(), ConnectionConfig{Host: host, Password: "PRIVATE_HOST", Logger: &sink, LogLevel: "info"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) { return nil, ErrConnection }))
+			d, err := New(fixtureDriver(), ConnectionConfig{Host: host, Password: "PRIVATE_HOST", Logger: &sink, LogLevel: "info"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) { return nil, ErrConnection }))
 			if err != nil {
 				t.Fatal(err)
 			}

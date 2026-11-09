@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -8,7 +9,7 @@ import (
 )
 
 func TestStructuredSourceFileOverridesDefaults(t *testing.T) {
-	p, e := config.Load(config.Options{Name: "backup", CWD: t.TempDir(), Home: t.TempDir(), Directories: []string{}, Environment: map[string]string{"NC_TFTP_SOURCE_FILES": `{"huawei":"flash:/custom.cfg"}`}, Defaults: config.Defaults("tftp")})
+	p, e := config.Load(context.Background(), config.Options{Name: "backup", CWD: t.TempDir(), Home: t.TempDir(), Directories: []string{}, Environment: map[string]string{"NC_TFTP_SOURCE_FILES": `{"huawei":"flash:/custom.cfg"}`}, Defaults: config.Defaults("tftp")})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -27,7 +28,7 @@ func TestStructuredSourceFileOverridesDefaults(t *testing.T) {
 }
 
 func TestRemovedSourceFileEnvironmentIsRejected(t *testing.T) {
-	_, e := config.Load(config.Options{Name: "backup", CWD: t.TempDir(), Home: t.TempDir(), Directories: []string{}, Environment: map[string]string{"NC_HUAWEI_TFTP_SOURCE_FILE": "flash:/custom.cfg"}, Defaults: config.Defaults("tftp")})
+	_, e := config.Load(context.Background(), config.Options{Name: "backup", CWD: t.TempDir(), Home: t.TempDir(), Directories: []string{}, Environment: map[string]string{"NC_HUAWEI_TFTP_SOURCE_FILE": "flash:/custom.cfg"}, Defaults: config.Defaults("tftp")})
 	field, ok := errors.AsType[*config.FieldError](e)
 	if !ok || field.Problem != "removed" || field.Field != "NC_HUAWEI_TFTP_SOURCE_FILE" || field.Replacement != "tftp.source_files.huawei" || !errors.Is(e, config.ErrInvalid) {
 		t.Fatalf("removed variable not reported: %#v", e)

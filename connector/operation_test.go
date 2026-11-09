@@ -7,7 +7,7 @@ import (
 )
 
 func TestOperationHoldsLeaseAndExpires(t *testing.T) {
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"one\nsw#", "two\nsw#"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"one\nsw#", "two\nsw#"})
 	var saved *Operation
 	e := d.WithOperation(t.Context(), func(ctx context.Context, o *Operation) error {
 		saved = o

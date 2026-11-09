@@ -16,7 +16,7 @@ import (
 
 func TestHookAndReceiptErrorsBothSurvive(t *testing.T) {
 	hookErr, receiptErr := errors.New("private hook body"), errors.New("private receipt body")
-	p := fixtureProfile()
+	p := fixtureDriver()
 	p.AfterCommand = func(context.Context, Command, StepResult, Executor) error { return hookErr }
 	d, writes := fixtureDevice(t, p, []string{"done\nsw#"})
 	receipts := 0
@@ -46,7 +46,7 @@ func TestHookAndReceiptErrorsBothSurvive(t *testing.T) {
 type cancelConfig struct{ entered chan struct{} }
 
 func TestAfterLoginReceivesVerifiedResponse(t *testing.T) {
-	p := fixtureProfile()
+	p := fixtureDriver()
 	var retained Response
 	p.AfterLogin = func(_ context.Context, s StepResult) (LoginState, error) {
 		retained = s.Response()
@@ -84,7 +84,7 @@ func TestCloseCancelsAdmittedCallbacks(t *testing.T) {
 			entered := make(chan struct{})
 			var d *Device
 			var run func(context.Context) error
-			p := fixtureProfile()
+			p := fixtureDriver()
 			switch phase {
 			case "operation":
 				var err error
@@ -108,7 +108,7 @@ func TestCloseCancelsAdmittedCallbacks(t *testing.T) {
 				d, _ = fixtureDevice(t, p, nil)
 				run = d.Connect
 			case "finish":
-				p.ConfigStrategy = func() ConfigStrategy { return cancelConfig{entered} }
+				p.Collector = func() ConfigStrategy { return cancelConfig{entered} }
 				d, _ = fixtureDevice(t, p, []string{"show config\nbody\nsw#"})
 				run = func(ctx context.Context) error { _, err := d.RunningConfig(ctx); return err }
 			}
@@ -147,7 +147,7 @@ func TestRejectedResponseRetainsVerifiedEvidence(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			d, _ := fixtureDevice(t, fixtureProfile(), []string{wire})
+			d, _ := fixtureDevice(t, fixtureDriver(), []string{wire})
 			r, err := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{})
 			if !errors.Is(err, ErrDevice) || len(r.Steps()) != 0 || len(r.Attempts()) != 1 {
 				t.Fatalf("unexpected rejection: %v", err)
@@ -190,7 +190,7 @@ func TestUnavailableResponseConversionIsExplicit(t *testing.T) {
 				wire += "\nsw#"
 				want = textcodec.ErrEncoding
 			}
-			d, _ := fixtureDevice(t, fixtureProfile(), []string{wire})
+			d, _ := fixtureDevice(t, fixtureDriver(), []string{wire})
 			timeout := 20 * time.Millisecond
 			r, err := d.ExecuteCommand(t.Context(), Command{Text: "show", Timeout: &timeout}, ExecuteOptions{})
 			if err == nil || len(r.Attempts()) != 1 {

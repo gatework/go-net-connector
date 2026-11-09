@@ -21,7 +21,7 @@ func TestCacheOfflineAndRefreshFallback(t *testing.T) {
 		calls++
 		return []inventory.Device{{IP: "192.0.2.1"}}, nil
 	})
-	c, e := NewCache(source, CacheOptions{Directory: dir, Identity: "identity", TTL: &ttl, Now: func() time.Time { return now }})
+	c, e := testCache("identity", source, cacheOptions{Directory: dir, TTL: &ttl, Now: func() time.Time { return now }})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -33,12 +33,12 @@ func TestCacheOfflineAndRefreshFallback(t *testing.T) {
 	if e != nil || r.Status != "fresh_cache" || calls != 1 {
 		t.Fatal(r, e, calls)
 	}
-	offline, _ := NewCache(nil, CacheOptions{Directory: dir, Identity: "identity", TTL: &ttl, Now: func() time.Time { return now.Add(2 * time.Hour) }})
+	offline, _ := testCache("identity", nil, cacheOptions{Directory: dir, TTL: &ttl, Now: func() time.Time { return now.Add(2 * time.Hour) }})
 	r, e = offline.Fetch(t.Context(), "only")
 	if e != nil || r.Status != "stale_cache" || calls != 1 {
 		t.Fatal(r, e)
 	}
-	failed, _ := NewCache(SourceFunc(func(context.Context) ([]inventory.Device, error) { return nil, errors.New("secret error") }), CacheOptions{Directory: dir, Identity: "identity", TTL: &ttl, Now: func() time.Time { return now.Add(2 * time.Hour) }})
+	failed, _ := testCache("identity", SourceFunc(func(context.Context) ([]inventory.Device, error) { return nil, errors.New("secret error") }), cacheOptions{Directory: dir, TTL: &ttl, Now: func() time.Time { return now.Add(2 * time.Hour) }})
 	r, e = failed.Fetch(t.Context(), "refresh")
 	if e != nil || r.Status != "stale_cache" || r.RefreshErrorCode != "inventory_error" {
 		t.Fatal(r, e)
@@ -46,16 +46,16 @@ func TestCacheOfflineAndRefreshFallback(t *testing.T) {
 }
 func TestCacheWriteFailureKeepsFreshResult(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "cache")
-	var c *Cache
+	var c *cache
 	calls := 0
 	source := SourceFunc(func(context.Context) ([]inventory.Device, error) {
 		calls++
-		if e := os.Mkdir(c.Path(), 0700); e != nil {
+		if e := os.Mkdir(c.path, 0700); e != nil {
 			t.Fatal(e)
 		}
 		return []inventory.Device{{IP: "192.0.2.2"}}, nil
 	})
-	c, _ = NewCache(source, CacheOptions{Directory: dir, Identity: "failure"})
+	c, _ = testCache("failure", source, cacheOptions{Directory: dir})
 	r, e := c.Fetch(t.Context(), "refresh")
 	if e != nil || len(r.Rows) != 1 || r.WriteErrorType == "" || calls != 1 {
 		t.Fatalf("%+v %v %d", r, e, calls)
@@ -64,8 +64,8 @@ func TestCacheWriteFailureKeepsFreshResult(t *testing.T) {
 
 func TestCacheEmptyInventoryRoundTrip(t *testing.T) {
 	calls := 0
-	opts := CacheOptions{Directory: filepath.Join(t.TempDir(), "cache"), Identity: "empty"}
-	c, e := NewCache(SourceFunc(func(context.Context) ([]inventory.Device, error) { calls++; return []inventory.Device{}, nil }), opts)
+	opts := cacheOptions{Directory: filepath.Join(t.TempDir(), "cache")}
+	c, e := testCache("empty", SourceFunc(func(context.Context) ([]inventory.Device, error) { calls++; return []inventory.Device{}, nil }), opts)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -75,7 +75,7 @@ func TestCacheEmptyInventoryRoundTrip(t *testing.T) {
 			t.Fatalf("%s: %+v %v calls=%d", mode, r, e, calls)
 		}
 	}
-	offline, e := NewCache(nil, opts)
+	offline, e := testCache("empty", nil, opts)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -83,7 +83,7 @@ func TestCacheEmptyInventoryRoundTrip(t *testing.T) {
 	if e != nil || r.Rows == nil || len(r.Rows) != 0 || r.Status != "fresh_cache" {
 		t.Fatalf("offline: %+v %v", r, e)
 	}
-	body, e := os.ReadFile(c.Path())
+	body, e := os.ReadFile(c.path)
 	if e != nil || !bytes.Contains(body, []byte(`"rows":[]`)) {
 		t.Fatalf("cache does not contain empty array: %v", e)
 	}
@@ -98,11 +98,11 @@ func TestCacheOversizedEntryRecoveryAndSafety(t *testing.T) {
 					t.Fatal(e)
 				}
 				calls := 0
-				c, e := NewCache(SourceFunc(func(context.Context) ([]inventory.Device, error) { calls++; return []inventory.Device{}, nil }), CacheOptions{Directory: dir, Identity: "large", Limits: Limits{MaxInventoryBytes: 300}})
+				c, e := testCache("large", SourceFunc(func(context.Context) ([]inventory.Device, error) { calls++; return []inventory.Device{}, nil }), cacheOptions{Directory: dir, Limits: Limits{MaxInventoryBytes: 300}})
 				if e != nil {
 					t.Fatal(e)
 				}
-				path := c.Path()
+				path := c.path
 				if kind == "symlink" || kind == "hardlink" {
 					path = filepath.Join(dir, "target")
 				}
@@ -113,10 +113,10 @@ func TestCacheOversizedEntryRecoveryAndSafety(t *testing.T) {
 					e = os.Chmod(path, 0644)
 				}
 				if kind == "symlink" {
-					e = os.Symlink(path, c.Path())
+					e = os.Symlink(path, c.path)
 				}
 				if kind == "hardlink" {
-					e = os.Link(path, c.Path())
+					e = os.Link(path, c.path)
 				}
 				if e != nil {
 					t.Fatal(e)
@@ -135,4 +135,9 @@ func TestCacheOversizedEntryRecoveryAndSafety(t *testing.T) {
 			})
 		}
 	}
+}
+
+// testCache builds a cache for a fixed test identity.
+func testCache(identity string, source Source, o cacheOptions) (*cache, error) {
+	return newCache(source, o, digest([]byte(identity)))
 }

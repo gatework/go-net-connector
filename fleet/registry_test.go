@@ -10,7 +10,7 @@ import (
 	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
-type profileRegistry map[string]connector.Profile
+type profileRegistry map[string]connector.Terminal
 
 type changingRegistry struct {
 	profiles profileRegistry
@@ -89,10 +89,10 @@ func (r profileRegistry) Lookup(name string) (dialect.Platform, error) {
 	if !ok {
 		return nil, connector.ErrUnsupported
 	}
-	return testProfileDialect{profile}, nil
+	return testProfileDialect{connector.StaticDriver{Grammar: profile}}, nil
 }
 
-type testProfileDialect struct{ profile connector.Profile }
+type testProfileDialect struct{ connector.StaticDriver }
 
-func (d testProfileDialect) Name() string               { return d.profile.Name }
-func (d testProfileDialect) Profile() connector.Profile { return d.profile }
+func (d testProfileDialect) Name() string                                { return d.Grammar.Name }
+func (testProfileDialect) MatchInventory(dialect.InventoryIdentity) bool { return false }

@@ -4,7 +4,6 @@ package huawei
 import (
 	"time"
 
-	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/vendors/internal/driver"
 )
 
@@ -12,7 +11,8 @@ var saveConfirmationPattern = driver.Regex(`(?i)^(?:Info:[ \t]*)?(?:Save the con
 
 // Dialect is the built-in Huawei VRP platform.
 type Dialect struct {
-	driver.ProfiledPlatform
+	driver.Base
+	driver.ReadOnlyCommands
 	driver.TopologyReader
 	tftpPolicy
 }
@@ -20,14 +20,15 @@ type Dialect struct {
 // New returns the built-in Huawei VRP dialect.
 func New() Dialect {
 	return Dialect{
-		ProfiledPlatform: driver.NewProfiledPlatform(newProfile()),
+		Base:             newBase(),
+		ReadOnlyCommands: readOnly,
 		TopologyReader:   driver.NewTopologyReader("display lldp neighbor brief", topologyParser()),
 		tftpPolicy:       newTFTPPolicy(),
 	}
 }
 
-func newProfile() connector.Profile {
-	p := driver.BaseProfile("huawei")
+func newBase() driver.Base {
+	p := driver.BaseTerminal("huawei")
 	p.ConfigCommands = []string{"dis cur"}
 	p.SaveCommands = []string{"save force"}
 	p.UsernamePrompt = driver.Pattern(`(?i)(?:login|Username):\s*\z`)
@@ -37,5 +38,8 @@ func newProfile() connector.Profile {
 	p.Interactions = driver.YesNoConfirmations()
 	p.PrivilegeCommand = "su"
 	p.PrivilegePrompt = driver.Pattern(`(?is)privilege\s+(?:level\s+is|is\s+).+>\s*\z`)
-	return driver.FinishProfile(p, 10*time.Second, driver.BaseConfigFactory(), saveConfirmationPattern)
+	return driver.NewBase(p, 10*time.Second, driver.BaseConfigFactory(), saveConfirmationPattern)
 }
+
+// readOnly lists the commands this family accepts for read-only collection.
+var readOnly = driver.ReadOnlyCommands{Verbs: []string{"display", "dis", "ping", "tracert"}}

@@ -1,6 +1,7 @@
 package workflow_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -23,7 +24,7 @@ func TestTFTPPreflightFailureNeverCreatesDevice(t *testing.T) {
 	defaults["backup"].(map[string]any)["directory"] = filepath.Join(root, "backups")
 	defaults["tftp"].(map[string]any)["server"] = "192.0.2.10"
 	defaults["tftp"].(map[string]any)["verification_root"] = blocked
-	p, err := config.Load(config.Options{Name: "backup", CWD: root, Home: root, Directories: []string{}, Environment: map[string]string{}, Defaults: defaults, AllowMissing: true})
+	p, err := config.Load(context.Background(), config.Options{Name: "backup", CWD: root, Home: root, Directories: []string{}, Environment: map[string]string{}, Defaults: defaults, AllowMissing: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +32,7 @@ func TestTFTPPreflightFailureNeverCreatesDevice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s = s.WithDeviceFactory(func(connector.Profile, connector.ConnectionConfig) (*connector.Device, error) {
+	s = s.WithDeviceFactory(func(connector.Driver, connector.ConnectionConfig) (*connector.Device, error) {
 		t.Fatal("device created before preflight succeeded")
 		return nil, nil
 	})

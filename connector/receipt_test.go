@@ -10,7 +10,7 @@ import (
 )
 
 func TestSingleAcceptedRequiresOneMatchingMainCommand(t *testing.T) {
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{
 		"show\r\nvalue\r\nsw#", "first\r\none\r\nsw#", "second\r\ntwo\r\nsw#",
 	})
 	single, err := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{})
@@ -86,7 +86,7 @@ func TestStepBodyPreservesVerifiedContent(t *testing.T) {
 		{name: "empty body without echo", wire: "sw#"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			d, _ := fixtureDevice(t, fixtureProfile(), []string{test.wire})
+			d, _ := fixtureDevice(t, fixtureDriver(), []string{test.wire})
 			result, err := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{})
 			if err != nil {
 				t.Fatal(err)
@@ -110,8 +110,8 @@ func TestStepBodyPreservesVerifiedContent(t *testing.T) {
 }
 
 func TestStepBodyRetainsPromptLeadingNewlines(t *testing.T) {
-	p := fixtureProfile()
-	p.CommandPrompt = testPattern(`\n+sw#$`)
+	p := fixtureDriver()
+	p.Grammar.CommandPrompt = testPattern(`\n+sw#$`)
 	d, _ := fixtureDevice(t, p, []string{"show\nbody\n\nsw#"})
 	result, err := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{})
 	if err != nil {
@@ -158,7 +158,7 @@ func TestStepBodyRejectsUnavailableAndInconsistentEvidence(t *testing.T) {
 func TestStepBodyRejectsBackupPreservationViews(t *testing.T) {
 	for _, mode := range []configTextMode{configTextBackupSource, configTextPreserveInvalid} {
 		t.Run(fmt.Sprint(mode), func(t *testing.T) {
-			d, _ := fixtureDevice(t, fixtureProfile(), []string{"show config\r\n description 中文\xff\r\nsw#"})
+			d, _ := fixtureDevice(t, fixtureDriver(), []string{"show config\r\n description 中文\xff\r\nsw#"})
 			result, err := d.ExecuteCommand(t.Context(), Command{Text: "show config"}, ExecuteOptions{textMode: mode})
 			if err != nil {
 				t.Fatal(err)
@@ -178,7 +178,7 @@ func TestStepBodyRejectsBackupPreservationViews(t *testing.T) {
 }
 
 func TestSingleAcceptedRejectsInvalidEncoding(t *testing.T) {
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"show\r\n\xff\r\nsw#"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"show\r\n\xff\r\nsw#"})
 	result, err := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{})
 	if !errors.Is(err, textcodec.ErrEncoding) || len(result.Attempts()) != 1 {
 		t.Fatalf("invalid response evidence lost: %v", err)

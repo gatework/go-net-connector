@@ -259,12 +259,15 @@ type Executor interface {
 	Value(string) string
 	SetValue(string, string)
 }
-type Profile struct {
-	// ValidateSave requires affirmative device evidence; nil leaves saving unconfirmed.
-	ValidateSave func(context.Context, Result) error
-	// LegacySSHArguments are used only by opted-in RSA compatibility recovery.
+
+// Terminal is a platform's declarative CLI grammar: prompts, pager, error and
+// confirmation rules, and the command sequences for collection and saving.
+// Behavior that needs code lives on the Driver.
+type Terminal struct {
+	// LegacyCryptoArguments are used only by opted-in recovery for devices that
+	// still require weak SSH ciphers or SSH1.
 	// Nil defaults to SSH1 (-1); an explicit empty slice disables this recovery.
-	LegacySSHArguments                                                                 []string
+	LegacyCryptoArguments                                                              []string
 	Name                                                                               string
 	LoginPrompt, CommandPrompt, UsernamePrompt, PasswordPrompt, PrivilegePrompt, Pager expect.Pattern
 	PagerResponse, PrivilegeCommand                                                    string
@@ -272,10 +275,6 @@ type Profile struct {
 	LoginInteractions, Interactions                                                    []Interaction
 	ConfigCommands, SaveCommands                                                       []string
 	CommandTimeout                                                                     time.Duration
-	Prepare                                                                            func(context.Context, Command, Executor) (Command, bool, error)
-	AfterCommand                                                                       func(context.Context, Command, StepResult, Executor) error
-	AfterLogin                                                                         func(context.Context, StepResult) (LoginState, error)
-	ConfigStrategy                                                                     func() ConfigStrategy
 }
 
 // LoginState contains the device state discovered by AfterLogin.
@@ -289,9 +288,9 @@ type ConfigStrategy interface {
 	Finish(context.Context, Result) (string, error)
 }
 
-func (p Profile) clone() (Profile, error) {
+func (p Terminal) clone() (Terminal, error) {
 	if e := p.Validate(); e != nil {
-		return Profile{}, e
+		return Terminal{}, e
 	}
 	p.LoginInteractions = cloneInteractions(p.LoginInteractions)
 	p.Interactions = cloneInteractions(p.Interactions)
@@ -301,10 +300,10 @@ func (p Profile) clone() (Profile, error) {
 			(*list)[i] = clonePattern(r)
 		}
 	}
-	if p.LegacySSHArguments == nil {
-		p.LegacySSHArguments = []string{"-1"}
+	if p.LegacyCryptoArguments == nil {
+		p.LegacyCryptoArguments = []string{"-1"}
 	} else {
-		p.LegacySSHArguments = append([]string{}, p.LegacySSHArguments...)
+		p.LegacyCryptoArguments = append([]string{}, p.LegacyCryptoArguments...)
 	}
 	p.ConfigCommands = append([]string(nil), p.ConfigCommands...)
 	p.SaveCommands = append([]string(nil), p.SaveCommands...)
@@ -363,11 +362,18 @@ type ConnectionConfig struct {
 	KnownHosts                                 string
 	HostKeyPolicy                              HostKeyPolicy
 	SSHPath, TelnetPath                        string
-	LegacySSHArguments                         []string
+	LegacyCryptoArguments                      []string
 	AllowTelnetFallback                        bool
-	AllowLegacySSH                             bool
-	replaceHostKey                             bool
-	Challenges                                 []Interaction
+	// JumpHost routes SSH through "[user@]host[:port]" with ssh -J. The jump
+	// host's own key is checked by the user's normal SSH configuration.
+	// Telnet and Telnet fallback are rejected with a jump host.
+	JumpHost string
+	// ConnectRetries retries refused, unroutable or timed-out connections
+	// before any login prompt (0-5). Authentication is never retried.
+	ConnectRetries    int
+	AllowLegacyCrypto bool
+	replaceHostKey    bool
+	Challenges        []Interaction
 	// Logger is an explicitly injected cooperative writer. With empty LogLevel,
 	// it receives raw rendered/redacted response bytes (the low-level API).
 	// LogLevel selects structured text events; only debug includes responses.
@@ -391,7 +397,7 @@ func (c ConnectionConfig) MarshalJSON() ([]byte, error) {
 // Close must interrupt concurrent I/O; failed cleanup may be retried. A transport
 // may implement Authenticated(context.Context) error to persist authentication
 // evidence after login. That hook receives the admitted login context and must
-// synchronize with Close. The legacy Authenticated() error hook is rejected.
+// synchronize with Close.
 type TransportFactory func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error)
 type Option func(*options) error
 type options struct{ factory TransportFactory }

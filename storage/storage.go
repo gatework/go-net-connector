@@ -267,8 +267,7 @@ type Lock struct {
 	path, lockPath string
 }
 
-func (l *Lock) Path() string     { return l.path }
-func (l *Lock) LockPath() string { return l.lockPath }
+func (l *Lock) Path() string { return l.path }
 func (l *Lock) Close() error {
 	if l.file == nil {
 		return nil

@@ -232,8 +232,8 @@ func (s Selection) Evaluate(d Device) Decision {
 	return Decision{reasons}
 }
 func translateGlob(pattern string) string {
-	// Ruby fnmatch without PATHNAME permits '*' to cross '/'.
-	// Ruby accepts both [!...] and [^...] for class negation. Respect escapes.
+	// Glob semantics: '*' may cross '/', and both [!...] and [^...] negate a
+	// class. Escapes are respected.
 	translated := make([]byte, 0, len(pattern))
 	inClass := false
 	for i := 0; i < len(pattern); i++ {
@@ -252,7 +252,7 @@ func translateGlob(pattern string) string {
 		}
 		if pattern[i] == '[' && !inClass {
 			if i+2 < len(pattern) && pattern[i+1] == '!' && pattern[i+2] == ']' {
-				// Ruby treats the empty negated class as any single character.
+				// An empty negated class matches any single character.
 				translated = append(translated, '?')
 				i += 2
 				continue

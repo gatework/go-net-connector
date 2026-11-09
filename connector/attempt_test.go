@@ -10,7 +10,7 @@ import (
 )
 
 func TestFailedAttemptRetainsPartialResponse(t *testing.T) {
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"private-prefix"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"private-prefix"})
 	timeout := 20 * time.Millisecond
 	r, err := d.ExecuteCommand(t.Context(), Command{Text: "show", Timeout: &timeout}, ExecuteOptions{})
 	if !errors.Is(err, context.DeadlineExceeded) || len(r.Steps()) != 0 {
@@ -25,7 +25,7 @@ func TestFailedAttemptRetainsPartialResponse(t *testing.T) {
 	}
 }
 func TestRejectedAttemptIsNotSuccessfulStep(t *testing.T) {
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"% Invalid command\nsw#"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"% Invalid command\nsw#"})
 	r, err := d.ExecuteCommand(t.Context(), Command{Text: "change"}, ExecuteOptions{})
 	if !errors.Is(err, ErrDevice) || len(r.Steps()) != 0 || len(r.Attempts()) != 1 || !r.Attempts()[0].Complete() {
 		t.Fatalf("steps=%d attempts=%v err=%v", len(r.Steps()), r.Attempts(), err)

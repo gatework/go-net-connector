@@ -31,7 +31,7 @@ func TestBackupAutomaticallyDecodesDeviceOutput(t *testing.T) {
 				return []inventory.Device{{IP: "192.0.2.1", Vendor: "h3c"}}, nil
 			})
 			done := make(chan error, 1)
-			r.DeviceFactory = func(p connector.Profile, c connector.ConnectionConfig) (*connector.Device, error) {
+			r.DeviceFactory = func(p connector.Driver, c connector.ConnectionConfig) (*connector.Device, error) {
 				c.LoginTimeout, c.CommandTimeout = time.Second, time.Second
 				return connector.New(p, c, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
 					a, b := net.Pipe()

@@ -19,7 +19,7 @@ func TestTextOnlyBackupStrictEncodingAndNoSidecar(t *testing.T) {
 		{"gb18030", "description \x95\x34\xb2\x35", "description 𠮷"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			d, _ := fixtureDevice(t, fixtureProfile(), []string{"show config\r\n" + tc.wire + "\r\nsw#"})
+			d, _ := fixtureDevice(t, fixtureDriver(), []string{"show config\r\n" + tc.wire + "\r\nsw#"})
 			path := filepath.Join(t.TempDir(), "device.txt")
 			receipt, err := d.Backup(t.Context(), BackupOptions{Path: path, TextOnly: true})
 			if err != nil || !receipt.Complete() || !receipt.HasSavedEvidence() || !receipt.TextOnly || receipt.Source != nil || receipt.TextWarning != nil {
@@ -37,7 +37,7 @@ func TestTextOnlyBackupStrictEncodingAndNoSidecar(t *testing.T) {
 	}
 }
 func TestTextOnlyBackupEncodingFailureKeepsPreviousFile(t *testing.T) {
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"show config\r\ndescription 中文\xff\r\nsw#"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"show config\r\ndescription 中文\xff\r\nsw#"})
 	path := filepath.Join(t.TempDir(), "device.txt")
 	if err := os.WriteFile(path, []byte("previous"), 0600); err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestTextOnlyBackupEncodingFailureKeepsPreviousFile(t *testing.T) {
 }
 func TestTextOnlyBackupUnchangedNeedsNoSource(t *testing.T) {
 	wire := "show config\r\nconfiguration\r\nsw#"
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{wire, wire})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{wire, wire})
 	path := filepath.Join(t.TempDir(), "device.txt")
 	if _, err := d.Backup(t.Context(), BackupOptions{Path: path, TextOnly: true}); err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestTextOnlyBackupUnchangedNeedsNoSource(t *testing.T) {
 	}
 }
 func TestSessionEventsDoNotDependOnLoggerOrExposeContents(t *testing.T) {
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"secret-command\r\nPRIVATE_BODY\r\nsw#"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"secret-command\r\nPRIVATE_BODY\r\nsw#"})
 	var names []string
 	d.config.LogLevel = "error"
 	d.log.level = "error"
@@ -93,7 +93,7 @@ func TestSessionEventsDoNotDependOnLoggerOrExposeContents(t *testing.T) {
 	}
 }
 func TestSessionObserverFailureRetainsCompletedStep(t *testing.T) {
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"show\r\nvalue\r\nsw#"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"show\r\nvalue\r\nsw#"})
 	cause := errors.New("observer unavailable")
 	d.config.OnSessionEvent = func(_ context.Context, e SessionEvent) error {
 		if e.Name == "command_complete" {
@@ -108,7 +108,7 @@ func TestSessionObserverFailureRetainsCompletedStep(t *testing.T) {
 }
 
 func TestTextOnlyEncodingFailureDoesNotCreateArtifact(t *testing.T) {
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"show config\r\n中文\xff\r\nsw#"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"show config\r\n中文\xff\r\nsw#"})
 	path := filepath.Join(t.TempDir(), "device.txt")
 	if _, err := d.Backup(t.Context(), BackupOptions{Path: path, TextOnly: true}); err == nil {
 		t.Fatal("unknown encoding accepted")
@@ -140,7 +140,7 @@ func TestTextOnlyReceiptNeedsDurableEvidence(t *testing.T) {
 func TestSessionObserverFailureBeforeConnectionDoesNotOpenTransport(t *testing.T) {
 	cause := errors.New("progress failed")
 	opens := 0
-	d, err := New(fixtureProfile(), ConnectionConfig{Host: "fixture", OnSessionEvent: func(context.Context, SessionEvent) error { return cause }}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
+	d, err := New(fixtureDriver(), ConnectionConfig{Host: "fixture", OnSessionEvent: func(context.Context, SessionEvent) error { return cause }}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 		opens++
 		return nil, errors.New("unexpected transport")
 	}))
@@ -153,7 +153,7 @@ func TestSessionObserverFailureBeforeConnectionDoesNotOpenTransport(t *testing.T
 	}
 }
 func TestSessionObserverReentryIsBusy(t *testing.T) {
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"show\r\nvalue\r\nsw#"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"show\r\nvalue\r\nsw#"})
 	var reentry error
 	d.config.OnSessionEvent = func(ctx context.Context, e SessionEvent) error {
 		if e.Name == "command_start" {

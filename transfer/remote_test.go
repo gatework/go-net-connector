@@ -37,7 +37,7 @@ func TestRemoteBackupRequiresDialectCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := connector.New(declaration.Profile(), connector.ConnectionConfig{Host: "192.0.2.1"})
+	d, err := connector.New(declaration, connector.ConnectionConfig{Host: "192.0.2.1"})
 	if err != nil {
 		t.Fatal(err)
 	}

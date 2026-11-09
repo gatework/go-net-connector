@@ -1,13 +1,14 @@
 package bootstrap
 
 import (
+	"context"
 	"testing"
 
 	"github.com/gatework/go-net-connector/config"
 )
 
 func TestValidateTFTPUsesDefaultUploadTimeout(t *testing.T) {
-	snapshot, err := config.Load(config.Options{
+	snapshot, err := config.Load(context.Background(), config.Options{
 		Name:        "backup",
 		CWD:         t.TempDir(),
 		Home:        t.TempDir(),
@@ -24,7 +25,7 @@ func TestValidateTFTPUsesDefaultUploadTimeout(t *testing.T) {
 }
 
 func TestValidateTFTPAcceptsVendorScopedSourceFile(t *testing.T) {
-	snapshot, err := config.Load(config.Options{
+	snapshot, err := config.Load(context.Background(), config.Options{
 		Name:        "backup",
 		CWD:         t.TempDir(),
 		Home:        t.TempDir(),

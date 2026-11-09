@@ -34,13 +34,34 @@ func batchFixture(t *testing.T, mode string) (string, map[string]any) {
 	writeBatchFixture(t, directory, mode, []any{row})
 	return directory, row
 }
+
+// writeBatchFixture writes report.json. Tests describe each row with flat
+// fields (path, bytes, sha256, local_file, verification), translated here to
+// the v3 artifact shape so negative cases can mutate one field at a time.
 func writeBatchFixture(t *testing.T, directory, mode string, rows []any) {
 	t.Helper()
-	b, e := json.Marshal(map[string]any{"schema_version": 2, "mode": mode, "success": false, "devices": rows})
+	devices := make([]any, 0, len(rows))
+	for _, item := range rows {
+		row := item.(map[string]any)
+		device := map[string]any{"host": row["host"], "name": row["name"], "status": row["status"]}
+		if mode == "tftp" {
+			device["artifacts"] = map[string]any{
+				"transfer": map[string]any{"remote_path": row["path"], "verification": row["verification"]},
+				"archive": map[string]any{
+					"server": map[string]any{"bytes": row["bytes"], "sha256": row["sha256"], "archive_path": "/srv/archive", "verified": row["verification"] == "server_verified"},
+					"local":  map[string]any{"path": row["local_file"], "state": "committed"}, "cleanup": "complete",
+				},
+			}
+		} else {
+			device["artifacts"] = map[string]any{"backup": map[string]any{"path": row["path"], "bytes": row["bytes"], "sha256": row["sha256"]}}
+		}
+		devices = append(devices, device)
+	}
+	b, e := json.Marshal(map[string]any{"schema_version": 3, "operation": mode, "success": false, "devices": devices})
 	if e != nil {
 		t.Fatal(e)
 	}
-	if e = os.WriteFile(filepath.Join(directory, "summary.json"), b, 0600); e != nil {
+	if e = os.WriteFile(filepath.Join(directory, "report.json"), b, 0600); e != nil {
 		t.Fatal(e)
 	}
 }
@@ -91,7 +112,7 @@ func TestReadBatchSavedRejectsInvalidEvidence(t *testing.T) {
 			}
 			writeBatchFixture(t, d, mode, rows)
 			if kind == "schema" {
-				os.WriteFile(filepath.Join(d, "summary.json"), []byte(`{"schema_version":1}`), 0600)
+				os.WriteFile(filepath.Join(d, "report.json"), []byte(`{"schema_version":1}`), 0600)
 			}
 			if b, _, e := ReadBatchSaved(t.Context(), d, "192.0.2.1"); e == nil || len(b) != 0 {
 				t.Fatal("accepted invalid evidence", kind, e)
@@ -130,12 +151,12 @@ func TestReadBatchSavedDoesNotReadReportAbsoluteLocation(t *testing.T) {
 
 func TestReadBatchSavedRejectsSummarySymlink(t *testing.T) {
 	d, _ := batchFixture(t, "backup")
-	path := filepath.Join(d, "summary.json")
+	path := filepath.Join(d, "report.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	outside := filepath.Join(t.TempDir(), "summary.json")
+	outside := filepath.Join(t.TempDir(), "report.json")
 	if err = os.WriteFile(outside, data, 0600); err != nil {
 		t.Fatal(err)
 	}

@@ -29,13 +29,8 @@ type Registry struct {
 	inventoryOrder []dialect.Platform
 }
 
-// inventoryMatcher belongs to the registry that consumes platform matchers.
-type inventoryMatcher interface {
-	MatchInventory(dialect.InventoryIdentity) bool
-}
-
-// NewBuiltinRegistry returns the process-wide immutable catalog. Each
-// dialect returns a detached connector profile for runtime use.
+// NewBuiltinRegistry returns the process-wide immutable catalog. Platforms
+// return detached terminal copies, so callers may customize them safely.
 func NewBuiltinRegistry() *Registry { return builtinRegistry() }
 
 var builtinRegistry = sync.OnceValue(func() *Registry {
@@ -92,8 +87,7 @@ func (r *Registry) ResolvePlatform(identity dialect.InventoryIdentity) (string, 
 	}
 	identity = normalizeInventoryIdentity(identity)
 	for _, platform := range r.inventoryOrder {
-		matcher, ok := platform.(inventoryMatcher)
-		if ok && matcher.MatchInventory(identity) {
+		if platform.MatchInventory(identity) {
 			return platform.Name(), true
 		}
 	}

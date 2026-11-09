@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gatework/go-net-connector/internal/ifname"
 	"github.com/gatework/go-net-connector/vendors"
 )
 
@@ -45,7 +46,7 @@ func TestNameAndDescriptionIdentity(t *testing.T) {
 	if EquivalentDescription("To_peer_Gi1/0/2", "To_peer_Te1/0/2") {
 		t.Fatal("different speed equal")
 	}
-	if got := ConfigName("Te1/0/2"); got != "TenGigabitEthernet1/0/2" {
+	if got := ifname.ConfigName("Te1/0/2"); got != "TenGigabitEthernet1/0/2" {
 		t.Fatalf("configuration interface = %q", got)
 	}
 }

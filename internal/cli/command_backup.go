@@ -19,11 +19,18 @@ func addBackupCommands(root *cobra.Command, leaf commandBuilder) {
 		bindTFTPFlags(c)
 		c.Example = "  netman backup tftp --tftp-server 192.0.2.9 --tftp-root /srv/tftp --success-policy verified --json"
 	})
+	leaf(backup, "remote", "设备原生远程导出（SCP/FTP），如 Juniper", "remote", "run", func(c *cobra.Command, o *options) {
+		bindOperation(c, o, true)
+		bindBackup(c, o)
+		bindRemoteFlags(c, o)
+		c.Example = "  netman backup remote --vendor juniper --remote-server 192.0.2.9 --remote-path backups --remote-username backup"
+	})
 	leaf(backup, "plan", "预览备份目标，不连接设备或归档服务", "backup", "plan", func(c *cobra.Command, o *options) {
 		bindOperation(c, o, false)
 		bindBackup(c, o)
 		bindTFTPFlags(c)
-		c.Flags().String("method", "cli", "备份`方式`：cli 或 tftp")
+		bindRemoteFlags(c, o)
+		c.Flags().String("method", "cli", "备份`方式`：cli、tftp 或 remote")
 		c.Example = "  netman backup plan --method cli --json\n  netman backup plan --method tftp --tftp-server 192.0.2.9"
 	})
 	exp := leaf(backup, "export <IP>", "从明确指定的批次导出配置，不访问网络", "backup", "export", func(c *cobra.Command, o *options) {
@@ -41,5 +48,12 @@ func addBackupCommands(root *cobra.Command, leaf commandBuilder) {
 		return nil
 	}
 	exp.Example = "  netman backup export 192.0.2.1 --batch ./backups/2026-11-03_10-00-00 --output ./saved.txt"
+	diff := leaf(backup, "diff <IP>", "比较同一设备在两个批次中的配置，不访问网络", "backup", "diff", func(c *cobra.Command, o *options) {
+		c.Flags().StringVar(&o.diffFrom, "from", "", "较早的批次`目录`")
+		c.Flags().StringVar(&o.diffTo, "to", "", "较新的批次`目录`")
+		c.Flags().BoolVar(&o.json, "json", false, "以 JSON 输出差异统计与内容")
+	})
+	diff.Args = exp.Args
+	diff.Example = "  netman backup diff 192.0.2.1 --from ./backups/2026-11-01_10-00-00 --to ./backups/2026-11-08_10-00-00"
 	root.AddCommand(backup)
 }

@@ -10,7 +10,7 @@ import (
 )
 
 func TestSessionObserversAreBoundPerServicesCopy(t *testing.T) {
-	policy, err := config.Load(config.Options{Name: "backup", CWD: t.TempDir(), Home: t.TempDir(), Directories: []string{}, Defaults: config.Defaults("backup")})
+	policy, err := config.Load(context.Background(), config.Options{Name: "backup", CWD: t.TempDir(), Home: t.TempDir(), Directories: []string{}, Defaults: config.Defaults("backup")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,14 +24,14 @@ func TestSessionObserversAreBoundPerServicesCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	var configs []connector.ConnectionConfig
-	base = base.WithDeviceFactory(func(_ connector.Profile, c connector.ConnectionConfig) (*connector.Device, error) {
+	base = base.WithDeviceFactory(func(_ connector.Driver, c connector.ConnectionConfig) (*connector.Device, error) {
 		configs = append(configs, c)
 		return nil, nil
 	})
 	observed := 0
 	scoped := base.WithSessionObserver(func(context.Context, connector.SessionEvent) error { observed++; return nil })
 	for _, services := range []*Services{scoped, base} {
-		if _, err = services.Device(t.Context(), fleet.Record{Host: "192.0.2.1", Vendor: "h3c"}); err != nil {
+		if _, err = services.DeviceWithLogger(t.Context(), fleet.Record{Host: "192.0.2.1", Vendor: "h3c"}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

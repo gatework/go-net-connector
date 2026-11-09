@@ -15,6 +15,7 @@ import (
 
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/vendors"
+	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
 type fixture struct {
@@ -73,7 +74,7 @@ func newFixture(t *testing.T, vendor string) *fixture {
 				switch {
 				case command == fixtureNeighborCommands[vendor]:
 					body = f.neighbor
-				case command == p.ConfigCommands[len(p.ConfigCommands)-1]:
+				case command == p.Terminal().ConfigCommands[len(p.Terminal().ConfigCommands)-1]:
 					ending := "!\nend"
 					if vendor == "h3c" || vendor == "h3c_wireless" {
 						ending = "#"
@@ -85,7 +86,7 @@ func newFixture(t *testing.T, vendor string) *fixture {
 					if f.partial && f.desc == "planned" {
 						body += "interface malformed extra fields\n description ignored\n"
 					}
-				case command == p.SaveCommands[0]:
+				case command == p.Terminal().SaveCommands[0]:
 					body = f.saveOutput
 				case command == "system-view" || command == "configure" || command == "configure terminal":
 					f.mode = "config"
@@ -133,12 +134,12 @@ func newFixture(t *testing.T, vendor string) *fixture {
 	return f
 }
 
-func platformProfile(vendor string) connector.Profile {
+func platformProfile(vendor string) dialect.Platform {
 	declaration, err := vendors.NewBuiltinRegistry().Lookup(vendor)
 	if err != nil {
 		panic(err)
 	}
-	return declaration.Profile()
+	return declaration
 }
 func (f *fixture) prompt() string {
 	if f.vendor == "h3c" || f.vendor == "h3c_wireless" {
@@ -165,7 +166,7 @@ func TestApplyRevalidatesChangesReadsBackThenSaves(t *testing.T) {
 	for _, vendor := range []string{"h3c", "h3c_wireless", "cisco_ios", "cisco_nxos", "hillstone"} {
 		t.Run(vendor, func(t *testing.T) {
 			f := newFixture(t, vendor)
-			p, e := f.topology.Plan(context.Background(), FormatOptions{Formatter: planned})
+			p, e := planTopology(f.topology, FormatOptions{Formatter: planned})
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -192,7 +193,7 @@ func TestApplyPreflightAndStaleRefusal(t *testing.T) {
 	for _, fault := range []string{"confirmation", "forged", "duplicate", "description", "chassis"} {
 		t.Run(fault, func(t *testing.T) {
 			f := newFixture(t, "h3c")
-			p, e := f.topology.Plan(context.Background(), FormatOptions{Formatter: planned})
+			p, e := planTopology(f.topology, FormatOptions{Formatter: planned})
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -234,7 +235,7 @@ func TestApplyReadbackFailuresNeverSave(t *testing.T) {
 	for _, fault := range []string{"mismatch", "partial", "change_eof", "verify_eof", "persist_eof", "prompt_only", "hidden_failure"} {
 		t.Run(fault, func(t *testing.T) {
 			f := newFixture(t, "cisco_ios")
-			p, e := f.topology.Plan(context.Background(), FormatOptions{Formatter: planned})
+			p, e := planTopology(f.topology, FormatOptions{Formatter: planned})
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -292,12 +293,12 @@ func TestSyncNoOpAndLeaseCoversAllPhases(t *testing.T) {
 			t.Errorf("lease released: %v", e)
 		}
 	}
-	r, e := f.topology.Sync(context.Background(), FormatOptions{Formatter: planned})
+	r, e := syncTopology(f.topology, FormatOptions{Formatter: planned})
 	if e != nil || !r.Persisted {
 		t.Fatalf("%#v %v", r, e)
 	}
 	start := len(f.sent())
-	r, e = f.topology.Sync(context.Background(), FormatOptions{Formatter: planned})
+	r, e = syncTopology(f.topology, FormatOptions{Formatter: planned})
 	if e != nil || r.Persisted {
 		t.Fatalf("no-op %#v %v", r, e)
 	}
@@ -310,7 +311,7 @@ func TestSyncNoOpAndLeaseCoversAllPhases(t *testing.T) {
 
 func TestPersistenceCallbackFailureRetainsPrimaryErrorAndCompletedSave(t *testing.T) {
 	f := newFixture(t, "cisco_ios")
-	p, e := f.topology.Plan(context.Background(), FormatOptions{Formatter: planned})
+	p, e := planTopology(f.topology, FormatOptions{Formatter: planned})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -348,10 +349,10 @@ func TestReadOnlyAndUnsupportedOperationsAreOffline(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			if _, e = top.Plan(context.Background(), FormatOptions{}); !errors.Is(e, ErrUnsupported) {
+			if _, e = planTopology(top, FormatOptions{}); !errors.Is(e, ErrUnsupported) {
 				t.Fatalf("plan: %v", e)
 			}
-			if _, e = top.Sync(context.Background(), FormatOptions{}); !errors.Is(e, ErrUnsupported) {
+			if _, e = syncTopology(top, FormatOptions{}); !errors.Is(e, ErrUnsupported) {
 				t.Fatalf("sync: %v", e)
 			}
 			if opened != 0 {
@@ -375,11 +376,8 @@ func TestTopologyRejectsBehaviorsNotDeclaredByPlatform(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = top.Neighbors(context.Background()); !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("neighbors: %v", err)
-	}
-	if _, _, err = top.Descriptions(context.Background()); !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("descriptions: %v", err)
+	if _, err = top.Audit(context.Background(), FormatOptions{}); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("audit: %v", err)
 	}
 	if _, err = top.Discover(context.Background()); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("discover: %v", err)
@@ -434,7 +432,7 @@ func TestFortinetVersionAndAuthorizedViewSelection(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			peers, r, e := top.Neighbors(context.Background())
+			peers, r, e := neighborsOnly(top)
 			if tc.valid && (e != nil || len(peers) != 0 || len(r.Receipts) != 2) {
 				t.Fatalf("%#v %v", r, e)
 			}
@@ -488,7 +486,7 @@ func TestReadOnlyPlatformCandidateErrorCode(t *testing.T) {
 		p := platformProfile(v)
 		d, _ := connector.New(p, connector.ConnectionConfig{Host: "fixture"})
 		top, _ := New(d, vendors.NewBuiltinRegistry())
-		_, e := top.Sync(context.Background(), FormatOptions{})
+		_, e := syncTopology(top, FormatOptions{})
 		var domain *Error
 		if !errors.As(e, &domain) || domain.Code != "candidate_isolation_unavailable" {
 			t.Fatalf("%s error %v", v, e)
@@ -501,7 +499,7 @@ func TestEveryWriteDialectStopsAtEachFailedStage(t *testing.T) {
 		for _, phase := range []string{"enter", "change", "leave", "verify", "persist"} {
 			t.Run(vendor+"/"+phase, func(t *testing.T) {
 				f := newFixture(t, vendor)
-				p, e := f.topology.Plan(context.Background(), FormatOptions{Formatter: planned})
+				p, e := planTopology(f.topology, FormatOptions{Formatter: planned})
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -554,11 +552,11 @@ func TestEveryWriteDialectStopsAtEachFailedStage(t *testing.T) {
 }
 func TestDiscoveryPublicBoundariesAndParsingFailureReceipts(t *testing.T) {
 	f := newFixture(t, "cisco_ios")
-	descs, r, e := f.topology.Descriptions(context.Background())
-	if e != nil || descs["gigabitethernet1/0/1"] != "original" || len(r.Receipts) != 2 {
-		t.Fatalf("descriptions %#v %#v %v", descs, r, e)
-	}
 	s, e := f.topology.Discover(context.Background())
+	if e != nil || s.Descriptions["gigabitethernet1/0/1"] != "original" {
+		t.Fatalf("descriptions %#v %v", s, e)
+	}
+	s, e = f.topology.Discover(context.Background())
 	if e != nil || len(s.Neighbors) != 1 || len(s.Receipts) != 3 {
 		t.Fatalf("snapshot %#v %v", s, e)
 	}
@@ -570,7 +568,7 @@ func TestDiscoveryPublicBoundariesAndParsingFailureReceipts(t *testing.T) {
 }
 func TestApplySnapshotsPlanBeforeCallbacks(t *testing.T) {
 	f := newFixture(t, "cisco_ios")
-	p, e := f.topology.Plan(context.Background(), FormatOptions{Formatter: planned})
+	p, e := planTopology(f.topology, FormatOptions{Formatter: planned})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -602,4 +600,40 @@ func TestAuditFormatterFailurePreservesCollectionReceipts(t *testing.T) {
 			t.Fatalf("receipt %d: %v", i, receipt.Command())
 		}
 	}
+}
+
+// planTopology plans a description change as the workflow does: one audit
+// lease, whose plan exists only for platforms that can write.
+func planTopology(c *Client, opts FormatOptions) (Plan, error) {
+	if err := c.supportsWrite(); err != nil {
+		return Plan{}, err
+	}
+	a, err := c.Audit(context.Background(), opts)
+	if err != nil || a.Plan == nil {
+		return Plan{Receipts: a.Receipts}, err
+	}
+	return *a.Plan, nil
+}
+
+// syncTopology audits, then applies the resulting plan with confirmation.
+func syncTopology(c *Client, opts FormatOptions) (Result, error) {
+	p, err := planTopology(c, opts)
+	if err != nil {
+		return Result{}, err
+	}
+	return c.Apply(context.Background(), p, ApplyOptions{Confirmed: true})
+}
+
+// neighborsOnly runs neighbor discovery alone in one lease, without
+// configuration collection, to isolate the neighbor command flow.
+func neighborsOnly(c *Client) (peers []Neighbor, result Result, err error) {
+	if err = c.supportsNeighbors(); err != nil {
+		return
+	}
+	err = c.device.WithOperation(context.Background(), func(ctx context.Context, op *connector.Operation) error {
+		var e error
+		peers, e = c.neighbors(ctx, op, &result)
+		return e
+	})
+	return
 }

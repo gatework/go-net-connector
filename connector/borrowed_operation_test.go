@@ -48,7 +48,7 @@ func (c *borrowedConn) Close() error {
 	return err
 }
 
-func borrowedFixture(t *testing.T, p Profile, cfg ConnectionConfig, exchanges []borrowedExchange, failCloses int32, closeErr error) (*Device, *borrowedWire) {
+func borrowedFixture(t *testing.T, p StaticDriver, cfg ConnectionConfig, exchanges []borrowedExchange, failCloses int32, closeErr error) (*Device, *borrowedWire) {
 	t.Helper()
 	wire := new(borrowedWire)
 	var peers sync.WaitGroup
@@ -105,7 +105,7 @@ func connectBorrowed(t *testing.T, d *Device) {
 }
 
 func TestBorrowedOperationRequiresConnectedLease(t *testing.T) {
-	d, wire := borrowedFixture(t, fixtureProfile(), ConnectionConfig{}, nil, 0, nil)
+	d, wire := borrowedFixture(t, fixtureDriver(), ConnectionConfig{}, nil, 0, nil)
 	called := false
 	run := func(context.Context, *Operation) error { called = true; return nil }
 	operationErr, cleanupErr := d.WithBorrowedOperation(t.Context(), run)
@@ -131,7 +131,7 @@ func TestBorrowedOperationRequiresConnectedLease(t *testing.T) {
 }
 
 func TestBorrowedRejectionPreservesOnlyVerifiedAttempt(t *testing.T) {
-	d, wire := borrowedFixture(t, fixtureProfile(), ConnectionConfig{}, []borrowedExchange{
+	d, wire := borrowedFixture(t, fixtureDriver(), ConnectionConfig{}, []borrowedExchange{
 		{"query", "% Invalid input\nnext#", false},
 		{"quit", "sw#", false},
 	}, 0, nil)
@@ -172,7 +172,7 @@ func TestBorrowedRejectionPreservesOnlyVerifiedAttempt(t *testing.T) {
 }
 
 func TestBorrowedPreservationValidationBeforeWrite(t *testing.T) {
-	d, wire := borrowedFixture(t, fixtureProfile(), ConnectionConfig{}, nil, 0, nil)
+	d, wire := borrowedFixture(t, fixtureDriver(), ConnectionConfig{}, nil, 0, nil)
 	opts := ExecuteOptions{PreserveSessionOnRejection: true}
 	if _, err := d.ExecuteCommand(t.Context(), Command{Text: "query"}, opts); !errors.Is(err, ErrInvalid) || wire.opens.Load() != 0 {
 		t.Fatalf("ordinary command=%v opens=%d", err, wire.opens.Load())
@@ -253,7 +253,7 @@ func TestBorrowedRejectionRetiresOnIncompleteOrLateFailure(t *testing.T) {
 				response = "accepted\nsw#"
 				opts.OnReceipt = func(context.Context, StepResult) error { return lateErr }
 			}
-			d, wire := borrowedFixture(t, fixtureProfile(), cfg, []borrowedExchange{{"query", response, eof}}, 0, nil)
+			d, wire := borrowedFixture(t, fixtureDriver(), cfg, []borrowedExchange{{"query", response, eof}}, 0, nil)
 			connectBorrowed(t, d)
 			operationErr, cleanupErr := d.WithBorrowedOperation(ctx, func(ctx context.Context, op *Operation) error {
 				result, err := op.ExecuteCommand(ctx, Command{Text: "query"}, opts)
@@ -284,7 +284,7 @@ func TestBorrowedRetireGuardsAndCleanupOwnership(t *testing.T) {
 	for _, kind := range []string{"ignored_cleanup", "canceled", "callback_error"} {
 		t.Run(kind, func(t *testing.T) {
 			closeErr := errors.New("private cleanup detail")
-			d, wire := borrowedFixture(t, fixtureProfile(), ConnectionConfig{}, nil, 2, closeErr)
+			d, wire := borrowedFixture(t, fixtureDriver(), ConnectionConfig{}, nil, 2, closeErr)
 			connectBorrowed(t, d)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
@@ -341,7 +341,7 @@ func TestBorrowedRetireGuardsAndCleanupOwnership(t *testing.T) {
 
 func TestBorrowedFailureKeepsCleanupSeparateWhenCallbackIgnoresErrors(t *testing.T) {
 	closeErr := errors.New("transport cleanup failed")
-	d, wire := borrowedFixture(t, fixtureProfile(), ConnectionConfig{}, []borrowedExchange{{"query", "% Invalid input\nsw#", false}}, 2, closeErr)
+	d, wire := borrowedFixture(t, fixtureDriver(), ConnectionConfig{}, []borrowedExchange{{"query", "% Invalid input\nsw#", false}}, 2, closeErr)
 	connectBorrowed(t, d)
 	operationErr, cleanupErr := d.WithBorrowedOperation(t.Context(), func(ctx context.Context, op *Operation) error {
 		_, err := op.ExecuteCommand(ctx, Command{Text: "query"}, ExecuteOptions{})
@@ -356,7 +356,7 @@ func TestBorrowedFailureKeepsCleanupSeparateWhenCallbackIgnoresErrors(t *testing
 }
 
 func TestBorrowedRetireRejectsReentryAndCloseCancelsCallback(t *testing.T) {
-	d, wire := borrowedFixture(t, fixtureProfile(), ConnectionConfig{}, []borrowedExchange{{"query", "accepted\nsw#", false}}, 0, nil)
+	d, wire := borrowedFixture(t, fixtureDriver(), ConnectionConfig{}, []borrowedExchange{{"query", "accepted\nsw#", false}}, 0, nil)
 	connectBorrowed(t, d)
 	operationErr, cleanupErr := d.WithBorrowedOperation(t.Context(), func(ctx context.Context, op *Operation) error {
 		result, err := op.ExecuteCommand(ctx, Command{Text: "query"}, ExecuteOptions{OnReceipt: func(ctx context.Context, _ StepResult) error {
@@ -390,7 +390,7 @@ func TestBorrowedRetireRejectsReentryAndCloseCancelsCallback(t *testing.T) {
 
 func TestBorrowedScopeJoinsCallAndRetainsCleanup(t *testing.T) {
 	closeErr := errors.New("transport cleanup failed")
-	d, wire := borrowedFixture(t, fixtureProfile(), ConnectionConfig{}, []borrowedExchange{{"query", "accepted\nsw#", false}}, 2, closeErr)
+	d, wire := borrowedFixture(t, fixtureDriver(), ConnectionConfig{}, []borrowedExchange{{"query", "accepted\nsw#", false}}, 2, closeErr)
 	connectBorrowed(t, d)
 	entered := make(chan struct{})
 	callDone := make(chan error, 1)
@@ -417,7 +417,7 @@ func TestBorrowedScopeJoinsCallAndRetainsCleanup(t *testing.T) {
 func TestBorrowedFinalObserverCancellationRetiresAcceptedResponse(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	d, _ := borrowedFixture(t, fixtureProfile(), ConnectionConfig{OnSessionEvent: func(_ context.Context, event SessionEvent) error {
+	d, _ := borrowedFixture(t, fixtureDriver(), ConnectionConfig{OnSessionEvent: func(_ context.Context, event SessionEvent) error {
 		if event.Name == "operation_complete" {
 			cancel()
 		}
@@ -439,7 +439,7 @@ func TestBorrowedFinalObserverCancellationRetiresAcceptedResponse(t *testing.T) 
 func TestBorrowedRecoveredFinalObserverPanicStillRetires(t *testing.T) {
 	closeErr := errors.New("transport cleanup failed")
 	observerErr := errors.New("observer panic")
-	d, wire := borrowedFixture(t, fixtureProfile(), ConnectionConfig{OnSessionEvent: func(_ context.Context, event SessionEvent) error {
+	d, wire := borrowedFixture(t, fixtureDriver(), ConnectionConfig{OnSessionEvent: func(_ context.Context, event SessionEvent) error {
 		if event.Name == "operation_complete" {
 			panic(observerErr)
 		}
@@ -469,10 +469,10 @@ func TestBorrowedConfigurationFailureRetiresOnlyOnce(t *testing.T) {
 	for _, save := range []bool{false, true} {
 		t.Run(fmt.Sprint(save), func(t *testing.T) {
 			closeErr := errors.New("transport cleanup failed")
-			profile := fixtureProfile()
+			profile := fixtureDriver()
 			command, response, wantErr := "show config", "% Invalid input\nsw#", ErrDevice
 			if save {
-				profile.SaveCommands = []string{"save"}
+				profile.Grammar.SaveCommands = []string{"save"}
 				command, response, wantErr = "save", "done\nsw#", ErrUnconfirmed
 			}
 			d, wire := borrowedFixture(t, profile, ConnectionConfig{}, []borrowedExchange{{command, response, false}}, 2, closeErr)
@@ -497,7 +497,7 @@ func TestBorrowedConfigurationFailureRetiresOnlyOnce(t *testing.T) {
 }
 
 func TestBorrowedRetirementNeedsExplicitReconnect(t *testing.T) {
-	d, wire := borrowedFixture(t, fixtureProfile(), ConnectionConfig{}, nil, 0, nil)
+	d, wire := borrowedFixture(t, fixtureDriver(), ConnectionConfig{}, nil, 0, nil)
 	connectBorrowed(t, d)
 	operationErr, cleanupErr := d.WithBorrowedOperation(t.Context(), func(_ context.Context, op *Operation) error { return op.Retire() })
 	if operationErr != nil || cleanupErr != nil {

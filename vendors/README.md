@@ -9,7 +9,7 @@ Inventory 设备厂商/系统/型号
   → fleet 应用主机覆盖、设备规则、厂商覆盖
   → Registry 的内建身份识别
   → Registry.Lookup(规范平台键)
-  → Platform.Profile() 建立独立会话配置
+  → connector.New(platform, …)：平台对象即设备驱动（Terminal + 行为）
   → 消费端定义的可选拓扑、TFTP、远程备份行为接口
   → workflow 汇总设备结果与证据
 ```
@@ -25,7 +25,7 @@ Inventory 设备厂商/系统/型号
 - `dialect/`：稳定的 `Platform`、`Registry` 叶子接口和跨包数据类型，不定义 workflow 能力接口。
 - `registry.go`：唯一的静态内建目录、平台键和内建身份匹配优先顺序。
 - `<family>/`：每个厂商家族直接位于 `vendors` 下，集中放置该家族的方言、命令、提示符、清单匹配及实际支持的能力策略。文件按业务职责拆分，不为统一目录形状添加空文件。
-- `internal/driver/`：跨厂商共享的 Profile、配置采集、拓扑委托、保存回执校验和 TFTP 骨架。这里不放某个厂商专属命令或提示符。
+- `internal/driver/`：跨厂商共享的 `Base`（Terminal、配置采集工厂、保存确认）、`TopologyReader`、配置采集、拓扑委托、保存回执校验和 TFTP 骨架。这里不放某个厂商专属命令或提示符。
 - `internal/topology/`：厂商拓扑解析共用的 TextFSM 执行、字段映射、引号解码和重复冲突检查。命令、模板选择、计数规则及完整性策略放在对应家族包。
 - `../internal/ifname/`：拓扑匹配和配置命令共用的接口名称规范化实现。
 - `../textfsm/templates/`：TextFSM 模板及索引。模板路径由所属平台拓扑策略声明。
@@ -49,7 +49,7 @@ H3C/Wireless 和 IOS/NX-OS 在家族包内共享稳定规则，同时保留各�
 
 ## 内建平台能力矩阵
 
-矩阵来自 `Profile` 命令声明及消费端能力接口断言；它描述源码当前声明的支持范围，不代表实机兼容性。配置列表示 CLI 配置采集策略；“保存命令”表示 Profile 声明通用保存脚本，成功仍需正向保存回执。拓扑按发现、接口描述读取、接口身份映射和描述写入分别列出。
+矩阵来自 Terminal 命令声明及消费端能力接口断言（各家族 `capabilities_test.go` 在编译期校验）；它描述源码当前声明的支持范围，不代表实机兼容性。配置列表示 CLI 配置采集策略；“保存命令”表示 Terminal 声明通用保存脚本，成功仍需正向保存回执。拓扑按发现、接口描述读取、接口身份映射和描述写入分别列出。
 
 | 平台 | 配置采集 | 保存命令 | 邻居发现 | 描述读取 | 接口映射 | 描述写入 | TFTP | 原生远程备份 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -70,13 +70,14 @@ H3C/Wireless 和 IOS/NX-OS 在家族包内共享稳定规则，同时保留各�
 
 ## 新增或扩展平台
 
-1. 先确认权威的平台键、厂商/OS/型号字段和 Ruby 对照行为。没有可靠证据的能力先不声明。
-2. 在现有家族包中新增平台类型；只有业务规则确实属于不同家族时才新建包。构造函数返回导出的具体平台类型（满足 `dialect.Platform`），使调用方可以命名该类型并断言能力接口。读取类拓扑能力用 `driver.NewTopologyReader` 组合；共享 Profile 基础项及 `driver.PositionMarkerCommandErrors`、`driver.YesNoConfirmations` 等按 CLI 机制命名的规则，平台差异留在当前家族包。
-3. 在 `inventory.go` 实现平台私有的 inventory matcher。Registry 会将厂商、OS、型号统一转换为小写 ASCII 词组后再调用；保留 `registry.go` 的平台声明顺序，以免重叠标签改变既有归属。fleet 消费 `fleet.PlatformResolver`。
-4. 只实现设备实际支持的消费端能力接口：拓扑接口定义在 `topology`，传输接口定义在 `transfer`。配置采集策略负责提示符切换、结果选择和文本清理；保存成功必须匹配正向签名，单独看到命令提示符不算成功。
-5. 若支持拓扑，在家族 `topology.go` 组装模板、记录计数、配置校验、接口规范化及写入模式；把模板放入对应目录并补足完整/空结果/异常输出夹具。
-6. 若支持 TFTP 或远程导出，在家族传输文件中声明参数校验、源文件发现、命令交互、完成证据和回执元数据。工作流超时、路径安全及服务端核验仍由 `transfer` 负责。
-7. 将规范键及内建优先顺序加入 `registry.go`，并加入匹配、Profile 隔离、Ruby parity 和能力边界测试。
-8. 执行 `go test ./vendors/... ./fleet ./topology ./transfer` 与 `go test ./...`；不得把静态夹具测试描述成真实设备验收。
+1. 先确认权威的平台键、厂商/OS/型号字段和实际设备行为（提示符、错误、分页、保存回执样本）。没有可靠证据的能力先不声明。
+2. 在现有家族包中新增平台类型；只有业务规则确实属于不同家族时才新建包。构造函数返回导出的具体平台类型（满足 `dialect.Platform`），使调用方可以命名该类型并断言能力接口。平台类型嵌入 `driver.Base`（由 `driver.BaseTerminal` + `driver.NewBase` 构造），读取类拓扑能力用 `driver.NewTopologyReader` 组合；需要代码的厂商行为写成平台方法，例如 H3C 的 `PrepareCommand/AfterCommand`、Radware 的 `AfterLogin`。共享 `driver.PositionMarkerCommandErrors`、`driver.YesNoConfirmations` 等按 CLI 机制命名的规则，平台差异留在当前家族包。
+3. 在 `inventory.go` 实现 `MatchInventory`（`dialect.Platform` 的一部分）。Registry 会将厂商、OS、型号统一转换为小写 ASCII 词组后再调用；保留 `registry.go` 的平台声明顺序，以免重叠标签改变既有归属。fleet 消费 `fleet.PlatformResolver`。
+4. 声明平台只读命令：嵌入 `driver.ReadOnlyCommands{Verbs: …}`（路径式菜单用 `PathPrefixes`），供 `netman exec` 在连接前判定；未列入的命令一律视为可能写入。
+5. 只实现设备实际支持的消费端能力接口：拓扑接口定义在 `topology`，传输接口定义在 `transfer`。配置采集策略负责提示符切换、结果选择和文本清理；保存成功必须匹配正向签名，单独看到命令提示符不算成功。
+6. 若支持拓扑，在家族 `topology.go` 组装模板、记录计数、配置校验、接口规范化及写入模式；把模板放入对应目录并补足完整/空结果/异常输出夹具。
+7. 若支持 TFTP 或远程导出，在家族传输文件中声明参数校验、源文件发现、命令交互、完成证据和回执元数据。工作流超时、路径安全及服务端核验仍由 `transfer` 负责。
+8. 将规范键及内建优先顺序加入 `registry.go`，并加入匹配、Terminal 副本隔离、设备交互 golden 和能力边界测试，并在家族 `capabilities_test.go` 声明所实现的能力接口。
+9. 执行 `go test ./vendors/... ./fleet ./topology ./transfer` 与 `go test ./...`；不得把静态夹具测试描述成真实设备验收。
 
 内建目录是编译期静态组合，不加载运行时插件。通常增加平台只需家族包、Registry 注册、模板和测试，不需要在各个 workflow 重复写厂商分支。

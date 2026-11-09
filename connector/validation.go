@@ -7,8 +7,8 @@ import (
 	expect "github.com/gatework/go-expect"
 )
 
-// Validate checks profile declarations without applying defaults or invoking hooks.
-func (p Profile) Validate() error {
+// Validate checks terminal declarations without applying defaults.
+func (p Terminal) Validate() error {
 	if p.Name == "" || p.LoginPrompt.IsZero() || p.CommandPrompt.IsZero() || p.CommandTimeout < 0 {
 		return ErrInvalid
 	}
@@ -37,7 +37,7 @@ func (p Profile) Validate() error {
 			}
 		}
 	}
-	for _, arg := range p.LegacySSHArguments {
+	for _, arg := range p.LegacyCryptoArguments {
 		if arg == "" || strings.ContainsAny(arg, "\x00\r\n") {
 			return ErrInvalid
 		}
@@ -51,6 +51,10 @@ func (p Profile) Validate() error {
 	}
 	return nil
 }
+
+// jumpHostPattern accepts "[user@]host[:port]" and never a leading "-", so the
+// value cannot be read as another ssh option.
+var jumpHostPattern = regexp.MustCompile(`^(?:[A-Za-z0-9._][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9][A-Za-z0-9.-]*|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?$`)
 
 // Validate checks the target and all connection options without allocating a Device.
 func (c ConnectionConfig) Validate() error {
@@ -70,7 +74,10 @@ func (c ConnectionConfig) ValidateOptions() error {
 			return ErrInvalid
 		}
 	}
-	if c.Port < 0 || c.Port > 65535 {
+	if c.Port < 0 || c.Port > 65535 || c.ConnectRetries < 0 || c.ConnectRetries > 5 {
+		return ErrInvalid
+	}
+	if c.JumpHost != "" && (!jumpHostPattern.MatchString(c.JumpHost) || c.Protocol == ProtocolTelnet || c.AllowTelnetFallback) {
 		return ErrInvalid
 	}
 	if c.LineEnding != "" && c.LineEnding != "\n" && c.LineEnding != "\r" && c.LineEnding != "\r\n" {

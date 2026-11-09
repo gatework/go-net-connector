@@ -14,7 +14,8 @@ import (
 
 // Dialect is the built-in H3C Comware switch platform.
 type Dialect struct {
-	driver.ProfiledPlatform
+	driver.Base
+	driver.ReadOnlyCommands
 	driver.TopologyReader
 	driver.DescriptionWriter
 	tftpPolicy
@@ -32,7 +33,8 @@ func Wireless() WirelessDialect { return WirelessDialect{newDialect("h3c_wireles
 
 func newDialect(profileName string) Dialect {
 	return Dialect{
-		ProfiledPlatform:  driver.NewProfiledPlatform(newProfile(profileName)),
+		Base:              newBase(profileName),
+		ReadOnlyCommands:  readOnly,
 		TopologyReader:    driver.NewTopologyReader("display lldp neighbor-information list", topologyParser()),
 		DescriptionWriter: driver.NewDescriptionWriter(dialectapi.WriteMode{Enter: "system-view", Leave: "return", InterfaceExit: "quit"}),
 		tftpPolicy:        newTFTPPolicy(),
@@ -41,8 +43,8 @@ func newDialect(profileName string) Dialect {
 
 var saveConfirmationPattern = driver.Regex(`(?i)^Saved the current configuration to mainboard device successfully\.$`)
 
-func newProfile(name string) connector.Profile {
-	p := driver.BaseProfile(name)
+func newBase(name string) driver.Base {
+	p := driver.BaseTerminal(name)
 	p.ConfigCommands = []string{"dis cur"}
 	p.SaveCommands = []string{"save force"}
 	p.UsernamePrompt = driver.Pattern(`(?i)(?:login|Username):\s*\z`)
@@ -50,16 +52,16 @@ func newProfile(name string) connector.Profile {
 	p.CommandPrompt = driver.Pattern(`(?:\A|[\r\n])(?:[^\S\n]|\x00)*[^\r\n]+[>\]](?:[^\S\n]|\x00)*\z`)
 	p.CommandErrors = driver.PositionMarkerCommandErrors()
 	p.Interactions = driver.YesNoConfirmations()
-	p.Prepare = prepareCommand
-	p.AfterCommand = captureAssignedRuleID
-	return driver.FinishProfile(p, 60*time.Second, driver.BaseConfigFactory(), saveConfirmationPattern)
+	return driver.NewBase(p, 60*time.Second, driver.BaseConfigFactory(), saveConfirmationPattern)
 }
 
 var appendRule = driver.Regex(`(?i)\A[ \t]*rule[ \t]+XXX[ \t]+append\b`)
 var createRule = driver.Regex(`(?i)\A[ \t]*rule[ \t]+pass\b`)
 var assignedRule = driver.Regex(`(?i)rule\s+(\d+)\s+pass[^\n]+\n\s*#`)
 
-func prepareCommand(_ context.Context, c connector.Command, x connector.Executor) (connector.Command, bool, error) {
+// PrepareCommand substitutes the rule id assigned by the preceding
+// "rule pass" command into a later "rule XXX append" command.
+func (Dialect) PrepareCommand(_ context.Context, c connector.Command, x connector.Executor) (connector.Command, bool, error) {
 	if appendRule.MatchString(c.Text) {
 		id := x.Value("rule_id")
 		if id == "" {
@@ -70,7 +72,9 @@ func prepareCommand(_ context.Context, c connector.Command, x connector.Executor
 	}
 	return c, false, nil
 }
-func captureAssignedRuleID(ctx context.Context, c connector.Command, _ connector.StepResult, x connector.Executor) error {
+
+// AfterCommand records the rule id the device assigned to a new pass rule.
+func (Dialect) AfterCommand(ctx context.Context, c connector.Command, _ connector.StepResult, x connector.Executor) error {
 	if !createRule.MatchString(c.Text) {
 		return nil
 	}
@@ -85,3 +89,6 @@ func captureAssignedRuleID(ctx context.Context, c connector.Command, _ connector
 	x.SetValue("rule_id", m[1])
 	return nil
 }
+
+// readOnly lists the commands this family accepts for read-only collection.
+var readOnly = driver.ReadOnlyCommands{Verbs: []string{"display", "dis", "ping", "tracert"}}

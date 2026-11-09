@@ -60,7 +60,7 @@ func TestSelectionIntersectionAndExclusions(t *testing.T) {
 	}
 }
 
-func TestSelectionRubyNegatedGlobClasses(t *testing.T) {
+func TestSelectionNegatedGlobClasses(t *testing.T) {
 	for _, exclude := range []bool{false, true} {
 		o := SelectionOptions{NameMatch: "glob"}
 		if exclude {

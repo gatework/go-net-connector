@@ -12,7 +12,7 @@ import (
 
 func TestCloseInterruptsDialWithoutWaitingForOperation(t *testing.T) {
 	entered := make(chan struct{})
-	d, err := New(fixtureProfile(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(ctx context.Context, _ ConnectionConfig) (io.ReadWriteCloser, error) {
+	d, err := New(fixtureDriver(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(ctx context.Context, _ ConnectionConfig) (io.ReadWriteCloser, error) {
 		close(entered)
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -43,7 +43,7 @@ func TestCloseInterruptsDialWithoutWaitingForOperation(t *testing.T) {
 func TestAbnormalCallbackExitRetiresSession(t *testing.T) {
 	for _, which := range []string{"panic", "goexit"} {
 		t.Run(which, func(t *testing.T) {
-			d, _ := fixtureDevice(t, fixtureProfile(), []string{"Question:"})
+			d, _ := fixtureDevice(t, fixtureDriver(), []string{"Question:"})
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
@@ -79,7 +79,7 @@ func (s *partialFactoryStream) Close() error              { s.closed = true; ret
 func TestFactoryPartialReturnIsOwned(t *testing.T) {
 	primary, cleanup := errors.New("setup"), errors.New("cleanup")
 	stream := &partialFactoryStream{cause: cleanup}
-	d, err := New(fixtureProfile(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) { return stream, primary }))
+	d, err := New(fixtureDriver(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) { return stream, primary }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,13 +91,13 @@ func TestFactoryPartialReturnIsOwned(t *testing.T) {
 
 func TestTypedNilLoggerRejected(t *testing.T) {
 	var writer *net.TCPConn
-	if _, err := New(fixtureProfile(), ConnectionConfig{Host: "fixture", Logger: writer}); err == nil {
+	if _, err := New(fixtureDriver(), ConnectionConfig{Host: "fixture", Logger: writer}); err == nil {
 		t.Fatal("typed nil logger accepted")
 	}
 }
 
 func TestCloseFromReceiptCancelsScopeAndKeepsStep(t *testing.T) {
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"done\nsw#"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"done\nsw#"})
 	r, err := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{OnReceipt: func(ctx context.Context, _ StepResult) error {
 		if err := d.Close(); err != nil {
 			t.Error(err)
@@ -116,7 +116,7 @@ func TestCloseFromReceiptCancelsScopeAndKeepsStep(t *testing.T) {
 }
 
 func TestTypedNilFactoryStreamRejected(t *testing.T) {
-	d, err := New(fixtureProfile(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
+	d, err := New(fixtureDriver(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 		var stream *net.TCPConn
 		return stream, nil
 	}))
@@ -129,7 +129,7 @@ func TestTypedNilFactoryStreamRejected(t *testing.T) {
 }
 
 func TestInteractionZeroLimitRepliesOnlyOnce(t *testing.T) {
-	d, writes := fixtureDevice(t, fixtureProfile(), []string{"Question:", "Question:"})
+	d, writes := fixtureDevice(t, fixtureDriver(), []string{"Question:", "Question:"})
 	_, err := d.ExecuteCommand(t.Context(), Command{Text: "change", Interactions: []Interaction{{Pattern: testPattern("Question:"), Reply: "yes\n"}}}, ExecuteOptions{})
 	if !errors.Is(err, ErrResponseLimit) {
 		t.Fatalf("second default response accepted: %v", err)
@@ -144,7 +144,7 @@ func TestExplicitUnlimitedRepliesAndPollValidation(t *testing.T) {
 	if err := validateInteractions([]Interaction{{Pattern: testPattern("Question:"), Limit: 2, Unlimited: true}}); err == nil {
 		t.Fatal("ambiguous response limit accepted")
 	}
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"Question:", "Question:", "done\nsw#"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"Question:", "Question:", "done\nsw#"})
 	_, err := d.ExecuteCommand(t.Context(), Command{Text: "change", Interactions: []Interaction{{Pattern: testPattern("Question:"), Reply: "yes\n", Unlimited: true}}}, ExecuteOptions{})
 	if err != nil {
 		t.Fatal(err)

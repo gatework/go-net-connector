@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -12,7 +13,7 @@ func TestTFTPUploadTimeoutConfiguration(t *testing.T) {
 		env  map[string]string
 		want time.Duration
 	}{{map[string]string{}, 180 * time.Second}, {map[string]string{"NC_TFTP_UPLOAD_TIMEOUT": "120"}, 120 * time.Second}} {
-		p, e := config.Load(config.Options{Name: "backup", CWD: t.TempDir(), Home: t.TempDir(), Directories: []string{}, Environment: tc.env, Defaults: config.Defaults("tftp"), AllowMissing: true})
+		p, e := config.Load(context.Background(), config.Options{Name: "backup", CWD: t.TempDir(), Home: t.TempDir(), Directories: []string{}, Environment: tc.env, Defaults: config.Defaults("tftp"), AllowMissing: true})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -27,7 +28,7 @@ func TestTFTPUploadTimeoutConfiguration(t *testing.T) {
 }
 
 func TestTFTPPolicyIsResolvedOnceAtConstruction(t *testing.T) {
-	policy, err := config.Load(config.Options{
+	policy, err := config.Load(context.Background(), config.Options{
 		Name:        "backup",
 		CWD:         t.TempDir(),
 		Home:        t.TempDir(),
@@ -69,7 +70,7 @@ func TestArchiveTimeoutConfigurationAndLimits(t *testing.T) {
 		{map[string]string{"NC_TFTP_ARCHIVE_VERIFY_TIMEOUT": "0"}, true},
 		{map[string]string{"NC_TFTP_ARCHIVE_CLEANUP_TIMEOUT": "0.00000000001"}, true},
 	} {
-		p, err := config.Load(config.Options{Name: "backup", CWD: t.TempDir(), Home: t.TempDir(), Directories: []string{}, Environment: tc.env, Defaults: config.Defaults("tftp")})
+		p, err := config.Load(context.Background(), config.Options{Name: "backup", CWD: t.TempDir(), Home: t.TempDir(), Directories: []string{}, Environment: tc.env, Defaults: config.Defaults("tftp")})
 		if err == nil {
 			var s *Services
 			s, err = New(p, nil)

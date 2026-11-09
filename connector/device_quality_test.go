@@ -24,7 +24,7 @@ func (s *retryFactoryStream) Close() error {
 func TestFactoryPartialReturnRetainsCleanupOwner(t *testing.T) {
 	primary, cleanup := errors.New("setup"), errors.New("cleanup")
 	stream := &retryFactoryStream{cleanup: cleanup}
-	d, err := New(fixtureProfile(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) { return stream, primary }))
+	d, err := New(fixtureDriver(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) { return stream, primary }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestFactoryPartialReturnRetainsCleanupOwner(t *testing.T) {
 }
 func TestAfterLoginStateHasValueSemantics(t *testing.T) {
 	shared := LoginState{HAState: "active"}
-	p := fixtureProfile()
+	p := fixtureDriver()
 	p.AfterLogin = func(context.Context, StepResult) (LoginState, error) { return shared, nil }
 	a, _ := fixtureDevice(t, p, nil)
 	b, _ := fixtureDevice(t, p, nil)
@@ -62,7 +62,7 @@ func TestAfterLoginStateHasValueSemantics(t *testing.T) {
 type renderedStep interface{ Rendered() (string, error) }
 
 func TestRenderedSnapshotPreservesOutput(t *testing.T) {
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"old\rnew\x1b[K\r\nsw#"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"old\rnew\x1b[K\r\nsw#"})
 	r, err := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{})
 	if err != nil {
 		t.Fatal(err)

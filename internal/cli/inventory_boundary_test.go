@@ -21,7 +21,7 @@ func TestTopologyInventoryCannotOpenDeviceOrCreateBatch(t *testing.T) {
 	r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) {
 		return []inventory.Device{{IP: "192.0.2.1", Name: "edge", Vendor: "h3c"}}, nil
 	})
-	r.DeviceFactory = func(connector.Profile, connector.ConnectionConfig) (*connector.Device, error) {
+	r.DeviceFactory = func(connector.Driver, connector.ConnectionConfig) (*connector.Device, error) {
 		panic("inventory constructed a device")
 	}
 	if code := r.Run(t.Context()); code != 0 {
@@ -39,7 +39,7 @@ func TestHumanInventoryShowsAnomaliesInTable(t *testing.T) {
 		r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) {
 			return []inventory.Device{{IP: "192.0.2.1", Name: "normal", Vendor: "h3c"}, {IP: "192.0.2.2", Name: "unmapped", Vendor: "mystery"}}, nil
 		})
-		r.DeviceFactory = func(connector.Profile, connector.ConnectionConfig) (*connector.Device, error) {
+		r.DeviceFactory = func(connector.Driver, connector.ConnectionConfig) (*connector.Device, error) {
 			panic("inventory opened device")
 		}
 		if code := r.Run(t.Context()); code != 0 {

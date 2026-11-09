@@ -18,7 +18,6 @@ func ShortInterface(name string, lowercase bool) string {
 	return n
 }
 
-func ConfigName(name string) string { return ifname.ConfigName(name) }
 func EquivalentDescription(current, expected string) bool {
 	if strings.EqualFold(current, expected) {
 		return true

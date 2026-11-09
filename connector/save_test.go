@@ -10,9 +10,9 @@ import (
 func TestSaveRequiresProfileEvidenceAndPreservesCompletedStep(t *testing.T) {
 	for _, output := range []string{"saved\nsw#", "sw#"} {
 		t.Run(output, func(t *testing.T) {
-			p := fixtureProfile()
-			p.SaveCommands = []string{"save"}
-			p.ValidateSave = func(ctx context.Context, r Result) error {
+			p := fixtureDriver()
+			p.Grammar.SaveCommands = []string{"save"}
+			p.Save = func(ctx context.Context, r Result) error {
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
@@ -36,8 +36,8 @@ func TestSaveRequiresProfileEvidenceAndPreservesCompletedStep(t *testing.T) {
 	}
 }
 func TestSaveWithoutEvidencePolicyRemainsUnconfirmed(t *testing.T) {
-	p := fixtureProfile()
-	p.SaveCommands = []string{"save"}
+	p := fixtureDriver()
+	p.Grammar.SaveCommands = []string{"save"}
 	d, _ := fixtureDevice(t, p, []string{"done\nsw#"})
 	r, err := d.SaveConfig(t.Context(), ExecuteOptions{})
 	if len(r.Steps()) != 1 || !errors.Is(err, ErrUnconfirmed) {

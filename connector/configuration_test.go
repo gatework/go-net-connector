@@ -11,7 +11,7 @@ import (
 )
 
 func TestRunningConfigRejectsEchoOnly(t *testing.T) {
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"show config\nsw#"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"show config\nsw#"})
 	r, e := d.RunningConfig(t.Context())
 	if e == nil || len(r.Steps()) != 1 {
 		t.Fatalf("%v %v", r, e)
@@ -20,7 +20,7 @@ func TestRunningConfigRejectsEchoOnly(t *testing.T) {
 
 func TestRunningConfigAutomaticallyDecodesGBK(t *testing.T) {
 	wire := "show config\r\n description \xd6\xd0\xce\xc4\r\nsw#"
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{wire})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{wire})
 	r, err := d.RunningConfig(t.Context())
 	if err != nil || testResultOutput(r) != "show config\n description 中文\nsw#" {
 		t.Fatalf("automatic decode: %v, %v", r, err)
@@ -31,7 +31,7 @@ func TestRunningConfigAutomaticallyDecodesGBK(t *testing.T) {
 }
 func TestBackupPreservesUnchangedMtime(t *testing.T) {
 	contents := "show config\r\nhostname test\r\nsw#"
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{contents, contents, contents})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{contents, contents, contents})
 	path := filepath.Join(t.TempDir(), "device.txt")
 	first, e := d.Backup(t.Context(), BackupOptions{Path: path})
 	if e != nil {
@@ -64,7 +64,7 @@ func TestBackupPreservesUnchangedMtime(t *testing.T) {
 }
 func TestBackupRefusesBusyPathBeforeOpeningDevice(t *testing.T) {
 	// A recursive callback must not obtain path ownership inside an active session.
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"ok\nsw#"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"ok\nsw#"})
 	_, e := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{OnReceipt: func(_ctx context.Context, _ StepResult) error {
 		_, err := d.Backup(_ctx, BackupOptions{Path: filepath.Join(t.TempDir(), "x")})
 		if err != ErrBusy {

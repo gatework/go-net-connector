@@ -53,7 +53,6 @@ func (s Snapshot) Sources() map[string]any {
 	maps.Copy(fields, s.fields)
 	return map[string]any{"configuration_files": append([]string{}, s.files...), "environment_files": append([]string{}, s.envFiles...), "fields": fields}
 }
-func (s Snapshot) Missing() bool                { return !s.applicable }
 func (s Snapshot) InitPaths() (string, string)  { return s.configPath, s.envPath }
 func (s Snapshot) String() string               { return "config.Snapshot" }
 func (s Snapshot) GoString() string             { return s.String() }
@@ -149,15 +148,10 @@ func uniquePaths(paths []string, last string) []string {
 	return out
 }
 
-// Load is the compatibility entry point for callers without a context.
-func Load(o Options) (Snapshot, error) {
-	return LoadContext(context.Background(), o)
-}
-
-// LoadContext loads and freezes the configured layers, checking cancellation
+// Load loads and freezes the configured layers, checking cancellation
 // between discovery, file reads and layer decoding. Filesystem calls and bounded
 // parsers remain synchronous; cancellation cannot interrupt a blocked syscall.
-func LoadContext(ctx context.Context, o Options) (snapshot Snapshot, err error) {
+func Load(ctx context.Context, o Options) (snapshot Snapshot, err error) {
 	s := Snapshot{data: map[string]any{}, environment: map[string]string{}, fields: map[string]string{}}
 	if ctx == nil {
 		return s, ErrInvalid
@@ -478,7 +472,7 @@ func validateValues(values map[string]any) error {
 				}
 			case KindInteger, KindOptionalInteger:
 				n, ok := integerValue(v)
-				valid = ok && (n > 0 || section == "backup" && key == "limit_per_vendor" && n == 0) || v == nil && f.Kind == KindOptionalInteger
+				valid = ok && (n > 0 || n == 0 && (section == "backup" && key == "limit_per_vendor" || section == "ssh" && key == "connect_retries")) || v == nil && f.Kind == KindOptionalInteger
 			case KindNumber:
 				n, ok := v.(float64)
 				if i, iok := integerValue(v); iok {

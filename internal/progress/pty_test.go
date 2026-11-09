@@ -51,7 +51,7 @@ func TestActualPTYPanelWidths(t *testing.T) {
 		for range 50 {
 			p.Start("中文👩‍💻é交换机", "h3c")
 			p.Event("中文👩‍💻é交换机", "login_complete", "ok")
-			p.Outcome("中文👩‍💻é交换机", "backed_up", "", time.Second)
+			p.Outcome("中文👩‍💻é交换机", "succeeded", "backed_up", "", time.Second)
 			p.tick()
 		}
 		p.Finish()

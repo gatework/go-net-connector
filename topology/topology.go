@@ -17,18 +17,18 @@ type Client struct {
 	identity          InterfaceIdentity
 	writer            DescriptionWriter
 	writeDenial       WriteRestriction
-	profile           connector.Profile
+	profile           connector.Terminal
 }
 
 func New(device *connector.Device, registry dialect.Registry) (*Client, error) {
 	if device == nil || registry == nil {
 		return nil, ErrInvalid
 	}
-	d, e := registry.Lookup(device.ProfileName())
+	d, e := registry.Lookup(device.PlatformName())
 	if e != nil {
 		return nil, e
 	}
-	p := d.Profile()
+	p := d.Terminal()
 	p.ConfigCommands = device.ConfigCommands()
 	p.SaveCommands = device.SaveCommands()
 	neighbors, _ := d.(NeighborDiscovery)
@@ -70,28 +70,6 @@ func (client *Client) supportsWrite() error {
 		return err
 	}
 	return requireWriter(client.writer, client.writeDenial)
-}
-func (client *Client) Neighbors(ctx context.Context) (peers []Neighbor, result Result, err error) {
-	if err = client.supportsNeighbors(); err != nil {
-		return
-	}
-	err = client.device.WithOperation(ctx, func(ctx context.Context, op *connector.Operation) error {
-		var e error
-		peers, e = client.neighbors(ctx, op, &result)
-		return e
-	})
-	return
-}
-func (client *Client) Descriptions(ctx context.Context) (descriptions map[string]string, result Result, err error) {
-	if err = client.supportsDescriptions(); err != nil {
-		return
-	}
-	err = client.device.WithOperation(ctx, func(ctx context.Context, op *connector.Operation) error {
-		var e error
-		descriptions, e = client.descriptions(ctx, op, &result)
-		return e
-	})
-	return
 }
 func (client *Client) Discover(ctx context.Context) (snapshot Snapshot, err error) {
 	if err = client.supportsNeighbors(); err != nil {
@@ -169,30 +147,6 @@ func (client *Client) descriptions(ctx context.Context, op *connector.Operation,
 	return ParseDescriptions(client.descriptionReader, output)
 }
 
-// Plan collects a snapshot under one operation lease, then builds exact stages.
-func (client *Client) Plan(ctx context.Context, opts FormatOptions) (plan Plan, err error) {
-	if err = client.supportsNeighbors(); err != nil {
-		return
-	}
-	if err = client.supportsDescriptions(); err != nil {
-		return
-	}
-	if err = client.supportsWrite(); err != nil {
-		return
-	}
-	err = client.device.WithOperation(ctx, func(ctx context.Context, op *connector.Operation) error {
-		s, e := client.discover(ctx, op)
-		plan.Receipts = s.Receipts
-		if e != nil {
-			return e
-		}
-		p, e := buildPlan(client.device.Host(), client.profile, client.identity, client.writer, client.writeDenial, s.Neighbors, s.Descriptions, opts)
-		p.Receipts = s.Receipts
-		plan = p
-		return e
-	})
-	return
-}
 func (client *Client) Audit(ctx context.Context, opts FormatOptions) (audit Audit, err error) {
 	if err = client.supportsNeighbors(); err != nil {
 		return
@@ -242,35 +196,6 @@ func (client *Client) Apply(ctx context.Context, plan Plan, opts ApplyOptions) (
 	return
 }
 
-// Sync is explicit intent to change descriptions. One lease covers discovery,
-// plan construction, revalidation, changes, readback, and confirmed persistence.
-func (client *Client) Sync(ctx context.Context, opts FormatOptions) (result Result, err error) {
-	if err = client.supportsNeighbors(); err != nil {
-		return
-	}
-	if err = client.supportsDescriptions(); err != nil {
-		return
-	}
-	if err = client.supportsWrite(); err != nil {
-		return
-	}
-	err = client.device.WithOperation(ctx, func(ctx context.Context, op *connector.Operation) error {
-		s, e := client.discover(ctx, op)
-		result.Receipts = append(result.Receipts, s.Receipts...)
-		if e != nil {
-			return e
-		}
-		p, e := buildPlan(client.device.Host(), client.profile, client.identity, client.writer, client.writeDenial, s.Neighbors, s.Descriptions, opts)
-		if e != nil {
-			return e
-		}
-		if len(p.Changes) == 0 {
-			return nil
-		}
-		return client.apply(ctx, op, p, ApplyOptions{Confirmed: true}, &result)
-	})
-	return
-}
 func commandScript(texts []string) connector.Script {
 	s := connector.Script{Name: "interface descriptions"}
 	for _, text := range texts {

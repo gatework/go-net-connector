@@ -19,6 +19,8 @@ var (
 		cause   error
 	}{
 		{mustPattern(`(?i)Connection refused`), errConnectionRefused},
+		{mustPattern(`(?i)No route to host`), errNoRoute},
+		{mustPattern(`(?i)(?:Operation|Connection) timed out`), errConnectTimeout},
 		{mustPattern(`(?i)(?:REMOTE HOST IDEN|IDENTIFICATION CHANGED)`), errHostKeyChanged},
 		{mustPattern(`(?i)RSA modulus too small`), errRSATooSmall},
 		{mustPattern(`(?i)Selected cipher type <unknown> not supported by server`), errUnsupportedCipher},

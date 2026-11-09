@@ -19,7 +19,7 @@ import (
 	"github.com/gatework/go-net-connector/inventory"
 )
 
-func TestFetchHTTPMigrationAndEvidence(t *testing.T) {
+func TestFetchHTTPCacheEvidence(t *testing.T) {
 	var fail atomic.Bool
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,21 +40,8 @@ func TestFetchHTTPMigrationAndEvidence(t *testing.T) {
 	ttl := time.Hour
 	cache := &CachePolicy{Directory: directory, Namespace: "account-a", TTL: &ttl, Now: func() time.Time { return now }}
 	source := HTTPOptions{URL: server.URL + "/", APIKey: "private-key"}
-	legacy, err := NewCache(SourceFunc(func(context.Context) ([]inventory.Device, error) {
-		return []inventory.Device{{IP: "192.0.2.99"}}, nil
-	}), CacheOptions{Directory: directory, Identity: "old-consumer-specific-identity"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := legacy.Fetch(t.Context(), "refresh"); err != nil {
-		t.Fatal(err)
-	}
-	legacyBytes, err := os.ReadFile(legacy.Path())
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := FetchHTTP(t.Context(), source, FetchOptions{Mode: "only", Cache: cache}); (errorCode(err) != "cache_unavailable" || !errors.Is(err, ErrCacheRefreshRequired)) || calls.Load() != 0 {
-		t.Fatalf("legacy identity must not be adopted offline: %v calls=%d", err, calls.Load())
+		t.Fatalf("cache-only without an entry must require refresh: %v calls=%d", err, calls.Load())
 	}
 	result, err := FetchHTTP(t.Context(), source, FetchOptions{Cache: cache})
 	if err != nil || result.Status != CacheStatusRefreshed || len(result.Rows) != 1 || result.Rows[0].IP != "192.0.2.1" || !result.FetchedAt.Equal(now) {
@@ -71,10 +58,6 @@ func TestFetchHTTPMigrationAndEvidence(t *testing.T) {
 	result, err = FetchHTTP(t.Context(), source, FetchOptions{Mode: "refresh", Cache: cache})
 	if err != nil || result.Status != CacheStatusStale || result.RefreshErrorCode != "request_failed" || !result.FetchedAt.Equal(time.Unix(1000, 0)) {
 		t.Fatalf("stale evidence lost: %+v %v", result, err)
-	}
-	after, err := os.ReadFile(legacy.Path())
-	if err != nil || string(after) != string(legacyBytes) {
-		t.Fatal("migration modified legacy cache", err)
 	}
 	files, err := filepath.Glob(filepath.Join(directory, "*.json"))
 	if err != nil {
@@ -119,7 +102,7 @@ func TestFetchHTTPPrincipalsAndQueryShape(t *testing.T) {
 			if _, err := FetchHTTP(t.Context(), source, FetchOptions{Mode: "only", Cache: cache}); err != nil {
 				t.Fatal(err)
 			}
-			source.Password = "" // Cache-only basic auth must not require the password.
+			source.Password = "" // cache-only basic auth must not require the password.
 			if source.APIKey != "" {
 				source.APIKey = "rotated-key"
 			}
@@ -225,7 +208,7 @@ func TestFetchPostgresEffectiveIdentityOffline(t *testing.T) {
 		t.Fatal(err)
 	}
 	policy := &CachePolicy{Directory: filepath.Join(t.TempDir(), "cache"), Namespace: "account"}
-	cache, err := newCache(SourceFunc(func(context.Context) ([]inventory.Device, error) { return []inventory.Device{{IP: "192.0.2.1"}}, nil }), CacheOptions{Directory: policy.Directory}, identity)
+	cache, err := newCache(SourceFunc(func(context.Context) ([]inventory.Device, error) { return []inventory.Device{{IP: "192.0.2.1"}}, nil }), cacheOptions{Directory: policy.Directory}, identity)
 	if err != nil {
 		t.Fatal(err)
 	}

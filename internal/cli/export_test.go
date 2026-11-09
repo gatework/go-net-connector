@@ -21,12 +21,12 @@ func exportBatchFixture(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(d, name), body, 0600); err != nil {
 		t.Fatal(err)
 	}
-	report := map[string]any{"schema_version": 2, "mode": "backup", "devices": []any{map[string]any{"host": "192.0.2.1", "path": filepath.Join(d, name), "bytes": len(body), "sha256": hex.EncodeToString(sum[:]), "status": "failed"}}}
+	report := map[string]any{"schema_version": 3, "operation": "backup", "devices": []any{map[string]any{"host": "192.0.2.1", "status": "failed", "artifacts": map[string]any{"backup": map[string]any{"path": filepath.Join(d, name), "bytes": len(body), "sha256": hex.EncodeToString(sum[:])}}}}}
 	data, err := json.Marshal(report)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = os.WriteFile(filepath.Join(d, "summary.json"), data, 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(d, "report.json"), data, 0600); err != nil {
 		t.Fatal(err)
 	}
 	return d

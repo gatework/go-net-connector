@@ -10,7 +10,7 @@ func TestConfigurationPromptTransitions(t *testing.T) {
 	} {
 		t.Run(tc.vendor+"/"+tc.command, func(t *testing.T) {
 			profile := profileForTest(t, tc.vendor)
-			pattern, err := profile.ConfigStrategy().MatchPrompt(tc.command, tc.current)
+			pattern, err := profile.NewConfigCollector().MatchPrompt(tc.command, tc.current)
 			if err != nil || !matchesPattern(pattern, tc.next) {
 				t.Fatalf("prompt transition to %q failed: %v", tc.next, err)
 			}

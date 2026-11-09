@@ -2,7 +2,6 @@ package fleet
 
 import (
 	"errors"
-	"maps"
 	"net/netip"
 	"regexp"
 	"sort"
@@ -233,14 +232,12 @@ type Plan struct {
 	transfers map[int]transfer.Target
 }
 
-func (p Plan) Mode() string         { return string(p.mode) }
 func (p Plan) Entries() []PlanEntry { return append([]PlanEntry(nil), p.entries...) }
 func (p Plan) Tasks() []Task        { return append([]Task(nil), p.tasks...) }
-func (p Plan) Transfers() map[int]transfer.Target {
-	m := make(map[int]transfer.Target, len(p.transfers))
-	maps.Copy(m, p.transfers)
-	return m
-}
+
+// ErrMissingCredentials reports a device with no configured login credentials.
+var ErrMissingCredentials = errors.New("fleet: missing device credentials")
+
 func NewPlan(rows []inventory.Device, rules *Rules, o PlanOptions) (Plan, error) {
 	if rules == nil || (o.Mode != "backup" && o.Mode != "tftp") || o.LimitPerVendor < 0 || o.LimitPerVendor > 5 || (o.Mode == "tftp" && o.Target == nil) {
 		return Plan{}, ErrInvalidPlan
@@ -277,7 +274,7 @@ func NewPlan(rows []inventory.Device, rules *Rules, o PlanOptions) (Plan, error)
 				return Plan{}, ErrInvalidPlan
 			}
 			if planMode == modeBackup {
-				profile := declaration.Profile()
+				profile := declaration.Terminal()
 				supported.backup = len(profile.ConfigCommands) > 0
 			} else {
 				tftpPolicy, hasTransfer := declaration.(transfer.TFTPPolicy)

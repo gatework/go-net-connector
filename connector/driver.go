@@ -1,0 +1,123 @@
+package connector
+
+import "context"
+
+// Driver is one platform's device driver: its terminal grammar plus the
+// behavior that grammar cannot declare. Vendor platform objects implement it.
+type Driver interface {
+	// Terminal returns an independent copy of the platform grammar.
+	Terminal() Terminal
+	// NewConfigCollector returns a fresh strategy for one configuration
+	// collection, or nil to use the generic rendered-output collector.
+	NewConfigCollector() ConfigStrategy
+	// ValidateSave requires affirmative device evidence that the save
+	// completed; a prompt alone is not proof. It returns ErrUnconfirmed
+	// (or a wrapped cause) when the evidence is missing.
+	ValidateSave(context.Context, Result) error
+}
+
+// CommandPreparer is an optional Driver hook that may rewrite or skip a
+// command before it is sent, for example to substitute a device-assigned id.
+type CommandPreparer interface {
+	PrepareCommand(context.Context, Command, Executor) (cmd Command, skip bool, err error)
+}
+
+// CommandObserver is an optional Driver hook run after a command is accepted.
+type CommandObserver interface {
+	AfterCommand(context.Context, Command, StepResult, Executor) error
+}
+
+// LoginInspector is an optional Driver hook that reads device state from the
+// login banner, such as a high-availability role.
+type LoginInspector interface {
+	AfterLogin(context.Context, StepResult) (LoginState, error)
+}
+
+// StaticDriver adapts a Terminal and optional functions into a Driver. Nil
+// functions mean: generic rendered configuration collection, saves are never
+// confirmed, and no command or login hooks.
+type StaticDriver struct {
+	Grammar      Terminal
+	Collector    func() ConfigStrategy
+	Save         func(context.Context, Result) error
+	Prepare      func(context.Context, Command, Executor) (Command, bool, error)
+	AfterCommand func(context.Context, Command, StepResult, Executor) error
+	AfterLogin   func(context.Context, StepResult) (LoginState, error)
+}
+
+func (s StaticDriver) Terminal() Terminal { return s.Grammar }
+
+func (s StaticDriver) NewConfigCollector() ConfigStrategy {
+	if s.Collector == nil {
+		return nil
+	}
+	return s.Collector()
+}
+
+func (s StaticDriver) ValidateSave(ctx context.Context, result Result) error {
+	if s.Save == nil {
+		return ErrUnconfirmed
+	}
+	return s.Save(ctx, result)
+}
+
+// staticHooks exposes StaticDriver functions as optional hooks only when set,
+// so an unset hook behaves exactly like a driver without that interface.
+func (s StaticDriver) hooks() (CommandPreparer, CommandObserver, LoginInspector) {
+	var p CommandPreparer
+	var o CommandObserver
+	var l LoginInspector
+	if s.Prepare != nil {
+		p = preparerFunc(s.Prepare)
+	}
+	if s.AfterCommand != nil {
+		o = observerFunc(s.AfterCommand)
+	}
+	if s.AfterLogin != nil {
+		l = inspectorFunc(s.AfterLogin)
+	}
+	return p, o, l
+}
+
+type preparerFunc func(context.Context, Command, Executor) (Command, bool, error)
+
+func (f preparerFunc) PrepareCommand(ctx context.Context, c Command, x Executor) (Command, bool, error) {
+	return f(ctx, c, x)
+}
+
+type observerFunc func(context.Context, Command, StepResult, Executor) error
+
+func (f observerFunc) AfterCommand(ctx context.Context, c Command, s StepResult, x Executor) error {
+	return f(ctx, c, s, x)
+}
+
+type inspectorFunc func(context.Context, StepResult) (LoginState, error)
+
+func (f inspectorFunc) AfterLogin(ctx context.Context, s StepResult) (LoginState, error) {
+	return f(ctx, s)
+}
+
+// WithTerminal returns a driver that keeps d's behavior but uses grammar t,
+// for callers that customize a platform's prompts or commands.
+func WithTerminal(d Driver, t Terminal) Driver { return terminalOverride{Driver: d, grammar: t} }
+
+type terminalOverride struct {
+	Driver
+	grammar Terminal
+}
+
+func (o terminalOverride) Terminal() Terminal { return o.grammar }
+
+// driverHooks resolves the optional hooks once, at Device construction.
+func driverHooks(d Driver) (CommandPreparer, CommandObserver, LoginInspector) {
+	switch v := d.(type) {
+	case StaticDriver:
+		return v.hooks()
+	case terminalOverride:
+		return driverHooks(v.Driver)
+	}
+	p, _ := d.(CommandPreparer)
+	o, _ := d.(CommandObserver)
+	l, _ := d.(LoginInspector)
+	return p, o, l
+}

@@ -14,7 +14,6 @@ import (
 
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/internal/bootstrap"
 	"github.com/gatework/go-net-connector/internal/display"
 	"github.com/gatework/go-net-connector/internal/progress"
@@ -77,10 +76,11 @@ func (r Runtime) executeSelected(ctx context.Context, o options, request command
 	if request.kind == requestExport {
 		return r.exportBatch(ctx, o.export, o.batch, o.output, o.json)
 	}
-	var pushScripts workflow.PushScripts
-	if request.kind == requestPushPlan || request.kind == requestPushRun {
-		var e error
-		if pushScripts, e = r.loadPushScripts(o); e != nil {
+	if request.kind == requestDiff {
+		return r.diffBatches(ctx, o.export, o.diffFrom, o.diffTo, o.json)
+	}
+	if request.useCase != nil {
+		if e := request.useCase.prepare(r, o); e != nil {
 			return r.fail(program, e)
 		}
 	}
@@ -273,65 +273,26 @@ func (r Runtime) executeSelected(ctx context.Context, o options, request command
 			return r.fail(program, config.ErrInvalid)
 		}
 	}
-	w := &workflow.Runner{Observe: workflowObserver(reporter)}
-	workflowRun := services.WorkflowRuntime()
-	var result workflow.Result
-	if o.mode == "topology" {
-		var settings workflow.TopologySettings
-		settings, e = services.WorkflowTopologySettings(request.topologyMode())
-		if e != nil {
-			return r.fail(program, e)
-		}
-		result, e = w.Topology(ctx, workflowRun, settings, rows, request.topology)
-	} else if request.kind == requestPushPlan || request.kind == requestPushRun {
-		var plan fleet.Plan
-		plan, e = fleet.NewPlan(rows, services.Rules(), fleet.PlanOptions{Mode: "backup"})
-		if e != nil {
-			return r.fail(program, e)
-		}
-		result, e = w.Push(ctx, workflowRun, plan, workflow.PushOptions{
-			Scripts: pushScripts, Save: o.pushSave, StopAfterFailures: o.pushStopAfter,
-			Plan: request.kind == requestPushPlan, Directory: r.pushDirectory(o),
-		})
-	} else if request.kind == requestTFTPRun || request.kind == requestTFTPPlan {
-		var settings workflow.TFTPSettings
-		settings, e = services.WorkflowTFTPSettings()
-		if e != nil {
-			return r.fail(program, e)
-		}
-		result, e = w.TFTP(ctx, workflowRun, settings, rows, workflow.TFTPOptions{BackupOptions: backup, Plan: request.kind == requestTFTPPlan, All: o.all})
-	} else {
-		limit := services.Limit()
-		if o.all {
-			limit = 0
-		}
-		plan, err := fleet.NewPlan(rows, services.Rules(), fleet.PlanOptions{Mode: "backup", LimitPerVendor: limit})
-		if err != nil {
-			return r.fail(program, err)
-		}
-		if request.inventoryPreview() {
-			result = workflow.Preview(plan)
-		} else {
-			result, e = w.Backup(ctx, workflowRun, plan, backup)
-		}
+	backup.Save = o.save
+	pipeline := useCaseEnv{
+		runner: &workflow.Runner{Observe: workflowObserver(reporter)}, runtime: services.WorkflowRuntime(),
+		services: services, backup: backup, rows: rows, options: o, cli: r,
 	}
+	result, e := request.useCase.run(ctx, pipeline)
 	if stopUpdates != nil {
 		stopUpdates()
 	}
-	var progressErr error
 	if reporter != nil {
-		progressErr = reporter.Err()
-		workflow.RecordProgressFailure(ctx, &result, progressErr)
+		workflow.RecordFailure(ctx, &result, "progress_failed", reporter.Err())
 	}
 	outputErr := r.renderResult(result, o, ctx.Err() != nil)
-	workflow.RecordOutputFailure(ctx, result, outputErr)
+	workflow.RecordFailure(ctx, &result, "output_failed", outputErr)
 	if ctx.Err() != nil {
 		return 130
 	}
 	if outputErr != nil {
 		return r.fail(program, outputErr)
 	}
-
 	if e != nil {
 		return r.fail(program, e)
 	}
@@ -339,7 +300,6 @@ func (r Runtime) executeSelected(ctx context.Context, o options, request command
 		return 0
 	}
 	return 1
-
 }
 func readLine(reader *bufio.Reader, limit int) (string, error) {
 	var b strings.Builder

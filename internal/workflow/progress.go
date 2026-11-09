@@ -6,7 +6,7 @@ import (
 
 	"github.com/gatework/go-net-connector/archive"
 	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/fleet"
+	"github.com/gatework/go-net-connector/internal/batchreport"
 )
 
 // Event carries bounded operation facts, never terminal text or response bodies.
@@ -22,10 +22,10 @@ type PlanEvent struct {
 type StartEvent struct{ Host, Vendor string }
 type SessionEvent connector.SessionEvent
 type OutcomeEvent struct {
-	Host, Status, ErrorCode         string
-	Duration                        time.Duration
-	TextWarningBytes                int
-	SourceCommitted, SourceVerified bool
+	Host, Status, Outcome, ErrorCode string
+	Duration                         time.Duration
+	TextWarningBytes                 int
+	SourceCommitted, SourceVerified  bool
 }
 type TransferStageEvent struct{ Host, Stage string }
 type Phase string
@@ -78,24 +78,21 @@ func (r *Runner) observe() SessionObserver {
 		return nil
 	}
 }
-func (r *Runner) outcome(out fleet.Outcome) error {
-	event := OutcomeEvent{Host: out.Device.Host, Status: out.Status, ErrorCode: out.ErrorCode, Duration: out.Duration}
-	if backup := out.Artifact.Backup; backup != nil && backup.TextWarning != nil {
-		event.TextWarningBytes = backup.TextWarning.Count
-		event.SourceCommitted, event.SourceVerified = backup.SourceEvidence()
-	}
-	return r.emit(event)
-}
 func (r *Runner) begin() {
-	r.result = Result{}
 	r.progressMu.Lock()
 	r.progressErr = nil
 	r.progressMu.Unlock()
 }
-func (r *Runner) finishBatch(ctx context.Context) {
+
+// finish emits the final event; a progress failure fails the batch while
+// keeping every device result.
+func (r *Runner) finish(report *batchreport.Report) {
 	_ = r.emit(FinishedEvent{})
 	r.progressMu.Lock()
 	err := r.progressErr
 	r.progressMu.Unlock()
-	RecordProgressFailure(ctx, &r.result, err)
+	if err != nil {
+		result := Result{Report: report}
+		RecordFailure(context.Background(), &result, "progress_failed", err)
+	}
 }

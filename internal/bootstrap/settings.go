@@ -26,7 +26,9 @@ import (
 var ErrCredentials = fleet.ErrMissingCredentials
 
 type Secret func(string) string
-type DeviceFactory func(connector.Profile, connector.ConnectionConfig) (*connector.Device, error)
+
+// DeviceFactory constructs an unconnected device for a platform driver.
+type DeviceFactory func(connector.Driver, connector.ConnectionConfig) (*connector.Device, error)
 type Services struct {
 	observer   func(context.Context, connector.SessionEvent) error
 	policy     config.Snapshot
@@ -65,12 +67,12 @@ func New(policy config.Snapshot, secret Secret) (*Services, error) {
 	if e != nil {
 		return nil, e
 	}
-	s := &Services{policy: policy, secret: secret, rules: rules, registry: registry, factory: func(p connector.Profile, c connector.ConnectionConfig) (*connector.Device, error) {
-		return connector.New(p, c)
+	s := &Services{policy: policy, secret: secret, rules: rules, registry: registry, factory: func(d connector.Driver, c connector.ConnectionConfig) (*connector.Device, error) {
+		return connector.New(d, c)
 	}, templates: make(map[string]connector.ConnectionConfig)}
 	for _, vendor := range registry.Names() {
 		d, _ := registry.Lookup(vendor)
-		p := d.Profile()
+		p := d.Terminal()
 		c, e := s.compileConnection(vendor)
 		if e != nil {
 			return nil, e
@@ -261,7 +263,7 @@ func ruleOptions(p config.Snapshot) (fleet.RuleOptions, error) {
 }
 func (s *Services) compileConnection(vendor string) (connector.ConnectionConfig, error) {
 	p := s.policy
-	c := connector.ConnectionConfig{LogLevel: stringValue(p, "ssh.log_level"), Protocol: connector.Protocol(stringValue(p, "ssh.protocol")), KnownHosts: stringValue(p, "ssh.known_hosts"), HostKeyPolicy: connector.HostKeyPolicy(stringValue(p, "ssh.host_key_policy")), MaxScriptOutputBytes: int64(integerValue(p, "ssh.max_script_output_bytes"))}
+	c := connector.ConnectionConfig{LogLevel: stringValue(p, "ssh.log_level"), Protocol: connector.Protocol(stringValue(p, "ssh.protocol")), KnownHosts: stringValue(p, "ssh.known_hosts"), JumpHost: stringValue(p, "ssh.jump_host"), ConnectRetries: integerValue(p, "ssh.connect_retries"), HostKeyPolicy: connector.HostKeyPolicy(stringValue(p, "ssh.host_key_policy")), MaxScriptOutputBytes: int64(integerValue(p, "ssh.max_script_output_bytes"))}
 	protocols, e := stringMap(p, "ssh.vendor_protocols")
 	if e != nil {
 		return c, e
@@ -276,9 +278,6 @@ func (s *Services) compileConnection(vendor string) (connector.ConnectionConfig,
 	}
 	return c, nil
 }
-func (s *Services) Device(ctx context.Context, r fleet.Record) (*connector.Device, error) {
-	return s.DeviceWithLogger(ctx, r, nil)
-}
 func (s *Services) DeviceWithLogger(ctx context.Context, r fleet.Record, logger io.Writer) (*connector.Device, error) {
 	if e := ctx.Err(); e != nil {
 		return nil, e
@@ -287,7 +286,6 @@ func (s *Services) DeviceWithLogger(ctx context.Context, r fleet.Record, logger 
 	if e != nil {
 		return nil, e
 	}
-	p := d.Profile()
 	c, ok := s.templates[r.Vendor]
 	if !ok {
 		return nil, config.ErrInvalid
@@ -313,7 +311,7 @@ func (s *Services) DeviceWithLogger(ctx context.Context, r fleet.Record, logger 
 	}
 	c.Password = get(keys.password)
 	c.EnablePassword = get(keys.enablePassword)
-	return s.factory(p, c)
+	return s.factory(d, c)
 }
 func (s *Services) limits() netdisco.Limits {
 	return s.settings.inventoryLimits
@@ -402,7 +400,7 @@ func (s *Services) LogDirectory(mode, directory string) string {
 	if explicit := s.settings.logDirectory; explicit != "" {
 		return explicit
 	}
-	if mode == "topology" || mode == "tftp" || mode == "push" {
+	if mode == "topology" || mode == "tftp" || mode == "deploy" || mode == "exec" {
 		return filepath.Join(directory, "logs")
 	}
 	return ""

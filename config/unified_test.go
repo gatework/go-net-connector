@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,11 +24,11 @@ func TestUnifiedConfigurationAppliesToEveryCommand(t *testing.T) {
 		if name == "tftp" {
 			name = "backup"
 		}
-		s, err := Load(Options{Name: name, CWD: root, Home: root, Directories: []string{root}, Environment: map[string]string{}, Defaults: Defaults(mode)})
+		s, err := Load(context.Background(), Options{Name: name, CWD: root, Home: root, Directories: []string{root}, Environment: map[string]string{}, Defaults: Defaults(mode)})
 		if err != nil {
 			t.Fatal(mode, err)
 		}
-		if s.Missing() || s.Value("netdisco.url") != "https://inventory.example.test" || s.Value("backup.parallel") != 7 || s.Value("topology.parallel") != 3 || s.Value("tftp.upload_timeout") != 600 {
+		if s.Value("netdisco.url") != "https://inventory.example.test" || s.Value("backup.parallel") != 7 || s.Value("topology.parallel") != 3 || s.Value("tftp.upload_timeout") != 600 {
 			t.Fatal(mode, s.Public())
 		}
 		files := s.Sources()["configuration_files"].([]string)
@@ -44,8 +45,8 @@ func TestScopeFilesAloneDoNotCreateApplicableConfiguration(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	s, err := Load(Options{Name: "backup", CWD: root, Home: root, Directories: []string{root}, Environment: map[string]string{}, Defaults: Defaults("backup")})
-	if err != nil || !s.Missing() || s.Value("backup.parallel") != 4 {
+	s, err := Load(context.Background(), Options{Name: "backup", CWD: root, Home: root, Directories: []string{root}, Environment: map[string]string{}, Defaults: Defaults("backup")})
+	if err != nil || len(s.Sources()["configuration_files"].([]string)) != 0 || s.Value("backup.parallel") != 4 {
 		t.Fatal(s.Public(), err)
 	}
 }
@@ -53,11 +54,11 @@ func TestScopeFilesAloneDoNotCreateApplicableConfiguration(t *testing.T) {
 func TestUnifiedInitializerRoundTripAndExistingFile(t *testing.T) {
 	root := t.TempDir()
 	options := Options{Name: "backup", CWD: root, Home: root, Directories: []string{}, Environment: map[string]string{}, Defaults: Defaults("backup"), Overrides: map[string]any{"netdisco": map[string]any{"url": "https://inventory.example.test"}, "tftp": map[string]any{"server": "192.0.2.50"}}}
-	s, err := Load(options)
+	s, err := Load(context.Background(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := Initialize(s, "backup")
+	created, err := InitializeSelected(s, "backup", true, true)
 	if err != nil || len(created) != 2 {
 		t.Fatal(created, err)
 	}
@@ -80,11 +81,11 @@ func TestUnifiedInitializerRoundTripAndExistingFile(t *testing.T) {
 	options.Overrides = nil
 	options.Name = "topology"
 	options.Defaults = Defaults("topology")
-	loaded, err := Load(options)
+	loaded, err := Load(context.Background(), options)
 	if err != nil || loaded.Value("tftp.server") != "192.0.2.50" {
 		t.Fatal(err)
 	}
-	created, err = Initialize(loaded, "topology")
+	created, err = InitializeSelected(loaded, "topology", true, true)
 	if err != nil || len(created) != 0 {
 		t.Fatal(created, err)
 	}
@@ -101,7 +102,7 @@ func TestNestedLegacyDocumentRequiresMigration(t *testing.T) {
 		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Load(Options{Name: "backup", CWD: root, Home: root, Directories: []string{root}, Defaults: Defaults("backup")}); err == nil {
+		if _, err := Load(context.Background(), Options{Name: "backup", CWD: root, Home: root, Directories: []string{root}, Defaults: Defaults("backup")}); err == nil {
 			t.Fatal("legacy nesting accepted")
 		}
 	}

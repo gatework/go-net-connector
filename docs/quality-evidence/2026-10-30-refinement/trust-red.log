@@ -1,5 +1,0 @@
---- FAIL: TestProcessCloseStopsAuthentication (0.02s)
-    transport_round3_test.go:69: authentication admitted after Close: <nil>
-FAIL
-FAIL	github.com/gatework/go-net-connector/connector	0.812s
-FAIL

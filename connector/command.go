@@ -143,16 +143,16 @@ func (d *Device) runScript(ctx context.Context, script Script, opts ExecuteOptio
 		x.limit = opts.MaxOutputBytes
 	}
 
-	if !opts.SkipPrivilege && d.profile.PrivilegeCommand != "" && !d.privileged.Load() {
+	if !opts.SkipPrivilege && d.terminal.PrivilegeCommand != "" && !d.privileged.Load() {
 		secret := d.config.EnablePassword
 		if secret == "" {
 			secret = d.config.Password
 		}
 		ac, cancel := context.WithTimeout(ctx, d.config.LoginTimeout)
-		err = d.sendLine(ac, d.profile.PrivilegeCommand+d.config.LineEnding, false)
+		err = d.sendLine(ac, d.terminal.PrivilegeCommand+d.config.LineEnding, false)
 		if err == nil {
 			var s StepResult
-			s, err = d.readResponse(ac, Command{}, d.profile.PrivilegePrompt, d.loginInteractions(secret), true, false)
+			s, err = d.readResponse(ac, Command{}, d.terminal.PrivilegePrompt, d.loginInteractions(secret), true, false)
 			if err == nil {
 				d.setPrompt(s.Response())
 				d.privileged.Store(true)
@@ -168,9 +168,9 @@ func (d *Device) runScript(ctx context.Context, script Script, opts ExecuteOptio
 			return
 		}
 		c := original
-		if d.profile.Prepare != nil {
+		if d.preparer != nil {
 			var skip bool
-			err = x.hook(ctx, func(ex Executor) error { var e error; c, skip, e = d.profile.Prepare(ctx, c, ex); return e })
+			err = x.hook(ctx, func(ex Executor) error { var e error; c, skip, e = d.preparer.PrepareCommand(ctx, c, ex); return e })
 			if err != nil {
 				err = newError("prepare_failed", "script", original, err)
 				return
@@ -187,8 +187,8 @@ func (d *Device) runScript(ctx context.Context, script Script, opts ExecuteOptio
 		if step.Response().RawPrompt() != "" {
 			result.steps = append(result.steps, step)
 		}
-		if err == nil && d.profile.AfterCommand != nil {
-			e := x.hook(ctx, func(ex Executor) error { return d.profile.AfterCommand(ctx, c, step, ex) })
+		if err == nil && d.observer != nil {
+			e := x.hook(ctx, func(ex Executor) error { return d.observer.AfterCommand(ctx, c, step, ex) })
 			if e != nil {
 				err = newError("after_command_failed", "script", c, e)
 			}
@@ -241,7 +241,7 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 		secrets = append(secrets, c.Text)
 	}
 	private := c.Sensitive || c.OutputSensitive
-	for _, rules := range [][]Interaction{c.Interactions, d.profile.Interactions} {
+	for _, rules := range [][]Interaction{c.Interactions, d.terminal.Interactions} {
 		for _, rule := range rules {
 			private = private || rule.Sensitive
 		}
@@ -288,7 +288,7 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 	started := time.Now()
 	prompt := c.Prompt
 	if prompt.IsZero() {
-		prompt = d.profile.CommandPrompt
+		prompt = d.terminal.CommandPrompt
 	}
 	if x.strategy != nil && c.Prompt.IsZero() {
 		var e error
@@ -308,8 +308,8 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 		return step, writeFailure("command", c, err)
 	}
 	written = len(c.Text) + len(d.config.LineEnding)
-	replies := append(cloneInteractions(c.Interactions), d.profile.Interactions...)
-	replies = append(replies, Interaction{Pattern: d.profile.Pager, Reply: d.profile.PagerResponse, Unlimited: true})
+	replies := append(cloneInteractions(c.Interactions), d.terminal.Interactions...)
+	replies = append(replies, Interaction{Pattern: d.terminal.Pager, Reply: d.terminal.PagerResponse, Unlimited: true})
 	step, err = d.readResponse(cc, c, prompt, replies, false, c.Poll)
 	response = step.Response()
 	step.duration = time.Since(started)
@@ -335,14 +335,14 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 	if int64(len(step.response.data.output)) > d.config.MaxOutputBytes {
 		return step, newError("output_limit_exceeded", "parse", c, ErrOutputLimit)
 	}
-	if len(d.profile.CommandErrors) > 0 {
+	if len(d.terminal.CommandErrors) > 0 {
 		if strings.Contains(diagnostic, "\x1b[") {
 			diagnostic = ansiColor.ReplaceAllString(diagnostic, "")
 		}
 		diagnostic = strings.ReplaceAll(strings.ReplaceAll(diagnostic, "\r\n", "\n"), "\r", "\n")
 	}
 	rendered, _ := response.Rendered()
-	for _, pattern := range d.profile.CommandErrors {
+	for _, pattern := range d.terminal.CommandErrors {
 		if pattern.MatchString(diagnostic) || pattern.MatchString(rendered) {
 			if cc.Err() == nil && (x.limit <= 0 || x.bytes <= x.limit) {
 				x.rejection = &response
@@ -404,7 +404,7 @@ func (d *Device) readResponse(ctx context.Context, c Command, prompt expect.Patt
 				body.WriteString(r.Match)
 			}
 		} else {
-			// Go regex boundaries consume delimiters that Ruby lookarounds retain.
+			// Regex boundaries consume line delimiters that belong to the response; restore them.
 			for _, b := range r.Match {
 				if b == '\r' || b == '\n' {
 					body.WriteRune(b)
@@ -430,7 +430,7 @@ func (d *Device) readResponse(ctx context.Context, c Command, prompt expect.Patt
 		add(loginAuthError, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
 			return expect.Return, ErrAuthentication
 		})
-		for _, r := range d.profile.AuthenticationErrors {
+		for _, r := range d.terminal.AuthenticationErrors {
 			p, _ := expect.FromRegexp(r)
 			add(p, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
 				return expect.Return, ErrAuthentication
@@ -511,6 +511,12 @@ func (d *Device) readResponse(ctx context.Context, c Command, prompt expect.Patt
 		}
 		code := "transport_error"
 		switch {
+		case errors.Is(err, errConnectionRefused):
+			code = "connection_refused"
+		case errors.Is(err, errNoRoute):
+			code = "no_route"
+		case errors.Is(err, errConnectTimeout):
+			code = "connection_timeout"
 		case errors.Is(err, ErrResponseLimit):
 			code = "response_limit_exceeded"
 		case errors.Is(err, ErrAuthentication):

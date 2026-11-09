@@ -23,7 +23,11 @@ type Device struct {
 	closed     bool
 	cancel     context.CancelFunc
 	retired    atomic.Bool
-	profile    Profile
+	terminal   Terminal
+	driver     Driver
+	preparer   CommandPreparer
+	observer   CommandObserver
+	inspector  LoginInspector
 	config     ConnectionConfig
 	factory    TransportFactory
 	lease      atomic.Bool
@@ -38,11 +42,16 @@ type Device struct {
 	operation  *Operation // Accessed only by the holder of lease.
 }
 
-func New(profile Profile, cfg ConnectionConfig, opts ...Option) (*Device, error) {
+// New constructs an unconnected Device for driver d. It never opens a
+// connection; register Close, then call Connect explicitly.
+func New(d Driver, cfg ConnectionConfig, opts ...Option) (*Device, error) {
+	if isNilValue(d) {
+		return nil, ErrInvalid
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	p, e := profile.clone()
+	p, e := d.Terminal().clone()
 	if e != nil {
 		return nil, e
 	}
@@ -71,7 +80,7 @@ func New(profile Profile, cfg ConnectionConfig, opts ...Option) (*Device, error)
 		return nil, e
 	}
 	cfg.Challenges = cloneInteractions(cfg.Challenges)
-	cfg.LegacySSHArguments = append([]string(nil), cfg.LegacySSHArguments...)
+	cfg.LegacyCryptoArguments = append([]string(nil), cfg.LegacyCryptoArguments...)
 	o := options{factory: openProcess}
 	for _, opt := range opts {
 		if opt == nil {
@@ -81,15 +90,16 @@ func New(profile Profile, cfg ConnectionConfig, opts ...Option) (*Device, error)
 			return nil, e
 		}
 	}
-	d := &Device{profile: p, config: cfg, factory: o.factory}
-	d.prompt.Store(promptState{err: ErrIncomplete})
-	d.haState.Store("")
-	d.log = &logWriter{target: cfg.Logger, level: cfg.LogLevel, host: cfg.Host, encoding: "auto", paused: true}
-	return d, nil
+	device := &Device{terminal: p, driver: d, config: cfg, factory: o.factory}
+	device.preparer, device.observer, device.inspector = driverHooks(d)
+	device.prompt.Store(promptState{err: ErrIncomplete})
+	device.haState.Store("")
+	device.log = &logWriter{target: cfg.Logger, level: cfg.LogLevel, host: cfg.Host, encoding: "auto", paused: true}
+	return device, nil
 }
-func (d *Device) ProfileName() string { return d.profile.Name }
-func (d *Device) Host() string        { return d.config.Host }
-func (d *Device) Connected() bool     { return d.connected.Load() }
+func (d *Device) PlatformName() string { return d.terminal.Name }
+func (d *Device) Host() string         { return d.config.Host }
+func (d *Device) Connected() bool      { return d.connected.Load() }
 
 type promptState struct {
 	raw, text string
@@ -161,12 +171,50 @@ func (d *Device) Connect(ctx context.Context) (err error) {
 }
 
 var errConnectionRefused = errors.New("connector: connection refused")
+var errNoRoute = errors.New("connector: no route to host")
+var errConnectTimeout = errors.New("connector: connection timed out")
+
+// unreachable reports connection failures that happen before the device shows
+// any login prompt, so no credential or command has been written.
+func unreachable(err error) bool {
+	return errors.Is(err, errConnectionRefused) || errors.Is(err, errNoRoute) || errors.Is(err, errConnectTimeout)
+}
+
 var errCleanup = errors.New("connector: cleanup failed")
 var errHostKeyChanged = errors.New("connector: host key changed")
 var errRSATooSmall = errors.New("connector: RSA modulus too small")
 var errUnsupportedCipher = errors.New("connector: unsupported cipher")
 
+// connect connects once, then retries only failures that happened before any
+// login prompt (refused, no route, timed out): nothing was written, so a retry
+// cannot replay a credential or a command. Authentication failures and every
+// failure after login begins are never retried.
 func (d *Device) connect(parent context.Context) error {
+	for attempt := 0; ; attempt++ {
+		err := d.connectWithRecovery(parent)
+		if err == nil || !unreachable(err) || attempt >= d.config.ConnectRetries || d.connected.Load() {
+			return err
+		}
+		if e := d.sessionEvent(parent, "connect_retry", "warn", Command{}, ""); e != nil {
+			return joinFailures(err, e)
+		}
+		timer := time.NewTimer(time.Duration(attempt+1) * connectRetryDelay)
+		select {
+		case <-parent.Done():
+			timer.Stop()
+			return parent.Err()
+		case <-timer.C:
+		}
+		// Only this call's own pre-login failures retired the session; nothing
+		// was written, so the next attempt is still the same initial connect.
+		d.retired.Store(false)
+	}
+}
+
+// connectRetryDelay is the linear backoff unit between connection attempts.
+var connectRetryDelay = 2 * time.Second
+
+func (d *Device) connectWithRecovery(parent context.Context) error {
 	if err := parent.Err(); err != nil {
 		return err
 	}
@@ -186,7 +234,7 @@ func (d *Device) connect(parent context.Context) error {
 	defer cancel()
 	cfg := d.config
 	// Legacy options are selected only after a recognized failure.
-	cfg.LegacySSHArguments = nil
+	cfg.LegacyCryptoArguments = nil
 	cfg.replaceHostKey = false
 	err := d.connectOnce(ctx, cfg)
 	if err == nil || cfg.Protocol != "ssh" || errors.Is(err, errCleanup) || d.transport != nil || ctx.Err() != nil {
@@ -198,10 +246,10 @@ func (d *Device) connect(parent context.Context) error {
 		cfg.Port = 0
 	case d.config.HostKeyPolicy == "replace" && errors.Is(err, errHostKeyChanged):
 		cfg.replaceHostKey = true
-	case d.config.AllowLegacySSH && errors.Is(err, errRSATooSmall) && len(d.profile.LegacySSHArguments) > 0:
-		cfg.LegacySSHArguments = append([]string(nil), d.profile.LegacySSHArguments...)
-	case d.config.AllowLegacySSH && errors.Is(err, errUnsupportedCipher):
-		cfg.LegacySSHArguments = []string{"-c", "des"}
+	case d.config.AllowLegacyCrypto && errors.Is(err, errRSATooSmall) && len(d.terminal.LegacyCryptoArguments) > 0:
+		cfg.LegacyCryptoArguments = append([]string(nil), d.terminal.LegacyCryptoArguments...)
+	case d.config.AllowLegacyCrypto && errors.Is(err, errUnsupportedCipher):
+		cfg.LegacyCryptoArguments = []string{"-c", "des"}
 	default:
 		return err
 	}
@@ -231,7 +279,7 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 		}
 	}()
 	cfg.Challenges = cloneInteractions(cfg.Challenges)
-	cfg.LegacySSHArguments = append([]string(nil), cfg.LegacySSHArguments...)
+	cfg.LegacyCryptoArguments = append([]string(nil), cfg.LegacyCryptoArguments...)
 	t, e := d.factory(ctx, cfg)
 	// A partial factory return still transfers cleanup responsibility.
 	if !isNilValue(t) {
@@ -243,9 +291,6 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 	}
 	if isNilValue(t) {
 		return ErrConnection
-	}
-	if _, legacy := t.(interface{ Authenticated() error }); legacy {
-		return newError("invalid_transport", "connect", Command{}, ErrInvalid)
 	}
 	var owned io.ReadWriteCloser = d.owner
 	if conn, ok := t.(syscall.Conn); ok {
@@ -279,7 +324,7 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 	authctx, cancel := context.WithTimeout(ctx, d.config.LoginTimeout)
 	defer cancel()
 	interactions := d.loginInteractions(d.config.Password)
-	response, e := d.readResponse(authctx, Command{}, d.profile.LoginPrompt, interactions, true, false)
+	response, e := d.readResponse(authctx, Command{}, d.terminal.LoginPrompt, interactions, true, false)
 	if e != nil {
 		return e
 	}
@@ -296,11 +341,11 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 	d.lifeMu.Unlock()
 	d.retired.Store(false)
 	d.privileged.Store(strings.Contains(response.Response().RawPrompt(), "]"))
-	if d.profile.AfterLogin != nil {
+	if d.inspector != nil {
 		// Freeze verified text before publishing the login response. A callback
 		// may inspect conversion errors or choose to consume only the raw banner.
 		_, _ = response.response.data.convert()
-		state, err := d.profile.AfterLogin(ctx, response)
+		state, err := d.inspector.AfterLogin(ctx, response)
 		if err != nil {
 			return newError("after_login_failed", "login", Command{}, err)
 		}
@@ -335,20 +380,20 @@ func (d *Device) loginInteractions(secret string) []Interaction {
 		}
 		return "yes\n", nil
 	}}
-	user := Interaction{Pattern: d.profile.UsernamePrompt, Limit: 1, Sensitive: true, Respond: func(context.Context, string) (string, error) {
+	user := Interaction{Pattern: d.terminal.UsernamePrompt, Limit: 1, Sensitive: true, Respond: func(context.Context, string) (string, error) {
 		if d.config.Username == "" {
 			return "", ErrAuthentication
 		}
 		return d.config.Username + d.config.LineEnding, nil
 	}}
-	pass := Interaction{Pattern: d.profile.PasswordPrompt, Limit: 1, Sensitive: true, Respond: func(context.Context, string) (string, error) {
+	pass := Interaction{Pattern: d.terminal.PasswordPrompt, Limit: 1, Sensitive: true, Respond: func(context.Context, string) (string, error) {
 		if secret == "" {
 			return "", ErrAuthentication
 		}
 		return secret + d.config.LineEnding, nil
 	}}
 	replies := []Interaction{hostkey}
-	replies = append(replies, d.profile.LoginInteractions...)
+	replies = append(replies, d.terminal.LoginInteractions...)
 	replies = append(replies, d.config.Challenges...)
 	if d.config.KeyPassphrase != "" {
 		replies = append(replies, Interaction{Pattern: keyPassphraseQuestion, Reply: d.config.KeyPassphrase + d.config.LineEnding, Limit: 1, Sensitive: true})

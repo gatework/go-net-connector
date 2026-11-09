@@ -2,16 +2,17 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"testing"
 )
 
 func TestInitializerOmitsImplicitDefaults(t *testing.T) {
-	s, e := Load(Options{Name: "backup", CWD: t.TempDir(), Home: t.TempDir(), Directories: []string{}, Environment: map[string]string{}, Defaults: Defaults("backup"), AllowMissing: true})
+	s, e := Load(context.Background(), Options{Name: "backup", CWD: t.TempDir(), Home: t.TempDir(), Directories: []string{}, Environment: map[string]string{}, Defaults: Defaults("backup"), AllowMissing: true})
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = Initialize(s, "backup"); e != nil {
+	if _, e = InitializeSelected(s, "backup", true, true); e != nil {
 		t.Fatal(e)
 	}
 	p, _ := s.InitPaths()

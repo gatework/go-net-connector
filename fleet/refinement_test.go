@@ -16,7 +16,7 @@ func TestPlanLooksUpCapabilitiesOncePerVendorPerPlan(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		profiles[name] = declaration.Profile()
+		profiles[name] = declaration.Terminal()
 	}
 	registry := &changingRegistry{profiles: profiles, calls: calls, resolver: any(builtin).(PlatformResolver)}
 	rules, err := NewRules(RuleOptions{}, registry)

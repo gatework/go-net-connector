@@ -10,7 +10,7 @@ import (
 
 func TestKeyPassphraseAndExplicitLineEnding(t *testing.T) {
 	done := make(chan error, 1)
-	d, err := New(fixtureProfile(), ConnectionConfig{Host: "fixture", IdentityFile: "/keys/device key", KeyPassphrase: "passphrase-value", LineEnding: "\r\n"}, WithTransportFactory(func(_ context.Context, cfg ConnectionConfig) (io.ReadWriteCloser, error) {
+	d, err := New(fixtureDriver(), ConnectionConfig{Host: "fixture", IdentityFile: "/keys/device key", KeyPassphrase: "passphrase-value", LineEnding: "\r\n"}, WithTransportFactory(func(_ context.Context, cfg ConnectionConfig) (io.ReadWriteCloser, error) {
 		if cfg.IdentityFile != "/keys/device key" {
 			t.Error("identity setting lost")
 		}

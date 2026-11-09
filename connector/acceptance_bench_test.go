@@ -19,7 +19,7 @@ func BenchmarkCommandOutput(b *testing.B) {
 			b.SetBytes(int64(size))
 			for b.Loop() {
 				done := make(chan struct{})
-				d, e := New(Profile{Name: "benchmark", LoginPrompt: testPattern(`sw#\s*$`), CommandPrompt: testPattern(`sw#\s*$`)}, ConnectionConfig{Host: "fixture", MaxOutputBytes: int64(size + 1024), CommandTimeout: 30 * time.Second}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
+				d, e := New(StaticDriver{Grammar: Terminal{Name: "benchmark", LoginPrompt: testPattern(`sw#\s*$`), CommandPrompt: testPattern(`sw#\s*$`)}}, ConnectionConfig{Host: "fixture", MaxOutputBytes: int64(size + 1024), CommandTimeout: 30 * time.Second}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 					a, c := net.Pipe()
 					go func() {
 						defer close(done)
@@ -54,7 +54,7 @@ func BenchmarkCommandPaged1000(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		done := make(chan struct{})
-		d, e := New(Profile{Name: "benchmark", LoginPrompt: prompt, CommandPrompt: prompt, Pager: pager}, ConnectionConfig{Host: "fixture", CommandTimeout: 30 * time.Second}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
+		d, e := New(StaticDriver{Grammar: Terminal{Name: "benchmark", LoginPrompt: prompt, CommandPrompt: prompt, Pager: pager}}, ConnectionConfig{Host: "fixture", CommandTimeout: 30 * time.Second}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 			a, c := net.Pipe()
 			go func() {
 				defer close(done)
@@ -96,7 +96,7 @@ func BenchmarkCommandMultiline(b *testing.B) {
 			b.SetBytes(int64(len(body)))
 			for b.Loop() {
 				done := make(chan struct{})
-				d, e := New(Profile{Name: "benchmark", LoginPrompt: testPattern(`sw#\s*$`), CommandPrompt: testPattern(`sw#\s*$`)}, ConnectionConfig{Host: "fixture", MaxOutputBytes: int64(size + 1024), CommandTimeout: 30 * time.Second}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
+				d, e := New(StaticDriver{Grammar: Terminal{Name: "benchmark", LoginPrompt: testPattern(`sw#\s*$`), CommandPrompt: testPattern(`sw#\s*$`)}}, ConnectionConfig{Host: "fixture", MaxOutputBytes: int64(size + 1024), CommandTimeout: 30 * time.Second}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 					a, c := net.Pipe()
 					go func() {
 						defer close(done)
@@ -135,7 +135,7 @@ func BenchmarkCommandLogging(b *testing.B) {
 			}
 			prompt := testPattern(`sw#\s*$`)
 			done := make(chan struct{})
-			d, err := New(Profile{Name: "benchmark", LoginPrompt: prompt, CommandPrompt: prompt}, cfg,
+			d, err := New(StaticDriver{Grammar: Terminal{Name: "benchmark", LoginPrompt: prompt, CommandPrompt: prompt}}, cfg,
 				WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 					a, peer := net.Pipe()
 					go func() {

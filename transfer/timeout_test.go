@@ -43,9 +43,9 @@ func TestSilentUploadIsBounded(t *testing.T) {
 func TestUploadTimeoutCoversSourceDiscoveryAndTransfer(t *testing.T) {
 	started := make(chan time.Time, 1)
 	done := make(chan struct{})
-	d, err := connector.New(connector.Profile{
+	d, err := connector.New(connector.StaticDriver{Grammar: connector.Terminal{
 		Name: "h3c", LoginPrompt: testPattern(`sw#\s*$`), CommandPrompt: testPattern(`sw#\s*$`),
-	}, connector.ConnectionConfig{Host: "192.0.2.1", CommandTimeout: time.Second}, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
+	}}, connector.ConnectionConfig{Host: "192.0.2.1", CommandTimeout: time.Second}, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
 		client, peer := net.Pipe()
 		go func() {
 			defer close(done)

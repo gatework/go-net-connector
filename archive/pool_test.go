@@ -56,7 +56,7 @@ func TestPoolLocalPipes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer p.Close()
-	if err := p.Prepare(context.Background()); err != nil {
+	if err := p.Prepare(context.Background(), nil); err != nil {
 		t.Fatal(err)
 	}
 	receipt, err := p.Upload(context.Background(), "running.cfg", "archive.cfg", func(_ context.Context, filename string) (transfer.Receipt, error) {
@@ -86,7 +86,7 @@ func TestPoolCloseCancelsActiveUpload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p.Prepare(context.Background()); err != nil {
+	if err := p.Prepare(context.Background(), nil); err != nil {
 		t.Fatal(err)
 	}
 	entered := make(chan struct{})
@@ -120,7 +120,7 @@ func TestPoolLocalDailyDirectoryReuse(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := p.Prepare(context.Background()); err != nil {
+		if err := p.Prepare(context.Background(), nil); err != nil {
 			t.Fatal(err)
 		}
 		for _, client := range p.clients {
@@ -140,7 +140,7 @@ func TestPoolLocalDailyDirectoryReuse(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := p.Prepare(context.Background()); err != nil {
+		if err := p.Prepare(context.Background(), nil); err != nil {
 			t.Fatal(err)
 		}
 		if p.clients[0].batch != want {
@@ -175,7 +175,7 @@ func TestPoolCloseCancelsAndJoinsPrepare(t *testing.T) {
 		return Channel{Input: client, Output: client, Close: func() error { client.Close(); <-done; return nil }}, nil
 	}
 	prepared := make(chan error, 1)
-	go func() { prepared <- p.Prepare(context.Background()) }()
+	go func() { prepared <- p.Prepare(context.Background(), nil) }()
 	<-entered
 	closed := make(chan error, 1)
 	go func() { closed <- p.Close() }()
@@ -225,7 +225,7 @@ func TestRemotePoolCloseCancelsAndJoinsPrepare(t *testing.T) {
 		}}, nil
 	}
 	prepared := make(chan error, 1)
-	go func() { prepared <- p.PrepareWithProgress(context.Background(), nil) }()
+	go func() { prepared <- p.Prepare(context.Background(), nil) }()
 	select {
 	case <-entered:
 	case <-time.After(time.Second):
@@ -340,7 +340,7 @@ func TestRemotePoolPreparesClientsWithBoundedConcurrency(t *testing.T) {
 	prepared := make(chan error, 1)
 	progressEvents := make(chan PrepareProgress, len(p.clients)*4)
 	go func() {
-		prepared <- p.PrepareWithProgress(context.Background(), func(event PrepareProgress) {
+		prepared <- p.Prepare(context.Background(), func(event PrepareProgress) {
 			progressEvents <- event
 		})
 	}()
@@ -396,7 +396,7 @@ func TestRemotePoolPreparesClientsWithBoundedConcurrency(t *testing.T) {
 		t.Fatalf("final preflight progress = %+v", last)
 	}
 	var reused []PrepareProgress
-	if err := p.PrepareWithProgress(context.Background(), func(event PrepareProgress) { reused = append(reused, event) }); err != nil {
+	if err := p.Prepare(context.Background(), func(event PrepareProgress) { reused = append(reused, event) }); err != nil {
 		t.Fatal(err)
 	}
 	if len(reused) != 1 || reused[0].Completed != len(p.clients) || reused[0].Total != len(p.clients) || reused[0].Workers != 4 || reused[0].Stage != PrepareStageReady {

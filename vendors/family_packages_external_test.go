@@ -37,7 +37,7 @@ func TestFamilyPackagesExposeDialectConstructors(t *testing.T) {
 	}
 	var _ topology.DescriptionReader = h3c.New()
 	var _ topology.DescriptionWriter = h3c.New()
-	if got := topology.ConfigName("Te1/0/2"); got != "TenGigabitEthernet1/0/2" {
+	if got := topology.InterfaceIdentity(h3c.New()).ConfigName("Te1/0/2"); got != "TenGigabitEthernet1/0/2" {
 		t.Fatalf("configuration interface = %q", got)
 	}
 

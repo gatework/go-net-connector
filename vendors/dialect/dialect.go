@@ -60,11 +60,14 @@ func NewDiagnosticError(code, phase string, cause error) error {
 	return &DiagnosticError{Code: code, Phase: phase, Cause: cause}
 }
 
-// Platform describes one authoritative CLI platform. Profile returns
-// a detached runtime declaration; callers may safely customize that copy.
+// Platform is one authoritative CLI platform: a device driver with a
+// canonical key and an inventory matcher. Optional business capabilities are
+// interfaces defined by the packages that consume them.
 type Platform interface {
+	connector.Driver
 	Name() string
-	Profile() connector.Profile
+	// MatchInventory classifies a normalized inventory identity.
+	MatchInventory(InventoryIdentity) bool
 }
 
 // Registry resolves immutable dialect objects by their canonical platform key.

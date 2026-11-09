@@ -19,7 +19,7 @@ import (
 type reviewFailSink struct{}
 
 func (reviewFailSink) Write([]byte) (int, error) { return 0, errors.New("sink failed") }
-func reviewDevice(t *testing.T, p Profile, sink io.Writer, responses []string) *Device {
+func reviewDevice(t *testing.T, p StaticDriver, sink io.Writer, responses []string) *Device {
 	t.Helper()
 	d, e := New(p, ConnectionConfig{Host: "fixture", Logger: sink, CommandTimeout: time.Second}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 		a, b := net.Pipe()
@@ -44,7 +44,7 @@ func reviewDevice(t *testing.T, p Profile, sink io.Writer, responses []string) *
 	return d
 }
 func TestStreamingLogFailureBeforeMatchHasNoReceipt(t *testing.T) {
-	d := reviewDevice(t, fixtureProfile(), reviewFailSink{}, []string{"done\nsw#"})
+	d := reviewDevice(t, fixtureDriver(), reviewFailSink{}, []string{"done\nsw#"})
 	count := 0
 	r, e := d.ExecuteCommand(t.Context(), Command{Text: "change"}, ExecuteOptions{OnReceipt: func(context.Context, StepResult) error { count++; return nil }})
 	if e == nil || len(r.Steps()) != 0 || count != 0 {
@@ -53,7 +53,7 @@ func TestStreamingLogFailureBeforeMatchHasNoReceipt(t *testing.T) {
 }
 func TestReviewSensitiveHookLeaks(t *testing.T) {
 	var log bytes.Buffer
-	p := fixtureProfile()
+	p := fixtureDriver()
 	p.AfterCommand = func(ctx context.Context, _ Command, _ StepResult, x Executor) error {
 		_, e := x.Execute(ctx, Command{Text: "show secret", OutputSensitive: true})
 		return e
@@ -68,7 +68,7 @@ func TestReviewSensitiveHookLeaks(t *testing.T) {
 	}
 }
 func TestOperationExpiresAndDrainsAdmittedCall(t *testing.T) {
-	d := reviewDevice(t, fixtureProfile(), nil, []string{"done\nsw#"})
+	d := reviewDevice(t, fixtureDriver(), nil, []string{"done\nsw#"})
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	cancelled := make(chan struct{})
@@ -109,15 +109,15 @@ func TestOperationExpiresAndDrainsAdmittedCall(t *testing.T) {
 	<-outer
 }
 func TestReviewInvalidProfileAllowsWrite(t *testing.T) {
-	p := fixtureProfile()
-	p.PrivilegeCommand = "enable\nwrite erase"
-	p.PrivilegePrompt = testPatternZero()
+	p := fixtureDriver()
+	p.Grammar.PrivilegeCommand = "enable\nwrite erase"
+	p.Grammar.PrivilegePrompt = testPatternZero()
 	if _, e := New(p, ConnectionConfig{Host: "fixture"}); e == nil {
 		t.Fatal("invalid privilege command/prompt accepted")
 	}
 }
 func TestReviewFailedHookStillConsumesBudget(t *testing.T) {
-	p := fixtureProfile()
+	p := fixtureDriver()
 	p.Prepare = func(ctx context.Context, c Command, x Executor) (Command, bool, error) {
 		_, e := x.Execute(ctx, Command{Text: "query"})
 		if !errors.Is(e, ErrDevice) {
@@ -132,7 +132,7 @@ func TestReviewFailedHookStillConsumesBudget(t *testing.T) {
 	}
 }
 func TestReviewCancellationInLastCallback(t *testing.T) {
-	d := reviewDevice(t, fixtureProfile(), nil, []string{"ok\nsw#"})
+	d := reviewDevice(t, fixtureDriver(), nil, []string{"ok\nsw#"})
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	r, e := d.ExecuteCommand(ctx, Command{Text: "main"}, ExecuteOptions{OnStep: func(context.Context, StepResult) error { cancel(); return nil }})
@@ -143,7 +143,7 @@ func TestReviewCancellationInLastCallback(t *testing.T) {
 
 func TestReviewRenderedSecretLeaks(t *testing.T) {
 	var log bytes.Buffer
-	d := reviewDevice(t, fixtureProfile(), &log, []string{"pa\x1b[31mssword\x1b[0m\nsw#"})
+	d := reviewDevice(t, fixtureDriver(), &log, []string{"pa\x1b[31mssword\x1b[0m\nsw#"})
 	d.config.Password = "password"
 	_, e := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{})
 	if e != nil {
@@ -171,7 +171,7 @@ func (c *reviewSingleClose) Close() error {
 	return c.Conn.Close()
 }
 func TestReviewTransportClosedTwice(t *testing.T) {
-	d, e := New(fixtureProfile(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
+	d, e := New(fixtureDriver(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 		a, b := net.Pipe()
 		go func() { defer b.Close(); io.WriteString(b, "sw#"); io.Copy(io.Discard, b) }()
 		return &reviewSingleClose{Conn: a}, nil
@@ -188,8 +188,8 @@ func TestReviewTransportClosedTwice(t *testing.T) {
 }
 
 func TestPagerPreservesConsumedLineBoundaries(t *testing.T) {
-	p := fixtureProfile()
-	p.PagerResponse = "\n"
+	p := fixtureDriver()
+	p.Grammar.PagerResponse = "\n"
 	d := reviewDevice(t, p, nil, []string{"first\r\n--More--\n", "second\r\nsw#"})
 	r, e := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{})
 	if e != nil {
@@ -204,7 +204,7 @@ func TestPagerPreservesConsumedLineBoundaries(t *testing.T) {
 	}
 }
 func TestCompletionLogFailurePreservesReceipt(t *testing.T) {
-	d := reviewDevice(t, fixtureProfile(), reviewFailSink{}, []string{"sw#"})
+	d := reviewDevice(t, fixtureDriver(), reviewFailSink{}, []string{"sw#"})
 	count := 0
 	r, e := d.ExecuteCommand(t.Context(), Command{Text: "change"}, ExecuteOptions{OnReceipt: func(context.Context, StepResult) error { count++; return nil }})
 	if e == nil || len(r.Steps()) != 1 || count != 1 {
@@ -214,20 +214,20 @@ func TestCompletionLogFailurePreservesReceipt(t *testing.T) {
 func TestProfileAndChallengePreflight(t *testing.T) {
 	for _, kind := range []string{"privilege_newline", "privilege_without_prompt", "login_nil", "interaction_empty", "interaction_negative", "challenge_nil"} {
 		t.Run(kind, func(t *testing.T) {
-			p := fixtureProfile()
+			p := fixtureDriver()
 			cfg := ConnectionConfig{Host: "fixture"}
 			switch kind {
 			case "privilege_newline":
-				p.PrivilegeCommand = "enable\nwrite erase"
-				p.PrivilegePrompt = p.CommandPrompt
+				p.Grammar.PrivilegeCommand = "enable\nwrite erase"
+				p.Grammar.PrivilegePrompt = p.Grammar.CommandPrompt
 			case "privilege_without_prompt":
-				p.PrivilegeCommand = "enable"
+				p.Grammar.PrivilegeCommand = "enable"
 			case "login_nil":
-				p.LoginInteractions = []Interaction{{}}
+				p.Grammar.LoginInteractions = []Interaction{{}}
 			case "interaction_empty":
-				p.Interactions = []Interaction{{Pattern: testPattern(`.*`)}}
+				p.Grammar.Interactions = []Interaction{{Pattern: testPattern(`.*`)}}
 			case "interaction_negative":
-				p.Interactions = []Interaction{{Pattern: testPattern(`yes`), Limit: -1}}
+				p.Grammar.Interactions = []Interaction{{Pattern: testPattern(`yes`), Limit: -1}}
 			case "challenge_nil":
 				cfg.Challenges = []Interaction{{}}
 			}
@@ -243,7 +243,7 @@ func TestHookExpiresAndDrainsAdmittedCall(t *testing.T) {
 	release := make(chan struct{})
 	child := make(chan error, 1)
 	outer := make(chan error, 1)
-	p := fixtureProfile()
+	p := fixtureDriver()
 	p.Prepare = func(ctx context.Context, c Command, x Executor) (Command, bool, error) {
 		go func() {
 			_, e := x.Execute(context.Background(), Command{Text: "query", Interactions: []Interaction{{Pattern: testPattern(`Question:`), Respond: func(ctx context.Context, _ string) (string, error) {
@@ -313,9 +313,9 @@ func TestLegacyRecoveryUsesOnlyRecognizedFailureOnce(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var attempts []ConnectionConfig
-			p := fixtureProfile()
-			p.LegacySSHArguments = tc.profileArgs
-			d, e := New(p, ConnectionConfig{Host: "fixture", AllowLegacySSH: tc.allow, LegacySSHArguments: []string{"forbidden-first-attempt"}}, WithTransportFactory(func(_ context.Context, cfg ConnectionConfig) (io.ReadWriteCloser, error) {
+			p := fixtureDriver()
+			p.Grammar.LegacyCryptoArguments = tc.profileArgs
+			d, e := New(p, ConnectionConfig{Host: "fixture", AllowLegacyCrypto: tc.allow, LegacyCryptoArguments: []string{"forbidden-first-attempt"}}, WithTransportFactory(func(_ context.Context, cfg ConnectionConfig) (io.ReadWriteCloser, error) {
 				attempts = append(attempts, cfg)
 				a, b := net.Pipe()
 				go func() { defer b.Close(); io.WriteString(b, tc.message) }()
@@ -329,11 +329,11 @@ func TestLegacyRecoveryUsesOnlyRecognizedFailureOnce(t *testing.T) {
 			if e == nil || len(attempts) != tc.wantAttempts {
 				t.Fatalf("attempts=%d error=%v", len(attempts), e)
 			}
-			if len(attempts[0].LegacySSHArguments) != 0 {
-				t.Fatalf("normal SSH used legacy arguments: %v", attempts[0].LegacySSHArguments)
+			if len(attempts[0].LegacyCryptoArguments) != 0 {
+				t.Fatalf("normal SSH used legacy arguments: %v", attempts[0].LegacyCryptoArguments)
 			}
-			if len(attempts) == 2 && !reflect.DeepEqual(attempts[1].LegacySSHArguments, tc.wantArgs) {
-				t.Fatalf("recovery args=%v", attempts[1].LegacySSHArguments)
+			if len(attempts) == 2 && !reflect.DeepEqual(attempts[1].LegacyCryptoArguments, tc.wantArgs) {
+				t.Fatalf("recovery args=%v", attempts[1].LegacyCryptoArguments)
 			}
 		})
 	}
@@ -342,7 +342,7 @@ func TestHostKeyReplacementStartsOnlyAfterChangedKey(t *testing.T) {
 	for _, message := range []string{"REMOTE HOST IDENTIFICATION HAS CHANGED!", "Permission denied"} {
 		t.Run(message, func(t *testing.T) {
 			var attempts []ConnectionConfig
-			d, e := New(fixtureProfile(), ConnectionConfig{Host: "fixture", HostKeyPolicy: "replace", KnownHosts: t.TempDir() + "/known_hosts"}, WithTransportFactory(func(_ context.Context, cfg ConnectionConfig) (io.ReadWriteCloser, error) {
+			d, e := New(fixtureDriver(), ConnectionConfig{Host: "fixture", HostKeyPolicy: "replace", KnownHosts: t.TempDir() + "/known_hosts"}, WithTransportFactory(func(_ context.Context, cfg ConnectionConfig) (io.ReadWriteCloser, error) {
 				attempts = append(attempts, cfg)
 				a, b := net.Pipe()
 				go func() { defer b.Close(); io.WriteString(b, message) }()
@@ -388,7 +388,7 @@ func (c *reviewFailFirstClose) Close() error {
 }
 func TestTransportFailedCloseRemainsRetryable(t *testing.T) {
 	var transport *reviewFailFirstClose
-	d, e := New(fixtureProfile(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
+	d, e := New(fixtureDriver(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 		a, b := net.Pipe()
 		transport = &reviewFailFirstClose{Conn: a}
 		go func() { defer b.Close(); io.WriteString(b, "sw#"); io.Copy(io.Discard, b) }()
@@ -413,7 +413,7 @@ func TestTransportFailedCloseRemainsRetryable(t *testing.T) {
 func TestReceiptSurvivesCallbackFailures(t *testing.T) {
 	for _, which := range []string{"receipt", "step"} {
 		t.Run(which, func(t *testing.T) {
-			d := reviewDevice(t, fixtureProfile(), nil, []string{"done\nsw#"})
+			d := reviewDevice(t, fixtureDriver(), nil, []string{"done\nsw#"})
 			called := 0
 			sentinel := errors.New("callback failed")
 			opts := ExecuteOptions{OnReceipt: func(context.Context, StepResult) error {
@@ -432,7 +432,7 @@ func TestReceiptSurvivesCallbackFailures(t *testing.T) {
 }
 func TestExpiredHookDoesNotReviveInLaterHook(t *testing.T) {
 	var saved Executor
-	p := fixtureProfile()
+	p := fixtureDriver()
 	p.Prepare = func(_ context.Context, c Command, x Executor) (Command, bool, error) {
 		if saved == nil {
 			saved = x
@@ -453,8 +453,8 @@ func TestExpiredHookDoesNotReviveInLaterHook(t *testing.T) {
 }
 
 func TestPagedRunningConfigPreservesEveryLine(t *testing.T) {
-	p := fixtureProfile()
-	p.PagerResponse = "\n"
+	p := fixtureDriver()
+	p.Grammar.PagerResponse = "\n"
 	d := reviewDevice(t, p, nil, []string{"show config\r\ninterface A\r\n--More--\n", " description B\r\nsw#"})
 	r, e := d.RunningConfig(t.Context())
 	if e != nil {
@@ -476,7 +476,7 @@ func TestRecoveryWaitsForSuccessfulCleanup(t *testing.T) {
 	for _, message := range []string{"Connection refused", "RSA modulus too small", "Selected cipher type <unknown> not supported by server", "REMOTE HOST IDENTIFICATION HAS CHANGED!"} {
 		t.Run(message, func(t *testing.T) {
 			attempts := 0
-			d, e := New(fixtureProfile(), ConnectionConfig{Host: "fixture", HostKeyPolicy: "replace", KnownHosts: t.TempDir() + "/known_hosts", AllowLegacySSH: true, AllowTelnetFallback: true}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
+			d, e := New(fixtureDriver(), ConnectionConfig{Host: "fixture", HostKeyPolicy: "replace", KnownHosts: t.TempDir() + "/known_hosts", AllowLegacyCrypto: true, AllowTelnetFallback: true}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 				attempts++
 				a, b := net.Pipe()
 				go func() { defer b.Close(); io.WriteString(b, message) }()
@@ -499,11 +499,11 @@ func TestSensitiveInteractionProtectsEntireExchange(t *testing.T) {
 	for _, profileInteraction := range []bool{false, true} {
 		t.Run(fmt.Sprint(profileInteraction), func(t *testing.T) {
 			var log bytes.Buffer
-			p := fixtureProfile()
+			p := fixtureDriver()
 			c := Command{Text: "show"}
 			rule := Interaction{Pattern: testPattern(`Question:`), Reply: "secret\n", Sensitive: true}
 			if profileInteraction {
-				p.Interactions = []Interaction{rule}
+				p.Grammar.Interactions = []Interaction{rule}
 			} else {
 				c.Interactions = []Interaction{rule}
 			}

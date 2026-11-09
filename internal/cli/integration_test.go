@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/internal/batchreport"
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/netdisco"
 )
@@ -41,7 +42,7 @@ func TestInventoryOnlyNeverConstructsDevice(t *testing.T) {
 	r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) {
 		return []inventory.Device{{IP: "192.0.2.1", Vendor: "cisco", OS: "ios"}}, nil
 	})
-	r.DeviceFactory = func(connector.Profile, connector.ConnectionConfig) (*connector.Device, error) {
+	r.DeviceFactory = func(connector.Driver, connector.ConnectionConfig) (*connector.Device, error) {
 		t.Fatal("constructed device")
 		return nil, nil
 	}
@@ -60,7 +61,7 @@ func TestStdinCredentialsOverrideVendorAndRequireRUN(t *testing.T) {
 				return []inventory.Device{{IP: "192.0.2.1", Vendor: "cisco", OS: "ios"}}, nil
 			})
 			calls := 0
-			r.DeviceFactory = func(_ connector.Profile, c connector.ConnectionConfig) (*connector.Device, error) {
+			r.DeviceFactory = func(_ connector.Driver, c connector.ConnectionConfig) (*connector.Device, error) {
 				calls++
 				if c.Username != "new" || c.Password != "new-secret" {
 					t.Fatal("wrong credentials")
@@ -84,8 +85,8 @@ func TestTFTPVerifiedLocalArchiveEndToEnd(t *testing.T) {
 	})
 	var uploads atomic.Int32
 	peers := make(chan struct{})
-	r.DeviceFactory = func(_ connector.Profile, c connector.ConnectionConfig) (*connector.Device, error) {
-		return connector.New(connector.Profile{Name: "cisco_nxos", LoginPrompt: testPattern(`sw#\s*$`), CommandPrompt: testPattern(`sw#\s*$`)}, c, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
+	r.DeviceFactory = func(_ connector.Driver, c connector.ConnectionConfig) (*connector.Device, error) {
+		return connector.New(connector.StaticDriver{Grammar: connector.Terminal{Name: "cisco_nxos", LoginPrompt: testPattern(`sw#\s*$`), CommandPrompt: testPattern(`sw#\s*$`)}}, c, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
 			a, b := net.Pipe()
 			go func() {
 				defer close(peers)
@@ -124,29 +125,28 @@ func TestTFTPVerifiedLocalArchiveEndToEnd(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("peer leak")
 	}
-	var report map[string]any
+	var report batchreport.Report
 	if e := json.Unmarshal(out.Bytes(), &report); e != nil {
 		t.Fatal(e)
 	}
-	reportBytes, e := os.ReadFile(report["report_location"].(string))
+	reportBytes, e := os.ReadFile(filepath.Join(report.Directory, "report.json"))
 	if e != nil {
 		t.Fatal(e)
 	}
 	if e = json.Unmarshal(reportBytes, &report); e != nil {
 		t.Fatal(e)
 	}
-	row := report["devices"].([]any)[0].(map[string]any)
-	if row["server_file_verified"] != true || row["verification"] != "server_verified" || uploads.Load() != 1 {
+	row := report.Devices[0]
+	if !row.Verified || row.Artifacts.Transfer.Verification != "server_verified" || uploads.Load() != 1 {
 		t.Fatal(row)
 	}
-	for _, key := range []string{"local_file", "server_archive_file", "session_log"} {
-		path, _ := row[key].(string)
+	for key, path := range map[string]string{"local_file": row.Artifacts.Archive.Local.Path, "server_archive_file": row.Artifacts.Archive.Server.ArchivePath, "session_log": row.SessionLog} {
 		b, e := os.ReadFile(path)
 		if e != nil || bytes.Contains(b, []byte("private-secret")) {
 			t.Fatal(key, e)
 		}
 	}
-	if _, e := os.Lstat(filepath.Join(root, row["remote_path"].(string))); !os.IsNotExist(e) {
+	if _, e := os.Lstat(filepath.Join(root, row.Artifacts.Transfer.RemotePath)); !os.IsNotExist(e) {
 		t.Fatal("staging not cleaned", e)
 	}
 }

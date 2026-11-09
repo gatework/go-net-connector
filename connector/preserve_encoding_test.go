@@ -9,7 +9,7 @@ import (
 
 func TestPreserveInvalidEncodingHasWarningAndNoSidecar(t *testing.T) {
 	wire := "show config\r\ndescription \xe2\x80\x94\xe2\r\nsw#"
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{wire})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{wire})
 	path := filepath.Join(t.TempDir(), "device.txt")
 	r, e := d.Backup(t.Context(), BackupOptions{Path: path, TextOnly: true, PreserveInvalidEncoding: true})
 	if e != nil || !r.Complete() || r.Encoding != "original-bytes" || r.TextWarning == nil || r.TextWarning.Count != 1 {

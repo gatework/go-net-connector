@@ -22,7 +22,7 @@ func TestBuiltinRegistryReturnsDetachedDialectProfiles(t *testing.T) {
 	if err != nil || dialect.Name() != "cisco_ios" {
 		t.Fatalf("lookup cisco_ios = %v, %v", dialect, err)
 	}
-	profile := dialect.Profile()
+	profile := dialect.Terminal()
 	if !reflect.DeepEqual(profile.ConfigCommands, []string{"terminal length 0", "show running-config"}) {
 		t.Fatalf("connector profile commands = %v", profile.ConfigCommands)
 	}
@@ -31,21 +31,21 @@ func TestBuiltinRegistryReturnsDetachedDialectProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := again.Profile().ConfigCommands[0]; got != "terminal length 0" {
+	if got := again.Terminal().ConfigCommands[0]; got != "terminal length 0" {
 		t.Fatalf("registry profile shared a mutable command slice: %q", got)
 	}
-	if again.Profile().ConfigStrategy() == again.Profile().ConfigStrategy() {
+	if again.NewConfigCollector() == again.NewConfigCollector() {
 		t.Fatal("registry returned a shared configuration strategy")
 	}
 }
 
-func profileForTest(t testing.TB, name string) connector.Profile {
+func profileForTest(t testing.TB, name string) dialect.Platform {
 	t.Helper()
-	dialect, err := NewBuiltinRegistry().Lookup(name)
+	platform, err := NewBuiltinRegistry().Lookup(name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return dialect.Profile()
+	return platform
 }
 
 func TestBuiltinRegistryKeepsVendorFamilyOverridesAsDistinctObjects(t *testing.T) {
@@ -135,5 +135,19 @@ func TestBuiltinRegistryResolvesInventoryIdentity(t *testing.T) {
 				t.Fatalf("ResolvePlatform(%+v) = %q, %v; want %q, %v", tc.identity, got, found, tc.want, tc.want != "")
 			}
 		})
+	}
+}
+
+func TestEveryPlatformClassifiesReadOnlyCommands(t *testing.T) {
+	registry := NewBuiltinRegistry()
+	for _, name := range registry.Names() {
+		platform, _ := registry.Lookup(name)
+		classifier, ok := platform.(interface{ IsReadOnly(string) bool })
+		if !ok {
+			t.Fatalf("%s has no read-only classifier", name)
+		}
+		if classifier.IsReadOnly("reload") || classifier.IsReadOnly("configure terminal") || classifier.IsReadOnly("system-view") {
+			t.Fatalf("%s treats a write command as read-only", name)
+		}
 	}
 }

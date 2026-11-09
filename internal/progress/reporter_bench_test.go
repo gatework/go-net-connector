@@ -39,7 +39,7 @@ func BenchmarkReporterSuccessfulTask(b *testing.B) {
 				if tc.buildDetails {
 					reporter.detail = fmt.Sprintf("[%s] 正在采集，等待设备响应", safeText(host))
 				}
-				if err := reporter.Outcome(host, "backed_up", "", time.Second); err != nil {
+				if err := reporter.Outcome(host, "succeeded", "backed_up", "", time.Second); err != nil {
 					b.Fatal(err)
 				}
 			}

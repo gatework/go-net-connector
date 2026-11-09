@@ -1,5 +1,0 @@
---- FAIL: TestTextLogFailurePreservesPrimaryDeviceError (0.00s)
-    logging_test.go:64: primary=connector: device_error (command) steps=0
-FAIL
-FAIL	github.com/gatework/go-net-connector/connector	0.450s
-FAIL

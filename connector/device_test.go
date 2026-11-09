@@ -15,10 +15,12 @@ import (
 	"time"
 )
 
-func fixtureProfile() Profile {
-	return Profile{Name: "fixture", LoginPrompt: testPattern(`(?m)(?:^|[\r\n])sw#\s*$`), CommandPrompt: testPattern(`(?m)(?:^|[\r\n])sw#\s*$`), CommandErrors: []*regexp.Regexp{regexp.MustCompile(`(?mi)^% Invalid`)}, ConfigCommands: []string{"show config"}}
+func fixtureDriver() StaticDriver { return StaticDriver{Grammar: fixtureTerminal()} }
+
+func fixtureTerminal() Terminal {
+	return Terminal{Name: "fixture", LoginPrompt: testPattern(`(?m)(?:^|[\r\n])sw#\s*$`), CommandPrompt: testPattern(`(?m)(?:^|[\r\n])sw#\s*$`), CommandErrors: []*regexp.Regexp{regexp.MustCompile(`(?mi)^% Invalid`)}, ConfigCommands: []string{"show config"}}
 }
-func fixtureDevice(t *testing.T, p Profile, responses []string) (*Device, *[]string) {
+func fixtureDevice(t *testing.T, p StaticDriver, responses []string) (*Device, *[]string) {
 	t.Helper()
 	writes := new([]string)
 	done := make(chan struct{})
@@ -56,7 +58,7 @@ func fixtureDevice(t *testing.T, p Profile, responses []string) (*Device, *[]str
 }
 func TestWholeScriptValidationBeforeConnection(t *testing.T) {
 	var opens atomic.Int32
-	d, e := New(fixtureProfile(), ConnectionConfig{Host: "test"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
+	d, e := New(fixtureDriver(), ConnectionConfig{Host: "test"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 		opens.Add(1)
 		return nil, errors.New("unexpected")
 	}))
@@ -69,7 +71,7 @@ func TestWholeScriptValidationBeforeConnection(t *testing.T) {
 	}
 }
 func TestReceiptSurvivesHookFailure(t *testing.T) {
-	p := fixtureProfile()
+	p := fixtureDriver()
 	hookErr := errors.New("secret callback body")
 	p.AfterCommand = func(ctx context.Context, _ Command, _ StepResult, executor Executor) error {
 		if _, err := executor.Execute(ctx, Command{Text: "hook"}); err != nil {
@@ -99,7 +101,7 @@ func TestReceiptSurvivesHookFailure(t *testing.T) {
 	}
 }
 func TestDeviceRejectionProducesNoReceipt(t *testing.T) {
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"show\n% Invalid input\nsw#"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"show\n% Invalid input\nsw#"})
 	r, e := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{})
 	if !errors.Is(e, ErrDevice) || len(r.Steps()) != 0 {
 		t.Fatalf("%+v %v", r, e)
@@ -109,9 +111,9 @@ func TestDeviceRejectionProducesNoReceipt(t *testing.T) {
 	}
 }
 func TestPagingAccumulatesRawAndExcludesMarker(t *testing.T) {
-	p := fixtureProfile()
-	p.Pager = testPattern(`--More--`)
-	p.PagerResponse = "\n"
+	p := fixtureDriver()
+	p.Grammar.Pager = testPattern(`--More--`)
+	p.Grammar.PagerResponse = "\n"
 	d, w := fixtureDevice(t, p, []string{"one\n--More--", "two\n--More--", "three\nsw#"})
 	r, e := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{})
 	if e != nil {
@@ -133,7 +135,7 @@ func TestPagingAccumulatesRawAndExcludesMarker(t *testing.T) {
 	}
 }
 func TestObserverReentryBusyAndInputSnapshot(t *testing.T) {
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"ok\nsw#"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"ok\nsw#"})
 	r, e := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{OnReceipt: func(ctx context.Context, _ StepResult) error {
 		_, e := d.ExecuteCommand(ctx, Command{Text: "nested"}, ExecuteOptions{})
 		if !errors.Is(e, ErrBusy) {
@@ -153,7 +155,7 @@ func TestObserverReentryBusyAndInputSnapshot(t *testing.T) {
 
 func TestHookExecutorExpiresBeforeReceiptCallback(t *testing.T) {
 	var borrowed Executor
-	p := fixtureProfile()
+	p := fixtureDriver()
 	p.AfterCommand = func(_ context.Context, _ Command, _ StepResult, x Executor) error { borrowed = x; return nil }
 	d, _ := fixtureDevice(t, p, []string{"done\nsw#"})
 	_, e := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{OnReceipt: func(ctx context.Context, _ StepResult) error {
@@ -169,9 +171,9 @@ func TestHookExecutorExpiresBeforeReceiptCallback(t *testing.T) {
 }
 
 func TestPrivilegeRetainedAcrossOperations(t *testing.T) {
-	p := fixtureProfile()
-	p.PrivilegeCommand = "enable"
-	p.PrivilegePrompt = p.CommandPrompt
+	p := fixtureDriver()
+	p.Grammar.PrivilegeCommand = "enable"
+	p.Grammar.PrivilegePrompt = p.Grammar.CommandPrompt
 	d, w := fixtureDevice(t, p, []string{"sw#", "first\nsw#", "second\nsw#"})
 	for range 2 {
 		if _, e := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{}); e != nil {
@@ -185,8 +187,8 @@ func TestPrivilegeRetainedAcrossOperations(t *testing.T) {
 }
 
 func TestDiagnosticsRetainErasedAndColoredErrors(t *testing.T) {
-	p := fixtureProfile()
-	p.CommandErrors = []*regexp.Regexp{regexp.MustCompile(`(?mi)^Error:`)}
+	p := fixtureDriver()
+	p.Grammar.CommandErrors = []*regexp.Regexp{regexp.MustCompile(`(?mi)^Error:`)}
 	for _, response := range []string{"Err\x1b[31mor: denied\x1b[0m\nsw#", "Error: denied\rall good\nsw#"} {
 		t.Run(response, func(t *testing.T) {
 			d, _ := fixtureDevice(t, p, []string{response})
@@ -199,13 +201,13 @@ func TestDiagnosticsRetainErasedAndColoredErrors(t *testing.T) {
 }
 func TestCredentialValidationBeforeIO(t *testing.T) {
 	for _, secret := range []string{"p\ncommand", "p\rcommand", "p\x00"} {
-		if _, e := New(fixtureProfile(), ConnectionConfig{Host: "fixture", Password: secret}); e == nil {
+		if _, e := New(fixtureDriver(), ConnectionConfig{Host: "fixture", Password: secret}); e == nil {
 			t.Fatal("credential accepted")
 		}
 	}
 }
 func TestExactScriptBudgetPreventsNextSend(t *testing.T) {
-	d, w := fixtureDevice(t, fixtureProfile(), []string{"ok\nsw#"})
+	d, w := fixtureDevice(t, fixtureDriver(), []string{"ok\nsw#"})
 	r, e := d.ExecuteScript(t.Context(), Script{Commands: []Command{{Text: "one"}, {Text: "two"}}}, ExecuteOptions{MaxOutputBytes: 6})
 	if !errors.Is(e, ErrScriptLimit) || len(r.Steps()) != 1 {
 		t.Fatalf("%v %v", r, e)
@@ -240,7 +242,7 @@ func TestTelnetFallbackOnlyAfterConnectionRefused(t *testing.T) {
 				}()
 				return a, nil
 			}
-			d, e := New(fixtureProfile(), ConnectionConfig{Host: "fixture", Port: 2222, AllowTelnetFallback: true}, WithTransportFactory(f))
+			d, e := New(fixtureDriver(), ConnectionConfig{Host: "fixture", Port: 2222, AllowTelnetFallback: true}, WithTransportFactory(f))
 			if e != nil {
 				t.Fatal(e)
 			}

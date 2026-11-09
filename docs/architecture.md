@@ -15,7 +15,7 @@ flowchart TD
   Policy --> Fleet[fleet: 有界并发和顺序结果]
   Workflow --> Fleet
   Fleet --> Device[Device: 操作租约与回执]
-  Device --> Profile[厂商档案及策略]
+  Device --> Driver[平台驱动: Terminal + 行为]
   Device --> Expect[go-expect: 匹配和 I/O]
   Expect --> Transport[SSH/Telnet PTY 进程]
   Fleet --> Archive[Archive Pool: 服务器目标事务]
@@ -23,7 +23,7 @@ flowchart TD
   Device --> Storage[本地原子存储]
 ```
 
-Profile 只声明规则；Device 拥有当前会话和操作租约。transport 拥有进程组，expect 拥有单一输入泵。Topology 的发现、重验、修改、读回和保存共用一次租约。每次归档的目标锁覆盖旧文件保留、服务器时钟标记、设备上传、核验、双端持久化和清理。
+Driver 提供终端语法（Terminal）与需要代码的厂商行为（配置采集、保存确认、可选命令/登录钩子）；Device 拥有当前会话和操作租约。transport 拥有进程组，expect 拥有单一输入泵。Topology 的发现、重验、修改、读回和保存共用一次租约。每次归档的目标锁覆盖旧文件保留、服务器时钟标记、设备上传、核验、双端持久化和清理。
 
 ## 应用组合与呈现
 
@@ -31,7 +31,7 @@ Profile 只声明规则；Device 拥有当前会话和操作租约。transport �
 
 `internal/workflow` 拥有业务步骤、报告持久化、保留证据和错误收尾。它通过串行的类型化 `Event` 回调报告计划、阶段、会话元数据和结果；`internal/cli` 将事件映射到 `progress.Reporter`，工作流不依赖终端 Reporter 或中文显示函数。回调失败会保留并在最终报告中降低成功状态；已确认的设备步骤、归档证明和存储回执继续保留，不重放设备写入。命令最终输出失败仍通过 `RecordOutputFailure` 回写报告。
 
-`internal/topologyreport` 拥有拓扑文本呈现的数据结构与渲染，CLI 摘要、持久化 summary.txt 和单设备报告共用这一实现。Workflow 的 `TopologyReport.Presentation` 返回与保留状态分离的类型化快照；调用方修改统计、命令、比较项或诊断不能改变后续执行资格和报告证据。执行状态与 apply 准入仍由 workflow 的私有类型负责，JSON schema 保持原有格式。
+所有业务命令共用 `internal/workflow` 的单设备阶段流水线：`Operation` 是 `Stage` 的有序组合，`Runner.Execute` 负责并发与稳定顺序、会话（`Session` 在首次使用时打开并认证，认证失败记为 authenticate 阶段）、首个失败即拦截后续阶段、`StopAfterFailures`、取消时 `not_started`/`interrupted`，以及 `plan.json`、`events.jsonl`、`report.json` 的写入。拓扑 apply 通过 `Operation.Then` 第二轮实现：第一轮全部审计结束并写好 `scripts/` 与 `topology-plan.json` 后才准入应用。报告契约（schema v3）由叶子包 `internal/batchreport` 拥有，导出与 diff 经 `storage.ReadBatchSaved` 读取并校验。CLI 每个业务命令是一个 `useCase`（离线 `prepare` + `run`），共享配置 → 凭据 → 装配 → 清单 → 执行 → 呈现管线。
 
 共享清单配置由公开 `config.InventoryEnvironment` 与 `config.ValidateInventory` 处理，只接受 `netdisco` / `inventory` 范围，并复用 config 内部同一份字段定义和解码器。环境投影先按高优先级字段的存在性屏蔽，再解析剩余值；false、null、空列表和替换父节都属于明确覆盖。纯校验不发现文件、不解析路径、不补默认值，也不读取凭据，业务程序仍拥有自己的文件与参数入口。
 
@@ -41,11 +41,11 @@ Profile 只声明规则；Device 拥有当前会话和操作租约。transport �
 
 ## 厂商方言与能力
 
-`vendors.NewBuiltinRegistry()` 是唯一内建平台目录。目录项是 `vendors/<family>` 家族包中的具体平台对象；每个对象返回独立的 `connector.Profile` 副本。`vendors/dialect` 只放 `Platform`、`Registry` 和跨包 DTO；`topology`、`transfer`、`fleet` 各自拥有消费端行为接口。家族对象只组合真实支持的接口，例如 Radware 提供描述读取和接口身份映射，不虚报邻居发现或描述写入。每个家族包集中组织 `dialect.go`、`inventory.go`、`configuration.go`、`topology.go` 和传输策略。H3C/H3C Wireless 与 Cisco IOS/NX-OS 共享家族实现，同时保留独立平台类型和平台覆盖。
+`vendors.NewBuiltinRegistry()` 是唯一内建平台目录。目录项是 `vendors/<family>` 家族包中的具体平台对象；每个对象就是一个 `connector.Driver`，`Terminal()` 返回独立副本。`vendors/dialect` 只放 `Platform`、`Registry` 和跨包 DTO；`topology`、`transfer`、`fleet` 各自拥有消费端行为接口。家族对象只组合真实支持的接口，例如 Radware 提供描述读取和接口身份映射，不虚报邻居发现或描述写入。每个家族包集中组织 `dialect.go`、`inventory.go`、`configuration.go`、`topology.go` 和传输策略。H3C/H3C Wireless 与 Cisco IOS/NX-OS 共享家族实现，同时保留独立平台类型和平台覆盖。
 
-登录/命令提示符、分页、错误签名、交互回复、配置命令、保存签名和身份匹配都由家族包拥有。共享 `vendors/internal/driver` 提供稳定的 Profile、配置采集、拓扑委托、保存回执校验和 TFTP 骨架。配置采集策略负责平台模式切换、差异校验和文本清理；缺少已知正向签名时保存结果保持未确认。`vendors/internal/topology` 只执行通用 TextFSM 解析和结果校验；模板选择、记录计数和配置完整性规则与方言同包。接口名规范化由 `internal/ifname` 单一实现。TFTP 的命令、来源文件发现、完成证据及回执元数据也由家族包负责。内建身份匹配器由 Registry 私有拥有，并从同一有序方言清单生成键查找表与匹配顺序，fleet 仅依赖自己的 resolver 接口，保留用户覆盖优先顺序。
+登录/命令提示符、分页、错误签名、交互回复、配置命令、保存签名和身份匹配都由家族包拥有。共享 `vendors/internal/driver` 提供 `driver.Base`（Terminal 持有、配置采集工厂、正向保存确认）、拓扑委托、保存回执校验和 TFTP 骨架。配置采集策略负责平台模式切换、差异校验和文本清理；缺少已知正向签名时保存结果保持未确认。`vendors/internal/topology` 只执行通用 TextFSM 解析和结果校验；模板选择、记录计数和配置完整性规则与方言同包。接口名规范化由 `internal/ifname` 单一实现。TFTP 的命令、来源文件发现、完成证据及回执元数据也由家族包负责。`MatchInventory` 是 `dialect.Platform` 的一部分，Registry 从同一有序平台清单生成键查找表与匹配顺序，fleet 仅依赖自己的 resolver 接口，保留用户覆盖优先顺序。
 
-`fleet.NewRules`、Topology 构造与纯计划函数、transfer API（包括 TFTP 和远程配置导出）都接收显式 `dialect.Registry`。Bootstrap 只在组合根创建一次目录并注入调用方，避免包级 Profile/Names 查询和全局运行时插件状态。扩展新平台时需同时声明能力、连接档案以及该平台实际支持的可选行为；没有证据的能力保持不支持。
+`fleet.NewRules`、Topology 构造与纯计划函数、transfer API（包括 TFTP 和远程配置导出）都接收显式 `dialect.Registry`。Bootstrap 只在组合根创建一次目录并注入调用方，避免包级平台/名称查询和全局运行时插件状态。扩展新平台时需同时声明能力、连接档案以及该平台实际支持的可选行为；没有证据的能力保持不支持。
 
 解析错误通过 `dialect.DiagnosticError` 携带稳定 code/phase，再由消费者转换为自己的领域错误。通用解析失败映射为 `unrecognized_output`；平台有明确证据时保留更具体的错误码，例如 Fortinet VDOM 不一致。诊断文本只包含元数据，不包含设备原始输出。
 

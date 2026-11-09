@@ -23,7 +23,7 @@ func workflowObserver(p *progress.Reporter) workflow.Observer {
 		case workflow.SessionEvent:
 			return p.Event(e.Host, e.Name, e.Status)
 		case workflow.OutcomeEvent:
-			err := p.Outcome(e.Host, e.Status, e.ErrorCode, e.Duration)
+			err := p.Outcome(e.Host, e.Status, e.Outcome, e.ErrorCode, e.Duration)
 			if e.TextWarningBytes > 0 {
 				err = errors.Join(err, p.Warning(fmt.Sprintf("[%s] %s", e.Host, backupProgress(e))))
 			}
@@ -72,7 +72,11 @@ func archivePreflightLabel(stage archive.PrepareStage) string {
 }
 
 func backupProgress(out workflow.OutcomeEvent) string {
-	text := display.Status(out.Status)
+	label := out.Status
+	if out.Outcome != "" {
+		label = out.Outcome
+	}
+	text := display.Status(label)
 	if out.TextWarningBytes > 0 {
 		text += fmt.Sprintf("（文本编码告警：%d 个字节；%s）", out.TextWarningBytes,
 			display.SourceState(out.SourceCommitted, out.SourceVerified))

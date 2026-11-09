@@ -4,12 +4,9 @@ package textfsm
 import (
 	"bufio"
 	"embed"
-	"encoding/csv"
 	"errors"
-	"io"
 	"io/fs"
 	"maps"
-	"regexp"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -29,12 +26,7 @@ var (
 //go:embed templates
 var templates embed.FS
 
-type indexEntry struct {
-	vendor, command *regexp.Regexp
-	template        string
-}
 type catalog struct {
-	index     []indexEntry
 	templates map[string]func() (fsm.TextFSM, error)
 }
 
@@ -61,48 +53,7 @@ func loadCatalog() (*catalog, error) {
 	if err != nil {
 		return nil, ErrTemplateInvalid
 	}
-	data, err := templates.ReadFile("templates/index")
-	if err != nil {
-		return nil, ErrTemplateInvalid
-	}
-	reader := csv.NewReader(strings.NewReader(string(data)))
-	reader.TrimLeadingSpace = true
-	header, err := reader.Read()
-	if err != nil || len(header) != 3 || header[0] != "Template" || header[1] != "Vendor" || header[2] != "Command" {
-		return nil, ErrTemplateInvalid
-	}
-	for {
-		row, err := reader.Read()
-		if errors.Is(err, io.EOF) {
-			return c, nil
-		}
-		if err != nil || len(row) != 3 {
-			return nil, ErrTemplateInvalid
-		}
-		vendor, err := regexp.Compile(strings.TrimSpace(row[1]))
-		if err != nil {
-			return nil, ErrTemplateInvalid
-		}
-		command, err := regexp.Compile(strings.TrimSpace(row[2]))
-		if err != nil {
-			return nil, ErrTemplateInvalid
-		}
-		c.index = append(c.index, indexEntry{vendor, command, strings.TrimSpace(row[0])})
-	}
-}
-
-// Parse selects a template using the complete vendor key and command.
-func Parse(vendor, command, output string) ([]map[string]any, error) {
-	c, err := embeddedCatalog()
-	if err != nil {
-		return nil, err
-	}
-	for _, entry := range c.index {
-		if entry.vendor.MatchString(vendor) && entry.command.MatchString(command) {
-			return ParseTemplate(entry.template, output)
-		}
-	}
-	return nil, ErrTemplateMissing
+	return c, nil
 }
 
 // compileTemplate contains dependency panic paths at the untrusted input boundary.

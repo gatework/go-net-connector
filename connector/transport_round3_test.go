@@ -54,10 +54,7 @@ func TestProcessCancellationReturnsCleanupOwner(t *testing.T) {
 }
 
 func authenticateTransport(p *processTransport, ctx context.Context) error {
-	if current, ok := any(p).(interface{ Authenticated(context.Context) error }); ok {
-		return current.Authenticated(ctx)
-	}
-	return any(p).(interface{ Authenticated() error }).Authenticated()
+	return p.Authenticated(ctx)
 }
 
 func TestProcessCloseStopsAuthentication(t *testing.T) {
@@ -89,13 +86,6 @@ type authenticationStream struct {
 
 func (s *authenticationStream) Authenticated(ctx context.Context) error { return s.commit(ctx) }
 
-type legacyAuthenticationStream struct {
-	net.Conn
-	called bool
-}
-
-func (s *legacyAuthenticationStream) Authenticated() error { s.called = true; return nil }
-
 func TestAuthenticationReceivesOperationContext(t *testing.T) {
 	entered := make(chan struct{})
 	a, peer := net.Pipe()
@@ -104,7 +94,7 @@ func TestAuthenticationReceivesOperationContext(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	}}
-	d, err := New(fixtureProfile(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) { return stream, nil }))
+	d, err := New(fixtureDriver(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) { return stream, nil }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,23 +112,6 @@ func TestAuthenticationReceivesOperationContext(t *testing.T) {
 	}
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("lost cancellation: %v", err)
-	}
-}
-
-func TestLegacyAuthenticationRejectedBeforeLogin(t *testing.T) {
-	a, peer := net.Pipe()
-	defer peer.Close()
-	stream := &legacyAuthenticationStream{Conn: a}
-	d, err := New(fixtureProfile(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) { return stream, nil }))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer d.Close()
-	go io.WriteString(peer, "sw#")
-	err = d.Connect(t.Context())
-	var classified *Error
-	if !errors.Is(err, ErrInvalid) || !errors.As(err, &classified) || classified.Code != "invalid_transport" || stream.called {
-		t.Fatalf("legacy hook not rejected: called=%t err=%v", stream.called, err)
 	}
 }
 
@@ -182,10 +155,10 @@ func TestCommandAndInteractionKeepWriteProgress(t *testing.T) {
 			primary, secondary := errors.New("private-primary"), errors.New("private-secondary")
 			a, peer := net.Pipe()
 			stream := &partialFailureStream{Conn: a, failAt: 1, failure: errors.Join(newError("fixture_write", "command", Command{}, primary), context.Canceled, secondary)}
-			profile := fixtureProfile()
+			profile := fixtureDriver()
 			if interaction {
 				stream.failAt = 2
-				profile.Pager, profile.PagerResponse = testPattern(`--More--`), "next"
+				profile.Grammar.Pager, profile.Grammar.PagerResponse = testPattern(`--More--`), "next"
 			}
 			d, err := New(profile, ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) { return stream, nil }))
 			if err != nil {
@@ -339,7 +312,7 @@ func TestCanceledProcessCleanupFailureStaysOwned(t *testing.T) {
 		}
 		return os.RemoveAll(path)
 	}
-	d, err := New(fixtureProfile(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(ctx context.Context, _ ConnectionConfig) (io.ReadWriteCloser, error) {
+	d, err := New(fixtureDriver(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(ctx context.Context, _ ConnectionConfig) (io.ReadWriteCloser, error) {
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		cmd := exec.Command("/bin/sh", "-c", "read value")

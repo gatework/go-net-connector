@@ -15,7 +15,7 @@ import (
 
 type exchange struct{ send, receive string }
 
-// Fixtures reproduce the frozen Ruby tests against a full connector session.
+// Fixtures drive each platform dialogue through a full connector session.
 func dialogue(t *testing.T, name, login string, events []exchange, configs ...connector.ConnectionConfig) (*connector.Device, func()) {
 	t.Helper()
 	p := profileForTest(t, name)
@@ -87,9 +87,9 @@ func TestCollectionDialectOutputsAndEchoOnly(t *testing.T) {
 				p := profileForTest(t, name)
 				events := []exchange{}
 				last := ""
-				for i, c := range p.ConfigCommands {
+				for i, c := range p.Terminal().ConfigCommands {
 					response := c + "\r\n"
-					if i == len(p.ConfigCommands)-1 && !empty {
+					if i == len(p.Terminal().ConfigCommands)-1 && !empty {
 						response += "hostname edge\r\n"
 					}
 					next := prompt
@@ -109,7 +109,7 @@ func TestCollectionDialectOutputsAndEchoOnly(t *testing.T) {
 					if _, ok := r.Config(); ok {
 						t.Fatal("failed result has config")
 					}
-					if len(r.Steps()) != len(p.ConfigCommands) {
+					if len(r.Steps()) != len(p.Terminal().ConfigCommands) {
 						t.Fatalf("completed steps lost: %d", len(r.Steps()))
 					}
 				} else {
@@ -147,7 +147,7 @@ func TestCollectionRejectsEchoOnlyWithRenderedPrompt(t *testing.T) {
 		t.Run(fmt.Sprintf("%s/%q", fixture.name, fixture.prompt), func(t *testing.T) {
 			p := profileForTest(t, fixture.name)
 			var events []exchange
-			for _, command := range p.ConfigCommands {
+			for _, command := range p.Terminal().ConfigCommands {
 				events = append(events, exchange{command + "\n", command + "\r\n" + fixture.prompt})
 			}
 			d, check := dialogue(t, fixture.name, fixture.prompt, events)
@@ -155,7 +155,7 @@ func TestCollectionRejectsEchoOnlyWithRenderedPrompt(t *testing.T) {
 			if !errors.Is(err, connector.ErrIncomplete) {
 				t.Fatalf("echo-only configuration accepted: %v", err)
 			}
-			if _, ok := result.Config(); ok || len(result.Steps()) != len(p.ConfigCommands) {
+			if _, ok := result.Config(); ok || len(result.Steps()) != len(p.Terminal().ConfigCommands) {
 				t.Fatal("configuration evidence or completed steps lost")
 			}
 			check()

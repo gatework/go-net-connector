@@ -11,7 +11,7 @@ import (
 
 func TestBackupPreservesInvalidBytesAndChinese(t *testing.T) {
 	wire := "show config\r\n description 中文\xff\r\nsw#"
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{wire})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{wire})
 	path := filepath.Join(t.TempDir(), "device.txt")
 	receipt, err := d.Backup(t.Context(), BackupOptions{Path: path})
 	if err != nil {
@@ -37,7 +37,7 @@ func TestBackupPreservesInvalidBytesAndChinese(t *testing.T) {
 }
 func TestBackupRawFailureDoesNotReplaceOldText(t *testing.T) {
 	wire := "show config\r\nnew config\r\nsw#"
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{wire})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{wire})
 	path := filepath.Join(t.TempDir(), "device.txt")
 	os.WriteFile(path, []byte("old backup"), 0600)
 	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(wire)))
@@ -53,7 +53,7 @@ func TestBackupRawFailureDoesNotReplaceOldText(t *testing.T) {
 }
 
 func TestBackupDoesNotRelaxRunningConfig(t *testing.T) {
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"show config\r\n description 中文\xff\r\nsw#"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"show config\r\n description 中文\xff\r\nsw#"})
 	_, err := d.RunningConfig(t.Context())
 	if err == nil {
 		t.Fatal("strict configuration accepted invalid encoding")
@@ -61,7 +61,7 @@ func TestBackupDoesNotRelaxRunningConfig(t *testing.T) {
 }
 func TestBackupEscapeExpansionRespectsOutputCap(t *testing.T) {
 	wire := "show config\r\n description " + strings.Repeat("\xff", 20) + "\r\nsw#"
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{wire})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{wire})
 	d.config.MaxOutputBytes = int64(len(wire))
 	path := filepath.Join(t.TempDir(), "device.txt")
 	_, err := d.Backup(t.Context(), BackupOptions{Path: path})
@@ -73,7 +73,7 @@ func TestBackupEscapeExpansionRespectsOutputCap(t *testing.T) {
 	}
 }
 func TestBackupRetainsDeviceRejectionBeforeTerminalEdit(t *testing.T) {
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{"% Invalid \xff\r\x1b[2Kshow config\r\nbody\r\nsw#"})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{"% Invalid \xff\r\x1b[2Kshow config\r\nbody\r\nsw#"})
 	path := filepath.Join(t.TempDir(), "device.txt")
 	_, err := d.Backup(t.Context(), BackupOptions{Path: path})
 	if err == nil {
@@ -82,7 +82,7 @@ func TestBackupRetainsDeviceRejectionBeforeTerminalEdit(t *testing.T) {
 }
 func TestBackupRawSymlinkDoesNotReplaceOldText(t *testing.T) {
 	wire := "show config\r\nnew config\r\nsw#"
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{wire})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{wire})
 	dir := t.TempDir()
 	path := filepath.Join(dir, "device.txt")
 	os.WriteFile(path, []byte("old"), 0600)
@@ -102,7 +102,7 @@ func TestBackupRawSymlinkDoesNotReplaceOldText(t *testing.T) {
 }
 func TestBackupWarningsAreBoundedAndKeepRawOffsets(t *testing.T) {
 	wire := "show config\r\n description 中文" + strings.Repeat("\xff", 100) + "\r\nsw#"
-	d, _ := fixtureDevice(t, fixtureProfile(), []string{wire})
+	d, _ := fixtureDevice(t, fixtureDriver(), []string{wire})
 	r, err := d.Backup(t.Context(), BackupOptions{Path: filepath.Join(t.TempDir(), "device.txt")})
 	if err != nil {
 		t.Fatal(err)

@@ -49,8 +49,8 @@ func TestCLILogPolicyExecution(t *testing.T) {
 			r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) {
 				return []inventory.Device{{IP: "192.0.2.1", Vendor: "cisco", OS: "nxos"}}, nil
 			})
-			r.DeviceFactory = func(_ connector.Profile, c connector.ConnectionConfig) (*connector.Device, error) {
-				p := connector.Profile{Name: "cisco_nxos", LoginPrompt: testPattern(`sw#$`), CommandPrompt: testPattern(`sw#$`), ConfigCommands: []string{"show config"}, Prepare: func(ctx context.Context, c connector.Command, e connector.Executor) (connector.Command, bool, error) {
+			r.DeviceFactory = func(_ connector.Driver, c connector.ConnectionConfig) (*connector.Device, error) {
+				p := connector.StaticDriver{Grammar: connector.Terminal{Name: "cisco_nxos", LoginPrompt: testPattern(`sw#$`), CommandPrompt: testPattern(`sw#$`), ConfigCommands: []string{"show config"}}, Prepare: func(ctx context.Context, c connector.Command, e connector.Executor) (connector.Command, bool, error) {
 					_, err := e.Execute(ctx, connector.Command{Text: "show visible"})
 					return c, false, err
 				}}
@@ -77,13 +77,13 @@ func TestCLILogPolicyExecution(t *testing.T) {
 			if code := r.Run(t.Context()); code != 0 {
 				t.Fatal(code, errout.String())
 			}
-			reportPath := filepath.Join(r.CWD, "backups", "summary.json")
+			reportPath := filepath.Join(r.CWD, "backups", "report.json")
 			if tc.layout != "flat" {
 				entries, err := os.ReadDir(filepath.Dir(reportPath))
 				if err != nil || len(entries) != 1 {
 					t.Fatal(entries, err)
 				}
-				reportPath = filepath.Join(r.CWD, "backups", entries[0].Name(), "summary.json")
+				reportPath = filepath.Join(r.CWD, "backups", entries[0].Name(), "report.json")
 			}
 			data, err := os.ReadFile(reportPath)
 			if err != nil {

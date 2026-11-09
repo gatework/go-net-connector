@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -10,7 +11,7 @@ import (
 )
 
 func TestInventoryReturnsPostgresConstructorError(t *testing.T) {
-	policy, err := config.Load(config.Options{
+	policy, err := config.Load(context.Background(), config.Options{
 		Name: "backup", CWD: t.TempDir(), Home: t.TempDir(), Directories: []string{},
 		Defaults: config.Defaults("backup"),
 		Environment: map[string]string{

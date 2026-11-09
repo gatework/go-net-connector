@@ -21,12 +21,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type CacheOptions struct {
-	Directory, Identity string
-	TTL                 *time.Duration
-	LockTimeout         time.Duration
-	Limits              Limits
-	Now                 func() time.Time
+type cacheOptions struct {
+	Directory   string
+	TTL         *time.Duration
+	LockTimeout time.Duration
+	Limits      Limits
+	Now         func() time.Time
 }
 
 const (
@@ -36,7 +36,7 @@ const (
 	CacheStatusDisabled  = "disabled"
 )
 
-type Cache struct {
+type cache struct {
 	source                              Source
 	directory, identity, path, lockPath string
 	ttl, lockTimeout                    time.Duration
@@ -46,7 +46,7 @@ type Cache struct {
 
 // CacheResult contains complete rows. Status records whether data was
 // refreshed, read fresh/stale from cache, or fetched with caching disabled.
-// Cache-only Fetch reports freshness; source failures use Go errors unless a
+// cache-only Fetch reports freshness; source failures use Go errors unless a
 // validated stale entry is available.
 type CacheResult struct {
 	Rows                                     []inventory.Device
@@ -64,14 +64,7 @@ type cacheEntry struct {
 // the requested identity. InventoryError.Code remains cache_unavailable.
 var ErrCacheRefreshRequired = errors.New("netdisco: refresh this source before using cache-only mode")
 
-func NewCache(source Source, o CacheOptions) (*Cache, error) {
-	if o.Identity == "" {
-		return nil, newInventoryError("invalid_cache", nil)
-	}
-	return newCache(source, o, Identity([]byte(o.Identity)))
-}
-
-func newCache(source Source, o CacheOptions, identity string) (*Cache, error) {
+func newCache(source Source, o cacheOptions, identity string) (*cache, error) {
 	if o.Directory == "" || strings.ContainsRune(o.Directory, 0) {
 		return nil, newInventoryError("invalid_cache", nil)
 	}
@@ -98,18 +91,9 @@ func newCache(source Source, o CacheOptions, identity string) (*Cache, error) {
 	if e != nil {
 		return nil, e
 	}
-	return &Cache{source, directory, identity, filepath.Join(directory, identity+".json"), filepath.Join(directory, identity+".lock"), ttl, lockTimeout, limits, now}, nil
+	return &cache{source, directory, identity, filepath.Join(directory, identity+".json"), filepath.Join(directory, identity+".lock"), ttl, lockTimeout, limits, now}, nil
 }
-func (c *Cache) Path() string { return c.path }
-func (c *Cache) Devices(ctx context.Context) ([]inventory.Device, error) {
-	mode := CachePrefer
-	if c.source == nil {
-		mode = CacheOnly
-	}
-	r, e := c.Fetch(ctx, mode)
-	return r.Rows, e
-}
-func (c *Cache) Fetch(ctx context.Context, mode CacheMode) (result CacheResult, err error) {
+func (c *cache) Fetch(ctx context.Context, mode CacheMode) (result CacheResult, err error) {
 	if !mode.Valid() {
 		return result, newInventoryError("invalid_cache_mode", nil)
 	}
@@ -218,7 +202,7 @@ func isPrivateCacheEntry(info os.FileInfo, directory bool) bool {
 	}
 	return info.Mode().IsRegular() && info.Mode().Perm() == 0600 && st.Nlink == 1
 }
-func (c *Cache) read(ctx context.Context) (*cacheEntry, error) {
+func (c *cache) read(ctx context.Context) (*cacheEntry, error) {
 	body, fp, e := storage.Read(ctx, c.path, c.limits.MaxInventoryBytes)
 	if errors.Is(e, os.ErrNotExist) {
 		return nil, nil
@@ -264,7 +248,7 @@ func (c *Cache) read(ctx context.Context) (*cacheEntry, error) {
 	}
 	return &entry, nil
 }
-func (c *Cache) validateRows(rows []inventory.Device) error {
+func (c *cache) validateRows(rows []inventory.Device) error {
 	if rows == nil || len(rows) > c.limits.MaxDevices {
 		return newInventoryError("invalid_inventory", nil)
 	}
@@ -281,8 +265,8 @@ func (c *Cache) validateRows(rows []inventory.Device) error {
 	return nil
 }
 
-// Identity hashes Ruby-compatible ordered JSON; NewCache applies the second hash.
-func Identity(orderedJSON []byte) string {
-	sum := sha256.Sum256(orderedJSON)
+// digest returns the opaque hex SHA-256 of a canonical source descriptor.
+func digest(descriptor []byte) string {
+	sum := sha256.Sum256(descriptor)
 	return hex.EncodeToString(sum[:])
 }

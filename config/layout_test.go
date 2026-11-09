@@ -1,13 +1,16 @@
 package config
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestExplicitAllCanClearSampleLimit(t *testing.T) {
 	override, e := FromEnvironment(map[string]string{"NC_SAMPLE_PER_VENDOR": "0"})
 	if e != nil {
 		t.Fatal(e)
 	}
-	s, e := Load(Options{Name: "backup", CWD: t.TempDir(), Home: t.TempDir(), Directories: []string{}, Environment: map[string]string{}, Defaults: Defaults("backup"), Overrides: override, AllowMissing: true})
+	s, e := Load(context.Background(), Options{Name: "backup", CWD: t.TempDir(), Home: t.TempDir(), Directories: []string{}, Environment: map[string]string{}, Defaults: Defaults("backup"), Overrides: override, AllowMissing: true})
 	if e != nil {
 		t.Fatal(e)
 	}

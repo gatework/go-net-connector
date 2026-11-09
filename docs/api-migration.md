@@ -5,6 +5,90 @@ layer. Resolve the pinned GitHub dependency with GOWORK=off. Do not run the old
 workspace reconstruction scripts for current builds; retained baselines/patches
 are historical audit material.
 
+## v0.7.0: platform drivers, one pipeline, no compatibility layer
+
+v0.7.0 drops every compatibility path. go-vxlan, go-wireless (pinned v0.4.0) and
+the Firemon adapter (pinned v0.2.0) keep working on their pinned versions; the
+changes below apply when they upgrade.
+
+**Platforms are device drivers.** `connector.Profile` is split:
+
+- `connector.Terminal` is the declarative grammar (prompts, pager, errors,
+  interactions, config/save commands, timeout, `LegacyCryptoArguments`).
+- `connector.Driver` is `Terminal()`, `NewConfigCollector()` (nil = generic
+  rendered collector) and `ValidateSave(ctx, Result)`.
+- Optional hooks are interfaces: `CommandPreparer`, `CommandObserver`,
+  `LoginInspector`.
+- `connector.New(driver, cfg, ...)` takes a Driver. Built-in platforms are
+  drivers: `connector.New(platform, cfg)`. For hand-written grammars use
+  `connector.StaticDriver{Grammar: t, Save: f, Collector: g, Prepare: …}`; to
+  customize a platform's grammar use `connector.WithTerminal(platform, t)`.
+- `dialect.Platform` = `connector.Driver` + `Name()` + `MatchInventory()`;
+  `Platform.Profile()` is gone (use `Terminal()`).
+- `Device.ProfileName()` / `Operation.ProfileName()` → `PlatformName()`.
+- `ConnectionConfig.LegacySSHArguments` / `AllowLegacySSH` →
+  `LegacyCryptoArguments` / `AllowLegacyCrypto`.
+- `bootstrap.DeviceFactory` receives a `connector.Driver`.
+
+Before → after:
+
+```go
+// before
+p := connector.Profile{Name: "x", LoginPrompt: lp, CommandPrompt: cp, ValidateSave: save}
+d, err := connector.New(p, cfg)
+// after
+d, err := connector.New(connector.StaticDriver{
+    Grammar: connector.Terminal{Name: "x", LoginPrompt: lp, CommandPrompt: cp},
+    Save:    save,
+}, cfg)
+```
+
+**One stage pipeline and one report.** Every operation runs through
+`workflow.Runner.Execute`: per device, one session, ordered stages
+(authenticate → execute → save → backup …), first failure stops the device.
+
+- CLI: `netman push` → `netman deploy` (`--save`, new `--backup`); new
+  `netman exec`, `netman backup remote`, `netman backup diff`; `backup run`
+  and `backup tftp` accept `--save`. Default deploy directory `./deploys`.
+- Batch files: `summary.json`/`summary.txt` → `report.json` (schema v3);
+  `plan.json` is the planned report; `events.jsonl` holds one device row per
+  line. `--json` prints the report. Topology review files: `scripts/*.cfg` and
+  `topology-plan.json` (+ `.sha256`); per-device `devices/*.txt` are gone.
+- Report v3 device rows: `status` is uniform (`succeeded`, `partial`, `failed`,
+  `interrupted`, `not_started`, `stopped`, or a skip reason); the
+  operation-specific result is `outcome` (`backed_up`, `uploaded`,
+  `exported`, `deployed`, `rejected`, `executed`, `planned`, `applied`, …);
+  `failed_stage`, `stages[]` and `diagnostic{code,phase}` replace
+  `error_type`/Ruby type names; evidence moves under `artifacts`
+  (`backup`, `transfer`, `archive`, `remote`, `script`, `save`, `outputs`,
+  `topology`). Old → new: `path/bytes/sha256` → `artifacts.backup.*`;
+  `remote_path`/`server`/`verification` → `artifacts.transfer.*`;
+  `local_file`/`server_archive_file`/`server_file_verified` →
+  `artifacts.archive.local.path` / `.server.archive_path` / `verified`;
+  `policy_success` → `success`; `mode` → `operation`.
+- Removed: `fleet.Run`, `RunOptions`, `Batch`, `Outcome`, `Artifact`,
+  `Report`, `NewReport`, `WriteReport`, `fleet.Plan.Mode`; package
+  `internal/topologyreport`; `workflow.PlanView`, `Preview`, push types.
+  `fleet` now owns only rules and plans; `fleet.ErrMissingCredentials` remains.
+- `progress.Reporter.Outcome(host, status, outcome, code, duration)`.
+- Connection: `ConnectionConfig.JumpHost` (`ssh -J`, rejected with Telnet or
+  Telnet fallback) and `ConnectRetries` (0–5, pre-login connection failures
+  only). Config `ssh.jump_host`, `ssh.connect_retries` (default 1). Refused,
+  unroutable and timed-out connections are now `connection_refused`,
+  `no_route`, `connection_timeout` instead of `authentication_error`.
+
+**Removed APIs.** `config.LoadContext` is renamed `config.Load(ctx, Options)`
+(the context-less `Load` is gone); `config.Snapshot.Missing`;
+`netdisco.NewCache`, `netdisco.CacheOptions`, `netdisco.Cache`,
+`netdisco.Identity` (use `FetchHTTP` / `FetchPostgres` with `CachePolicy`);
+`storage.SavedFilename`, `ReadSaved`, `ExportSaved`; `textfsm.Parse` and the
+template index (use `ParseTemplate` with an explicit template path);
+`topology.Client.{Neighbors,Descriptions,Plan,Sync}` (use `Discover`, `Audit`,
+`Apply`); `archive.Pool.PrepareWithProgress` merged into
+`Pool.Prepare(ctx, observe)`; `fleet.Plan.{Summary,Transfers}`,
+`fleet.Outcome.{Partial,Attempted}`; `bootstrap.Services.Device` (use
+`DeviceWithLogger`). The `DOTENV_LINEBREAK_MODE=legacy` escape mode is gone.
+
 ## v0.6.0: typed enumerations, exported dialects and removed TFTP keys
 
 **Breaking configuration change.** The platform-specific TFTP source-file keys

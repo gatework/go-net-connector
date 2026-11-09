@@ -16,7 +16,7 @@ func TestSuccessfulTasksDoNotAppendLogs(t *testing.T) {
 	for range 1000 {
 		p.Start("host", "h3c")
 		p.Event("host", "login_complete", "ok")
-		p.Outcome("host", "backed_up", "", time.Second)
+		p.Outcome("host", "succeeded", "backed_up", "", time.Second)
 	}
 	if strings.Contains(b.String(), "备份成功") || strings.Contains(b.String(), "开始任务") || strings.Count(b.String(), "\n") > 3 {
 		t.Fatalf("normal tasks flooded output: %d lines", strings.Count(b.String(), "\n"))
@@ -33,7 +33,7 @@ func TestPanelScreenKeepsErrorsAndDoesNotScrollSuccesses(t *testing.T) {
 			p.Start("交换机👩‍💻", "h3c")
 			p.Event("交换机👩‍💻", "login_complete", "ok")
 			p.lastRender = time.Time{}
-			p.Outcome("交换机👩‍💻", "backed_up", "", time.Second)
+			p.Outcome("交换机👩‍💻", "succeeded", "backed_up", "", time.Second)
 		}
 		screen := vt.NewEmulator(80, 24)
 		screen.Write(b.Bytes())
@@ -43,7 +43,7 @@ func TestPanelScreenKeepsErrorsAndDoesNotScrollSuccesses(t *testing.T) {
 		}
 		b.Reset()
 		p.Start("192.0.2.1", "h3c")
-		p.Outcome("192.0.2.1", "failed", "authentication_failed", time.Second)
+		p.Outcome("192.0.2.1", "failed", "", "authentication_failed", time.Second)
 		p.tick()
 		screen.Write(b.Bytes())
 		view = screen.String()

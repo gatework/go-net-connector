@@ -10,7 +10,8 @@ import (
 
 // Dialect is the built-in Fortinet platform.
 type Dialect struct {
-	driver.ProfiledPlatform
+	driver.Base
+	driver.ReadOnlyCommands
 	driver.TopologyReader
 	tftpPolicy
 }
@@ -22,14 +23,15 @@ func New() Dialect {
 	reader.StatusCommand = "get system status"
 	reader.SelectNeighborCommand = neighborCommand
 	return Dialect{
-		ProfiledPlatform: driver.NewProfiledPlatform(newProfile()),
+		Base:             newBase(),
+		ReadOnlyCommands: readOnly,
 		TopologyReader:   reader,
 		tftpPolicy:       newTFTPPolicy(),
 	}
 }
 
-func newProfile() connector.Profile {
-	p := driver.BaseProfile("fortinet")
+func newBase() driver.Base {
+	p := driver.BaseTerminal("fortinet")
 	p.ConfigCommands = []string{"show full-configuration"}
 	p.SaveCommands = []string{"execute cfg save"}
 	p.LoginPrompt = driver.Pattern(`(?:\A|[\r\n])[^\s#>$]+(?:[ \t]+\([^\r\n()]+\))?[ \t]*[#\$][ \t]*\z`)
@@ -38,5 +40,8 @@ func newProfile() connector.Profile {
 	p.CommandErrors = driver.Regexps(`(?im)^[ \t]*(?:command parse error|Command fail\.|Unknown action\b|Unknown command\b)`, `(?im)^[ \t]*(?:Permission denied|Access denied|Sorry, you have no permission)\b`)
 	p.LoginInteractions = []connector.Interaction{driver.LoginInteraction(`(?i)Press any key to continue[^\r\n]*\z`, " ")}
 	p.LoginInteractions[0].Capture = false
-	return driver.FinishProfile(p, 120*time.Second, driver.BaseConfigFactory(), nil)
+	return driver.NewBase(p, 120*time.Second, driver.BaseConfigFactory(), nil)
 }
+
+// readOnly lists the commands this family accepts for read-only collection.
+var readOnly = driver.ReadOnlyCommands{Verbs: []string{"get", "show"}}

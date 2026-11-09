@@ -38,14 +38,14 @@ func TestProfilesAndDeclaredBehaviors(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			p := profileForTest(t, c.name)
-			if !reflect.DeepEqual(p.ConfigCommands, c.config) || !reflect.DeepEqual(p.SaveCommands, c.save) || p.CommandTimeout != time.Duration(c.seconds)*time.Second {
+			if !reflect.DeepEqual(p.Terminal().ConfigCommands, c.config) || !reflect.DeepEqual(p.Terminal().SaveCommands, c.save) || p.Terminal().CommandTimeout != time.Duration(c.seconds)*time.Second {
 				t.Fatalf("profile: %#v", p)
 			}
-			if !matchesPattern(p.LoginPrompt, c.prompt) || !matchesPattern(p.CommandPrompt, c.prompt) {
+			if !matchesPattern(p.Terminal().LoginPrompt, c.prompt) || !matchesPattern(p.Terminal().CommandPrompt, c.prompt) {
 				t.Fatal("prompt rejected")
 			}
 			match := false
-			for _, r := range p.CommandErrors {
+			for _, r := range p.Terminal().CommandErrors {
 				match = match || r.MatchString(c.diagnostic)
 			}
 			if !match {
@@ -65,16 +65,16 @@ func TestProfilesAndDeclaredBehaviors(t *testing.T) {
 			_, hasNeighbors := declaration.(topology.NeighborDiscovery)
 			_, hasWriter := declaration.(topology.DescriptionWriter)
 			_, hasRemoteBackup := declaration.(transfer.RemoteBackupPolicy)
-			hasSave := len(p.SaveCommands) > 0
+			hasSave := len(p.Terminal().SaveCommands) > 0
 			if hasSave != wantSave || hasTFTP != wantTFTP || hasDescriptions != wantDesc || hasNeighbors != wantNeighbors || hasWriter != wantWrite || hasRemoteBackup != (c.name == "juniper") {
 				t.Fatalf("platform behavior mismatch: save=%t tftp=%t descriptions=%t neighbors=%t writer=%t remote_backup=%t", hasSave, hasTFTP, hasDescriptions, hasNeighbors, hasWriter, hasRemoteBackup)
 			}
-			p.ConfigCommands[0] = "mutated"
-			again := profileForTest(t, c.name)
-			if again.ConfigCommands[0] == "mutated" {
+			first := p.Terminal()
+			first.ConfigCommands[0] = "mutated"
+			if p.Terminal().ConfigCommands[0] == "mutated" {
 				t.Fatal("shared mutable commands")
 			}
-			if p.ConfigStrategy() == p.ConfigStrategy() {
+			if p.NewConfigCollector() == p.NewConfigCollector() {
 				t.Fatal("shared strategy")
 			}
 		})
@@ -96,9 +96,9 @@ func TestInteractionsAndPrivilege(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.vendor+c.input, func(t *testing.T) {
 			p := profileForTest(t, c.vendor)
-			rules := p.Interactions
+			rules := p.Terminal().Interactions
 			if c.login {
-				rules = p.LoginInteractions
+				rules = p.Terminal().LoginInteractions
 			}
 			got := ""
 			for _, r := range rules {
@@ -119,7 +119,7 @@ func TestInteractionsAndPrivilege(t *testing.T) {
 		})
 	}
 	p := profileForTest(t, "huawei")
-	if p.PrivilegeCommand != "su" || !matchesPattern(p.PrivilegePrompt, "privilege level is 3\n<Huawei>") {
+	if p.Terminal().PrivilegeCommand != "su" || !matchesPattern(p.Terminal().PrivilegePrompt, "privilege level is 3\n<Huawei>") {
 		t.Fatal("privilege")
 	}
 }
@@ -140,16 +140,16 @@ func TestH3CRuleHook(t *testing.T) {
 	p := profileForTest(t, "h3c")
 	x := &hookExecutor{values: map[string]string{}}
 	c := connector.Command{Text: "rule XXX append source-ip 192.0.2.1"}
-	if _, _, e := p.Prepare(t.Context(), c, x); e == nil {
+	if _, _, e := p.(connector.CommandPreparer).PrepareCommand(t.Context(), c, x); e == nil {
 		t.Fatal("unresolved ID accepted")
 	}
 	x.SetValue("rule_id", "123")
-	got, skip, e := p.Prepare(t.Context(), c, x)
+	got, skip, e := p.(connector.CommandPreparer).PrepareCommand(t.Context(), c, x)
 	if e != nil || skip || got.Text != "rule 123 append source-ip 192.0.2.1" {
 		t.Fatalf("%s %v %v", got.Text, skip, e)
 	}
 	x.err = errors.New("query failed")
-	if e := p.AfterCommand(t.Context(), connector.Command{Text: "rule pass source-ip any"}, connector.StepResult{}, x); !errors.Is(e, x.err) {
+	if e := p.(connector.CommandObserver).AfterCommand(t.Context(), connector.Command{Text: "rule pass source-ip any"}, connector.StepResult{}, x); !errors.Is(e, x.err) {
 		t.Fatalf("query error lost: %v", e)
 	}
 	if !reflect.DeepEqual(x.commands, []string{"dis this"}) {

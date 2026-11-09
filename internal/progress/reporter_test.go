@@ -42,7 +42,7 @@ func TestReporterShowsPlanStartStagesAndOutcome(t *testing.T) {
 	p.Start("192.0.2.1", "h3c")
 	p.Event("192.0.2.1", "login_complete", "ok")
 	p.Event("192.0.2.1", "command_start", "")
-	p.Outcome("192.0.2.1", "backed_up", "", time.Second)
+	p.Outcome("192.0.2.1", "succeeded", "backed_up", "", time.Second)
 	if err := p.Finish(); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestReporterBeginsTopologyApplyPhaseWithoutRepeatingPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.Start("192.0.2.1", "h3c")
-	p.Outcome("192.0.2.1", "discovered", "", time.Second)
+	p.Outcome("192.0.2.1", "succeeded", "discovered", "", time.Second)
 	if err := p.Phase("重新核验并应用拓扑计划"); err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestReporterBeginsTopologyApplyPhaseWithoutRepeatingPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.Start("192.0.2.2", "h3c")
-	p.Outcome("192.0.2.2", "applied", "", time.Second)
+	p.Outcome("192.0.2.2", "succeeded", "applied", "", time.Second)
 	p.tick()
 	if err := p.Finish(); err != nil {
 		t.Fatal(err)
@@ -165,7 +165,7 @@ func TestReporterDoesNotPrintUnknownMetadataOrControls(t *testing.T) {
 	p := New(&b, true)
 	p.Start("host\x1b[31m\nforged", "h3c")
 	p.Event("host", "PRIVATE_CONFIG secret=abc", "")
-	p.Outcome("host", "failed", "PRIVATE_SECRET", time.Second)
+	p.Outcome("host", "failed", "", "PRIVATE_SECRET", time.Second)
 	if strings.ContainsAny(b.String(), "\x1b\r") || strings.Contains(b.String(), "PRIVATE") {
 		t.Fatal(b.String())
 	}
@@ -203,15 +203,15 @@ func TestSkippedAndReviewOutcomesAreNotFailures(t *testing.T) {
 	p := New(&b, false)
 	p.Plan(2, 2, 1, "topology")
 	p.Start("192.0.2.1", "unsupported")
-	p.Outcome("192.0.2.1", "unsupported_operation", "", time.Second)
+	p.Outcome("192.0.2.1", "stopped", "", "", time.Second)
 	p.Start("192.0.2.2", "h3c")
-	p.Outcome("192.0.2.2", "partial_planned", "", time.Second)
+	p.Outcome("192.0.2.2", "partial", "partial_planned", "", time.Second)
 	if p.failed != 0 || p.skipped != 1 || p.pending != 1 {
 		t.Fatal(b.String())
 	}
 	p.Plan(2, 1, 1, "topology")
 	p.Start("192.0.2.2", "h3c")
-	p.Outcome("192.0.2.2", "applied", "", time.Second)
+	p.Outcome("192.0.2.2", "succeeded", "applied", "", time.Second)
 	if p.completed != 1 || p.total != 1 || p.failed != 0 {
 		t.Fatal(b.String())
 	}
@@ -237,10 +237,10 @@ func TestReporterSeparatesPlanProgressAndWarnings(t *testing.T) {
 	p.Plan(3, 3, 2, "backup")
 	for _, host := range []string{"192.0.2.1", "192.0.2.2"} {
 		p.Start(host, "h3c")
-		p.Outcome(host, "failed", "login_timeout", time.Second)
+		p.Outcome(host, "failed", "", "login_timeout", time.Second)
 	}
 	p.Start("192.0.2.3", "h3c")
-	p.Outcome("192.0.2.3", "backed_up", "", time.Second)
+	p.Outcome("192.0.2.3", "succeeded", "backed_up", "", time.Second)
 	if err := p.Finish(); err != nil {
 		t.Fatal(err)
 	}

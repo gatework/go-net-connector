@@ -66,7 +66,7 @@ func ReadBatchSaved(ctx context.Context, directory, host string) ([]byte, BatchA
 	if !os.SameFile(info, opened) {
 		return nil, BatchArtifact{}, ErrUnsafe
 	}
-	data, err := readBatchFile(ctx, root, "summary.json", 128<<20)
+	data, err := readBatchFile(ctx, root, "report.json", 128<<20)
 	if err != nil {
 		return nil, BatchArtifact{}, err
 	}

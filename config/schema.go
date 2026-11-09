@@ -77,6 +77,8 @@ var schema = map[string]Field{
 	"ssh.vendor_protocols":            {Env: "NC_VENDOR_PROTOCOLS", Kind: KindJSON},
 	"ssh.max_script_output_bytes":     {Env: "NC_MAX_SCRIPT_OUTPUT_BYTES", Kind: KindOptionalInteger},
 	"ssh.known_hosts":                 {Env: "NC_KNOWN_HOSTS", Kind: KindString},
+	"ssh.jump_host":                   {Env: "NC_SSH_JUMP_HOST", Kind: KindOptionalString},
+	"ssh.connect_retries":             {Env: "NC_SSH_CONNECT_RETRIES", Kind: KindInteger},
 	"ssh.host_key_policy":             {Env: "NC_HOST_KEY_POLICY", Kind: KindString},
 	"ssh.log_directory":               {Env: "NC_LOG_DIRECTORY", Kind: KindString},
 	"ssh.log_level":                   {Env: "NC_LOG_LEVEL", Kind: KindString},

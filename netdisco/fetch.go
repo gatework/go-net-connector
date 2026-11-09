@@ -11,7 +11,7 @@ import (
 )
 
 // FetchOptions selects the cache mode for one complete inventory collection.
-// An empty Mode means prefer. A nil Cache disables caching; only then fails.
+// An empty Mode means prefer. A nil cache disables caching; only then fails.
 type FetchOptions struct {
 	Mode  CacheMode
 	Cache *CachePolicy
@@ -30,7 +30,7 @@ type CachePolicy struct {
 
 // FetchHTTP collects complete rows with their cache and write-failure evidence.
 // It closes only its own idle HTTP connections, never an injected Client.
-// Cache-only reads need the source principal but do not need its password.
+// cache-only reads need the source principal but do not need its password.
 func FetchHTTP(ctx context.Context, source HTTPOptions, options FetchOptions) (CacheResult, error) {
 	mode, err := options.mode()
 	if err != nil {
@@ -104,7 +104,7 @@ func fetchInventory(ctx context.Context, source Source, identity string, limits 
 		rows, err := source.Devices(ctx)
 		return CacheResult{Rows: rows, Status: CacheStatusDisabled}, err
 	}
-	cache, err := newCache(source, CacheOptions{
+	cache, err := newCache(source, cacheOptions{
 		Directory: policy.Directory, TTL: policy.TTL,
 		LockTimeout: policy.LockTimeout, Now: policy.Now, Limits: limits,
 	}, identity)
@@ -127,8 +127,8 @@ func sourceIdentity(source string, descriptor any) (string, error) {
 	if err != nil {
 		return "", newInventoryError("invalid_identity", nil)
 	}
-	// Only this final opaque digest reaches CacheOptions or persistent storage.
-	return Identity(body), nil
+	// Only this final opaque digest reaches cacheOptions or persistent storage.
+	return digest(body), nil
 }
 
 func httpIdentity(o HTTPOptions, url string, limits Limits, namespace string) (string, error) {

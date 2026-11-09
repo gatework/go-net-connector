@@ -1,5 +1,6 @@
-// Package batchreport owns the persisted batch summary contract used by Fleet
-// and by safe artifact export.
+// Package batchreport owns the persisted batch report contract shared by every
+// operation (backup, TFTP, remote backup, deploy, exec, topology) and read back
+// by artifact export and diff.
 package batchreport
 
 import (
@@ -9,118 +10,134 @@ import (
 	"net/netip"
 )
 
-const SchemaVersion = 2
+// SchemaVersion identifies the unified report format.
+const SchemaVersion = 3
+
+// MaxArtifactBytes bounds one exported artifact.
 const MaxArtifactBytes int64 = 64 << 20
 
 var ErrInvalidEvidence = errors.New("batchreport: invalid artifact evidence")
 
-// Summary is the schema-v2 batch report written by Fleet and read by export.
-type Summary struct {
-	SchemaVersion      int               `json:"schema_version"`
-	Policy             string            `json:"policy"`
-	PolicySuccess      bool              `json:"policy_success"`
-	DurationMS         *float64          `json:"duration_ms"`
-	Mode               string            `json:"mode"`
-	Status             string            `json:"status"`
-	StartedAt          *string           `json:"started_at"`
-	FinishedAt         *string           `json:"finished_at"`
-	Total              int               `json:"total"`
-	Succeeded          int               `json:"succeeded"`
-	TextWarningDevices int               `json:"text_warning_devices"`
-	Partial            int               `json:"partial"`
-	Failed             int               `json:"failed"`
-	Skipped            int               `json:"skipped"`
-	Counts             map[string]int    `json:"counts"`
-	Coverage           Coverage          `json:"coverage"`
-	CallbackErrors     []CallbackError   `json:"callback_errors"`
-	ReportLocation     *string           `json:"report_location"`
-	ReportError        *string           `json:"report_error"`
-	Verification       *Verification     `json:"verification"`
-	ReportDiagnostic   *ReportDiagnostic `json:"report_diagnostic"`
-	Devices            []Device          `json:"devices"`
+// Device status values. Plan skip reasons (filtered, duplicate_host, …) are
+// also used verbatim as a device status for devices that never started.
+const (
+	StatusSucceeded   = "succeeded"
+	StatusPartial     = "partial"
+	StatusFailed      = "failed"
+	StatusInterrupted = "interrupted"
+	StatusNotStarted  = "not_started"
+	StatusStopped     = "stopped"
+)
+
+// Batch status values.
+const (
+	BatchSucceeded   = "succeeded"
+	BatchIncomplete  = "incomplete"
+	BatchInterrupted = "interrupted"
+	BatchNoDevices   = "no_devices"
+)
+
+// Report is report.json for one batch directory.
+type Report struct {
+	SchemaVersion int            `json:"schema_version"`
+	Operation     string         `json:"operation"`
+	Policy        string         `json:"policy"`
+	Success       bool           `json:"success"`
+	Status        string         `json:"status"`
+	Directory     string         `json:"directory"`
+	StartedAt     string         `json:"started_at"`
+	FinishedAt    string         `json:"finished_at"`
+	DurationMS    float64        `json:"duration_ms"`
+	Workers       int            `json:"workers"`
+	Total         int            `json:"total"`
+	Counts        map[string]int `json:"counts"`
+	Stopped       bool           `json:"stopped"`
+	Interrupted   bool           `json:"interrupted"`
+	SessionLogs   string         `json:"session_logs,omitempty"`
+	ReportError   string         `json:"report_error,omitempty"`
+	Devices       []Device       `json:"devices"`
 }
 
-// Map returns the established generic view used by CLI renderers and callers.
-func (s Summary) Map() map[string]any {
-	var verification any
-	if s.Verification != nil {
-		verification = map[string]int{"verified": s.Verification.Verified, "unverified": s.Verification.Unverified}
-	}
-	var reportDiagnostic any
-	if s.ReportDiagnostic != nil {
-		reportDiagnostic = s.ReportDiagnostic.values()
-	}
-	devices := make([]map[string]any, len(s.Devices))
-	for i, device := range s.Devices {
-		devices[i] = device.values()
-	}
-	return map[string]any{
-		"schema_version": s.SchemaVersion, "policy": s.Policy, "policy_success": s.PolicySuccess,
-		"duration_ms": floatValue(s.DurationMS), "mode": s.Mode, "status": s.Status,
-		"started_at": stringValue(s.StartedAt), "finished_at": stringValue(s.FinishedAt),
-		"total": s.Total, "succeeded": s.Succeeded, "text_warning_devices": s.TextWarningDevices,
-		"partial": s.Partial, "failed": s.Failed, "skipped": s.Skipped, "counts": s.Counts,
-		"coverage":        map[string]any{"complete": s.Coverage.Complete, "attempted": s.Coverage.Attempted, "skipped": s.Coverage.Skipped},
-		"callback_errors": s.CallbackErrors, "report_location": stringValue(s.ReportLocation),
-		"report_error": stringValue(s.ReportError), "verification": verification,
-		"report_diagnostic": reportDiagnostic, "devices": devices,
-	}
-}
-
-type Coverage struct {
-	Complete  bool `json:"complete"`
-	Attempted int  `json:"attempted"`
-	Skipped   int  `json:"skipped"`
-}
-
-type CallbackError struct {
-	Host      string `json:"host"`
-	ErrorType string `json:"error_type"`
-}
-
-type Verification struct {
-	Verified   int `json:"verified"`
-	Unverified int `json:"unverified"`
-}
-
+// Diagnostic is a stable, safe classification: never error text or output.
 type Diagnostic struct {
-	Phase         *string `json:"phase"`
-	Underlying    *string `json:"underlying_type"`
-	ArtifactState *string `json:"artifact_state"`
-	ArtifactPhase *string `json:"artifact_phase"`
-	Verification  *string `json:"verification"`
+	Code  string `json:"code"`
+	Phase string `json:"phase"`
 }
 
-type ReportDiagnostic struct {
-	ErrorCode     *string `json:"error_code"`
-	ErrorType     *string `json:"error_type"`
-	Phase         *string `json:"phase"`
-	Underlying    *string `json:"underlying_type"`
-	ArtifactState *string `json:"artifact_state"`
-	ArtifactPhase *string `json:"artifact_phase"`
-	Verification  *string `json:"verification"`
+// Stage records one step of the per-device pipeline.
+type Stage struct {
+	Name       string      `json:"name"`
+	Status     string      `json:"status"` // succeeded | partial | failed | skipped
+	DurationMS float64     `json:"duration_ms"`
+	Diagnostic *Diagnostic `json:"diagnostic,omitempty"`
 }
 
-// BackupSource and TextWarning are report-owned representations of the
-// evidence nested in a configuration backup row. Keeping these shapes here
-// makes the persisted contract explicit without coupling it to connector or
-// storage implementation types.
+// Device is one inventory entry and, when it ran, its pipeline evidence.
+type Device struct {
+	Host         string      `json:"host"`
+	Name         string      `json:"name,omitempty"`
+	Platform     string      `json:"platform,omitempty"`
+	SourceVendor string      `json:"source_vendor,omitempty"`
+	Status       string      `json:"status"`
+	Outcome      string      `json:"outcome,omitempty"`
+	FailedStage  string      `json:"failed_stage,omitempty"`
+	Diagnostic   *Diagnostic `json:"diagnostic,omitempty"`
+	Verified     bool        `json:"verified"`
+	StartedAt    string      `json:"started_at,omitempty"`
+	DurationMS   float64     `json:"duration_ms,omitempty"`
+	SessionLog   string      `json:"session_log,omitempty"`
+	Target       *Target     `json:"target,omitempty"`
+	Stages       []Stage     `json:"stages,omitempty"`
+	Artifacts    Artifacts   `json:"artifacts"`
+}
+
+// Target is what the plan intends for a device, before any I/O: the backup
+// file name, the TFTP destination or the script to deploy.
+type Target struct {
+	File             string `json:"file,omitempty"`
+	Server           string `json:"server,omitempty"`
+	VerificationRoot string `json:"verification_root,omitempty"`
+	SourceFile       string `json:"source_file,omitempty"`
+	SourceInterface  string `json:"source_interface,omitempty"`
+	VRF              string `json:"vrf,omitempty"`
+	Script           string `json:"script,omitempty"`
+	Commands         int    `json:"commands,omitempty"`
+}
+
+// Artifacts holds the evidence each stage produced. Unset stages are omitted.
+type Artifacts struct {
+	Backup   *Backup         `json:"backup,omitempty"`
+	Transfer *Transfer       `json:"transfer,omitempty"`
+	Archive  *ArchiveReceipt `json:"archive,omitempty"`
+	Remote   *Remote         `json:"remote,omitempty"`
+	Script   *Script         `json:"script,omitempty"`
+	Save     *Save           `json:"save,omitempty"`
+	Outputs  []Output        `json:"outputs,omitempty"`
+	// Topology carries the audit, plan and apply evidence of a topology run.
+	Topology any `json:"topology,omitempty"`
+}
+
 type FileReceipt struct {
 	Path  string `json:"path"`
 	State string `json:"state"`
 	Phase string `json:"phase"`
 }
 
-type ArchiveProof struct {
-	Bytes       int64  `json:"bytes"`
-	SHA256      string `json:"sha256"`
-	ArchivePath string `json:"archive_path"`
-	Verified    bool   `json:"verified"`
-}
-type ArchiveReceipt struct {
-	Server  *ArchiveProof `json:"server,omitempty"`
-	Local   FileReceipt   `json:"local"`
-	Cleanup string        `json:"cleanup"`
+// Backup is a locally saved configuration.
+type Backup struct {
+	Path           string        `json:"path"`
+	Bytes          int64         `json:"bytes"`
+	SHA256         string        `json:"sha256"`
+	Change         string        `json:"change"`
+	PreviousSHA256 string        `json:"previous_sha256,omitempty"`
+	Encoding       string        `json:"encoding,omitempty"`
+	Source         *BackupSource `json:"source,omitempty"`
+	TextWarning    *TextWarning  `json:"text_warning,omitempty"`
+	File           FileReceipt   `json:"file"`
+	// Saved: the configuration is on disk; Complete: device completion and
+	// file durability are both confirmed.
+	Saved    bool `json:"saved"`
+	Complete bool `json:"complete"`
 }
 
 type SourceSegment struct {
@@ -149,118 +166,72 @@ type TextWarning struct {
 	Positions []TextPosition `json:"positions"`
 }
 
-// Device is a report row. Mode and HasBackup control mode-specific fields but
-// are not serialized, keeping the established schema-v2 shape intact.
-type Device struct {
-	Archive            *ArchiveReceipt `json:"archive,omitempty"`
-	Mode               string          `json:"-"`
-	HasBackup          bool            `json:"-"`
-	Host               string          `json:"host"`
-	Name               *string         `json:"name"`
-	Vendor             *string         `json:"vendor"`
-	Status             string          `json:"status"`
-	Path               *string         `json:"path"`
-	Bytes              *int64          `json:"bytes"`
-	SHA256             *string         `json:"sha256"`
-	Change             *string         `json:"change"`
-	PreviousSHA256     *string         `json:"previous_sha256"`
-	StartedAt          *string         `json:"started_at"`
-	FinishedAt         *string         `json:"finished_at"`
-	DurationMS         *float64        `json:"duration_ms"`
-	ErrorCode          *string         `json:"error_code"`
-	ErrorType          *string         `json:"error_type"`
-	Diagnostic         Diagnostic      `json:"diagnostic"`
-	Source             *BackupSource   `json:"source"`
-	Encoding           *string         `json:"encoding"`
-	TextWarning        *TextWarning    `json:"text_warning"`
-	RemotePath         *string         `json:"remote_path"`
-	Server             *string         `json:"server"`
-	ConfigurationKind  *string         `json:"configuration_kind"`
-	SourceFile         *string         `json:"source_file"`
-	Format             *string         `json:"format"`
-	Verification       *string         `json:"verification"`
-	ServerSHA256       *string         `json:"server_sha256"`
-	LocalFile          *string         `json:"local_file"`
-	ServerArchiveFile  *string         `json:"server_archive_file"`
-	ServerFileVerified bool            `json:"server_file_verified"`
-	SessionLog         *string         `json:"session_log"`
+// Transfer is a device-reported TFTP upload.
+type Transfer struct {
+	RemotePath        string `json:"remote_path"`
+	Server            string `json:"server"`
+	ConfigurationKind string `json:"configuration_kind,omitempty"`
+	SourceFile        string `json:"source_file,omitempty"`
+	Format            string `json:"format,omitempty"`
+	Verification      string `json:"verification"`
 }
 
-func (d Device) MarshalJSON() ([]byte, error) {
-	return json.Marshal(d.values())
+type ArchiveProof struct {
+	Bytes       int64  `json:"bytes"`
+	SHA256      string `json:"sha256"`
+	ArchivePath string `json:"archive_path"`
+	Verified    bool   `json:"verified"`
 }
 
-func (d Device) values() map[string]any {
-	fields := map[string]any{
-		"host": d.Host, "name": d.Name, "vendor": d.Vendor, "status": d.Status,
-		"path": stringValue(d.Path), "bytes": int64Value(d.Bytes), "sha256": stringValue(d.SHA256),
-		"change": stringValue(d.Change), "previous_sha256": stringValue(d.PreviousSHA256),
-		"started_at": stringValue(d.StartedAt), "finished_at": stringValue(d.FinishedAt),
-		"duration_ms": floatValue(d.DurationMS), "error_code": stringValue(d.ErrorCode),
-		"error_type": stringValue(d.ErrorType), "diagnostic": d.Diagnostic.values(),
-	}
-	if d.Mode == "tftp" {
-		if d.Archive != nil {
-			fields["archive"] = d.Archive
-		}
-		fields["remote_path"] = stringValue(d.RemotePath)
-		fields["server"] = stringValue(d.Server)
-		fields["configuration_kind"] = stringValue(d.ConfigurationKind)
-		fields["source_file"] = stringValue(d.SourceFile)
-		fields["format"] = stringValue(d.Format)
-		fields["verification"] = stringValue(d.Verification)
-		fields["server_sha256"] = stringValue(d.ServerSHA256)
-		fields["local_file"] = stringValue(d.LocalFile)
-		fields["server_archive_file"] = stringValue(d.ServerArchiveFile)
-		fields["server_file_verified"] = d.ServerFileVerified
-	} else if d.HasBackup {
-		fields["source"] = d.Source
-		fields["encoding"] = stringValue(d.Encoding)
-		fields["text_warning"] = d.TextWarning
-	}
-	if d.SessionLog != nil {
-		fields["session_log"] = *d.SessionLog
-	}
-	return fields
+// ArchiveReceipt is the server-side verification and local retrieval of an upload.
+type ArchiveReceipt struct {
+	Server  *ArchiveProof `json:"server,omitempty"`
+	Local   FileReceipt   `json:"local"`
+	Cleanup string        `json:"cleanup"`
 }
 
-func (d Diagnostic) values() map[string]any {
-	return map[string]any{
-		"phase": stringValue(d.Phase), "underlying_type": stringValue(d.Underlying),
-		"artifact_state": stringValue(d.ArtifactState), "artifact_phase": stringValue(d.ArtifactPhase),
-		"verification": stringValue(d.Verification),
-	}
+// Remote is a device-native export to a remote server (SCP/FTP).
+type Remote struct {
+	Server      string `json:"server"`
+	Destination string `json:"destination"`
+	Protocol    string `json:"protocol"`
+	Reported    bool   `json:"reported"`
 }
 
-func (d ReportDiagnostic) values() map[string]any {
-	values := Diagnostic{Phase: d.Phase, Underlying: d.Underlying, ArtifactState: d.ArtifactState, ArtifactPhase: d.ArtifactPhase, Verification: d.Verification}.values()
-	values["error_code"], values["error_type"] = stringValue(d.ErrorCode), stringValue(d.ErrorType)
-	return values
+type Attempt struct {
+	Line     int  `json:"line"`
+	Written  int  `json:"written"`
+	Complete bool `json:"complete"`
+	Failed   bool `json:"failed"`
 }
 
-func stringValue(value *string) any {
-	if value == nil {
-		return nil
-	}
-	return *value
+// Script is a deployed command script. Accepted counts only commands whose
+// responses passed the rejection rules; Attempts include the failed command.
+type Script struct {
+	Name       string    `json:"name"`
+	Commands   int       `json:"commands"`
+	Accepted   int       `json:"accepted"`
+	FailedLine int       `json:"failed_line,omitempty"`
+	Attempts   []Attempt `json:"attempts"`
 }
 
-func int64Value(value *int64) any {
-	if value == nil {
-		return nil
-	}
-	return *value
+// Save records a configuration save; Confirmed requires positive evidence.
+type Save struct {
+	Confirmed bool `json:"confirmed"`
 }
 
-func floatValue(value *float64) any {
-	if value == nil {
-		return nil
-	}
-	return *value
+// Output is one saved read-only command output.
+type Output struct {
+	Command string `json:"command"`
+	Path    string `json:"path"`
+	Bytes   int64  `json:"bytes"`
+	SHA256  string `json:"sha256"`
 }
 
+// Artifact identifies one saved configuration selected from a report.
 type Artifact struct {
-	// Subdirectory is derived from mode, never from a report-controlled path.
+	// Subdirectory is derived from the artifact kind, never from a
+	// report-controlled path: TFTP retrievals live under "tftp".
 	Subdirectory string
 	Host         string
 	Path         string
@@ -277,21 +248,22 @@ func NormalizeHost(host string) (string, error) {
 	return address.String(), nil
 }
 
-// SelectArtifact validates the report contract and returns the unique saved
-// artifact whose IP address matches host. IPv4-mapped IPv6 retains its family.
+// SelectArtifact returns the unique saved configuration for host: a local
+// backup, or a TFTP upload whose server copy was verified and retrieved.
+// IPv4-mapped IPv6 keeps its family.
 func SelectArtifact(data []byte, host string) (Artifact, error) {
 	canonicalHost, err := NormalizeHost(host)
 	if err != nil {
 		return Artifact{}, ErrInvalidEvidence
 	}
 	address, _ := netip.ParseAddr(canonicalHost)
-	var summary Summary
-	if json.Unmarshal(data, &summary) != nil || summary.SchemaVersion != SchemaVersion || (summary.Mode != "backup" && summary.Mode != "tftp") {
+	var report Report
+	if json.Unmarshal(data, &report) != nil || report.SchemaVersion != SchemaVersion {
 		return Artifact{}, ErrInvalidEvidence
 	}
 	var selected *Device
-	for i := range summary.Devices {
-		candidate := &summary.Devices[i]
+	for i := range report.Devices {
+		candidate := &report.Devices[i]
 		a, parseErr := netip.ParseAddr(candidate.Host)
 		if parseErr == nil && a.Zone() == "" && a == address {
 			if selected != nil {
@@ -300,31 +272,22 @@ func SelectArtifact(data []byte, host string) (Artifact, error) {
 			selected = candidate
 		}
 	}
-	if selected == nil || selected.Bytes == nil || *selected.Bytes < 0 || *selected.Bytes > MaxArtifactBytes || selected.SHA256 == nil {
+	if selected == nil {
 		return Artifact{}, ErrInvalidEvidence
 	}
-	checksum, err := hex.DecodeString(*selected.SHA256)
-	if err != nil || len(checksum) != 32 {
+	artifact := Artifact{Host: address.String(), Status: selected.Status}
+	switch a := selected.Artifacts; {
+	case a.Backup != nil:
+		artifact.Path, artifact.Bytes, artifact.SHA256 = a.Backup.Path, a.Backup.Bytes, a.Backup.SHA256
+	case a.Archive != nil && a.Archive.Server != nil && a.Archive.Server.Verified && (a.Archive.Local.State == "committed" || a.Archive.Local.State == "durable"):
+		artifact.Subdirectory = "tftp"
+		artifact.Path, artifact.Bytes, artifact.SHA256 = a.Archive.Local.Path, a.Archive.Server.Bytes, a.Archive.Server.SHA256
+	default:
 		return Artifact{}, ErrInvalidEvidence
 	}
-	path := selected.Path
-	subdirectory := ""
-	if summary.Mode == "tftp" {
-		subdirectory = "tftp"
-		if selected.Verification == nil || *selected.Verification != "server_verified" {
-			return Artifact{}, ErrInvalidEvidence
-		}
-		path = selected.LocalFile
-	}
-	if path == nil || *path == "" {
+	checksum, err := hex.DecodeString(artifact.SHA256)
+	if artifact.Path == "" || artifact.Bytes < 0 || artifact.Bytes > MaxArtifactBytes || err != nil || len(checksum) != 32 {
 		return Artifact{}, ErrInvalidEvidence
 	}
-	return Artifact{
-		Subdirectory: subdirectory,
-		Host:         address.String(),
-		Path:         *path,
-		Bytes:        *selected.Bytes,
-		SHA256:       *selected.SHA256,
-		Status:       selected.Status,
-	}, nil
+	return artifact, nil
 }

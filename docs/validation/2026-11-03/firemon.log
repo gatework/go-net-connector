@@ -1,8 +1,0 @@
-go: downloading github.com/gatework/firemon v0.0.0-20261027225231-19d5508ca58a
-consumer/firemon/deploy_test.go
-consumer/firemon/factory_test.go
-consumer/firemon/failure_test.go
-consumer/firemon/profile.go
-consumer/firemon/session_test.go
-ok  	github.com/gatework/go-net-connector/consumer/firemon	1.948s
-{"adapter_source_sha256": {"deploy_test.go": "a1a4349006adde2fe5f1e5b0c8d0edb381f25b295c234dc2680c8fd5243728cb", "factory.go": "bb1d2740b6e1cd2b41eef1e5e8fa2bc00ff70ff9a6cc69989de360c8e7ed043b", "factory_test.go": "281214bd55b4c4f22b0c57d8a865ffd8489d91f1864934ef052d427f0b21ebe4", "failure_test.go": "29fa3228734f366c1113a1b2291736107b455ed465320e63118b6fd66146b530", "go.mod": "76c05b02c5fd6d85de6911e5a856421d036af731c3f1d7d00d27d3c02cb3b5e7", "go.sum": "9d39395117f5c315ff98454d3ed6f515810ee466c019a13805e04849e67b0c46", "profile.go": "262c4c8bc40b9af63b09e8ded194dac0789789abed00b88022d2ba68bd758c7f", "read.go": "74580c7654a4845dced0669fb278e1a78f2eb20c3847fa12fc96316b06e670f7", "save.go": "b37f1fc044ace243d70b2c1e05f35ed316264daf745ff40bced54a2b7a2ede44", "session.go": "47d6477d754f38c4791b01dcbb6df5d3c9f710d2f829cf6d0c76cecd6f8cbe06", "session_test.go": "80bf2f2ddf5982bbd965ee3623eb49694ae2f39f5d81a8f1b4392a5f36aaa74d"}, "firemon_version": "v0.0.0-20261027225231-19d5508ca58a", "published_adoption": false, "replacements": false, "source_adapter_contracts": "passed"}

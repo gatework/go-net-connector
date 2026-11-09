@@ -11,7 +11,8 @@ import (
 // Dialect is the built-in Palo Alto Networks platform. Description writes stay
 // unavailable because the platform lacks an isolated candidate.
 type Dialect struct {
-	driver.ProfiledPlatform
+	driver.Base
+	driver.ReadOnlyCommands
 	driver.TopologyReader
 	driver.WriteRestriction
 	tftpPolicy
@@ -20,19 +21,23 @@ type Dialect struct {
 // New returns the built-in Palo Alto Networks dialect.
 func New() Dialect {
 	return Dialect{
-		ProfiledPlatform: driver.NewProfiledPlatform(newProfile()),
+		Base:             newBase(),
+		ReadOnlyCommands: readOnly,
 		TopologyReader:   driver.NewTopologyReader("show lldp neighbors all", topologyParser()),
 		WriteRestriction: driver.WriteRestriction{Code: "candidate_isolation_unavailable"},
 		tftpPolicy:       newTFTPPolicy(),
 	}
 }
 
-func newProfile() connector.Profile {
-	p := driver.BaseProfile("palo_alto")
+func newBase() driver.Base {
+	p := driver.BaseTerminal("palo_alto")
 	p.ConfigCommands = []string{"set cli pager off", "set cli config-output-format set", "show config diff", "configure", "show", "exit", "show config diff"}
 	p.LoginPrompt = driver.Pattern(`(?:\A|[\r\n])[^\s@]+@[^\s>#]+[>#]\s*\z`)
 	p.CommandPrompt = p.LoginPrompt
 	p.CommandErrors = driver.Regexps(`(?im)^[ \t]*(?:Invalid syntax|Unknown command|Server error|Command failed)(?:[.:]|\s)`)
 	p.LoginInteractions = []connector.Interaction{driver.LoginInteraction(`(?i)(?:acknowledge|accept)[\s\S]*(?:yes/no|\[y/n\]|enter\s+yes)[^\r\n]*\z`, "yes\n")}
-	return driver.FinishProfile(p, 120*time.Second, configFactory(), nil)
+	return driver.NewBase(p, 120*time.Second, configFactory(), nil)
 }
+
+// readOnly lists the commands this family accepts for read-only collection.
+var readOnly = driver.ReadOnlyCommands{Verbs: []string{"show", "ping", "traceroute"}}

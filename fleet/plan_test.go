@@ -1,7 +1,6 @@
 package fleet
 
 import (
-	"context"
 	"testing"
 
 	"github.com/gatework/go-net-connector/inventory"
@@ -84,17 +83,6 @@ func TestPlanSampledTFTPCollisionWinnerAndInventoryOrder(t *testing.T) {
 			for i, e := range p.Entries() {
 				if e.Device.SourceIP != rows[i].IP || e.Status != tc.statuses[i] {
 					t.Fatalf("entry %d: %#v", i, e)
-				}
-			}
-			b, err := Run(t.Context(), p, RunOptions{Workers: 2, Run: func(context.Context, Task) (Artifact, error) {
-				return Artifact{Transfer: &transfer.Receipt{Verification: "device_reported"}}, nil
-			}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			for i, o := range b.Outcomes() {
-				if o.Device.SourceIP != rows[i].IP {
-					t.Fatal("outcomes lost inventory order")
 				}
 			}
 		})

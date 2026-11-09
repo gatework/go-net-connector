@@ -53,7 +53,7 @@ func TestStableLockAndAliases(t *testing.T) {
 	if !errors.Is(err, ErrBusy) {
 		t.Fatalf("wanted busy: %v", err)
 	}
-	lockPath := a.LockPath()
+	lockPath := a.lockPath
 	if err = a.Close(); err != nil {
 		t.Fatal(err)
 	}

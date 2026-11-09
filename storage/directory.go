@@ -1,13 +1,10 @@
 package storage
 
 import (
-	"context"
 	"fmt"
-	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 )
 
@@ -86,29 +83,4 @@ func CreateBatchDirectory(root string, stamp time.Time) (string, error) {
 		}
 		return path, nil
 	}
-}
-func SavedFilename(host string) (string, error) {
-	a, e := netip.ParseAddr(host)
-	if e != nil || a.Zone() != "" {
-		return "", ErrUnsafe
-	}
-	return strings.ReplaceAll(a.String(), ":", "_") + ".txt", nil
-}
-func ReadSaved(ctx context.Context, directory, host string) ([]byte, error) {
-	name, e := SavedFilename(host)
-	if e != nil {
-		return nil, e
-	}
-	b, _, e := Read(ctx, filepath.Join(directory, name), 32<<20)
-	return b, e
-}
-func ExportSaved(ctx context.Context, directory, host, destination string) (Receipt, error) {
-	b, e := ReadSaved(ctx, directory, host)
-	if e != nil {
-		return Receipt{}, e
-	}
-	if e = PrepareDirectory(filepath.Dir(destination)); e != nil {
-		return Receipt{}, e
-	}
-	return Write(ctx, destination, b)
 }

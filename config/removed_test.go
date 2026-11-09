@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -15,12 +16,12 @@ func TestRemovedSourceFileKeysAreRejected(t *testing.T) {
 			if err := os.WriteFile(path, []byte("tftp:\n  "+key+": flash:/a.cfg\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			_, err := Load(Options{Name: "backup", CWD: dir, Home: dir, Directories: []string{dir}, Environment: map[string]string{}, Defaults: Defaults("tftp")})
+			_, err := Load(context.Background(), Options{Name: "backup", CWD: dir, Home: dir, Directories: []string{dir}, Environment: map[string]string{}, Defaults: Defaults("tftp")})
 			assertRemoved(t, err, "tftp."+key)
 		})
 		t.Run("override "+key, func(t *testing.T) {
 			dir := t.TempDir()
-			_, err := Load(Options{Name: "backup", CWD: dir, Home: dir, Directories: []string{}, Environment: map[string]string{}, Defaults: Defaults("tftp"), Overrides: map[string]any{"tftp": map[string]any{key: "flash:/a.cfg"}}, AllowMissing: true})
+			_, err := Load(context.Background(), Options{Name: "backup", CWD: dir, Home: dir, Directories: []string{}, Environment: map[string]string{}, Defaults: Defaults("tftp"), Overrides: map[string]any{"tftp": map[string]any{key: "flash:/a.cfg"}}, AllowMissing: true})
 			assertRemoved(t, err, "tftp."+key)
 		})
 	}

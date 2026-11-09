@@ -1,8 +1,8 @@
 # go-net-connector
 
-以 Go 实现 Ruby net-connector 0.18.0 冻结工作区的设备连接、配置采集、原生上传、拓扑审计和批次执行模块。支持 Go 1.26+，目标平台为 Linux/macOS、amd64/arm64。
+面向网络管理员的设备自动化模块：设备登录、配置采集与备份、TFTP 与原生远程备份、邻居发现与接口描述修正、批量脚本下发和只读命令采集。支持 Go 1.26+，目标平台为 Linux/macOS、amd64/arm64。
 
-底层直接依赖 GitHub 上的 `github.com/gatework/go-expect` 和系统 SSH/Telnet。依赖版本由 `go.mod` 固定，构建不使用本地 `replace` 或跨仓库 `go.work`。历史校验记录仅用于审计，不参与当前构建。
+底层直接依赖 GitHub 上的 `github.com/gatework/go-expect` 和系统 SSH/Telnet。依赖版本由 `go.mod` 固定，构建不使用本地 `replace` 或跨仓库 `go.work`。
 
 ## 构建
 
@@ -14,7 +14,7 @@ GOWORK=off go test ./...
 GOWORK=off go build -o bin/ ./cmd/...
 ```
 
-当前版本为 [v0.6.0](docs/releases/v0.6.0.md)，新增 `netman push` 批量脚本下发，并移除厂商专用 TFTP 源文件配置键（改用 `tftp.source_files`）。公开 Go API 的变更见 [迁移说明](docs/api-migration.md)。配置使用平铺的 `net-connector.yml`，归档协议为 v2。
+当前版本为 [v0.7.0](docs/releases/v0.7.0.md)：统一阶段流水线与报告、`deploy`/`exec`/`backup remote`/`backup diff`、跳板机与连接重试，不保留兼容层。公开 Go API 的变更见 [迁移说明](docs/api-migration.md)。配置使用平铺的 `net-connector.yml`，归档协议为 v2。
 
 系统需要 `ssh`；Telnet 连接另需系统 `telnet`。SSH 归档服务器需要管理员安装 `tftp-archive`，默认路径 `/usr/local/bin/tftp-archive`。客户端只探测协议版本和能力，不上传或安装 worker。
 
@@ -27,28 +27,47 @@ GOWORK=off go build -o bin/ ./cmd/...
 ```sh
 bin/netman --help
 bin/netman config init --non-interactive
-bin/netman config show
-bin/netman config defaults
-bin/netman config defaults --for tftp --json
 bin/netman inventory list --hosts 192.0.2.0/24
 bin/netman backup plan --method cli --json
-bin/netman backup run --json
-bin/netman backup tftp --tftp-server 192.0.2.9 --tftp-root /srv/tftp --success-policy verified --json
-bin/netman topology plan --hosts 192.0.2.1 --json
-bin/netman topology apply --hosts 192.0.2.1 --json
-bin/netman push plan --script-for h3c=vlan.txt --hosts 192.0.2.0/28
-bin/netman push run --script ntp.txt --vendor cisco --save --stop-after-failures 1
+bin/netman backup run --save --json
+bin/netman backup tftp --tftp-server 192.0.2.9 --tftp-root /srv/tftp --success-policy verified
+bin/netman backup remote --vendor juniper --remote-server 192.0.2.9 --remote-path backups --remote-username backup
+bin/netman backup diff 192.0.2.1 --from ./backups/批次A --to ./backups/批次B
 bin/netman backup export 192.0.2.1 --batch ./backups/具体批次 --output ./saved.cfg
+bin/netman exec run --command 'show version' --vendor cisco
+bin/netman deploy plan --script-for h3c=vlan.txt --hosts 192.0.2.0/28
+bin/netman deploy run --script ntp.txt --vendor cisco --save --backup --stop-after-failures 1
+bin/netman topology plan --hosts 192.0.2.1 --json
+bin/netman topology apply --hosts 192.0.2.1
 bin/netman completion zsh
 ```
 
-备份默认全量选择和批次归档。配置采集默认 selected；TFTP 默认 verified，要求服务器核验并取回文件、本地持久化及暂存清理确认成功。`--success-policy selected` 可显式选择以设备报告判断上传结果。文本文件统一为 `设备名称-IP.txt`；可使用 `--sample` 抽样、`--success-policy strict` 严格判定及 `--layout flat` 平铺。设备名缺失时使用 `unnamed`。CLI 不生成 `.raw` 旁车：正常编码转换为 UTF-8；设备配置本身无法无损解码时保留原编码字节并报告编码警告，不猜字、不丢字，也不伪装成有效 UTF-8。
+### 单设备阶段流水线
 
-`push` 批量下发命令脚本：`--script` 适用于所有平台，`--script-for 平台=文件` 按规范平台键覆盖；缺少对应脚本的设备跳过且不连接。全部脚本在读取配置、凭据与清单之前完成校验（NUL、控制字符、非 UTF-8 均拒绝并报告行号），`push plan` 只预览不连接。`run` 逐台在一次操作租约内顺序发送，设备拒绝或结果不确定即停止该设备，不重试、不重放；`--save` 只以平台的正向保存回执为成功，否则报告 `save_unconfirmed`；未声明保存脚本的平台（如 Juniper、Palo Alto、Topsec）在指定 `--save` 时于规划阶段跳过，不会先改配置再发现无法保存。`--stop-after-failures N` 只阻止尚未开始的设备，不打断进行中的会话。批次目录（默认 `./pushes`）保留 `plan.json`、`report.json` 和会话日志；报告区分已接受命令数与包括失败命令在内的写入尝试。被拒绝或保存未确认的设备可能已部分生效，应按报告逐台核对而不是整份重跑。
+每台设备在一次会话内按阶段执行：**认证**（账户/密码/enable，以登录提示符确认登录成功）→ 业务阶段（如 **执行脚本** → **保存配置** → **备份**）。任一阶段失败即拦截该设备的后续阶段，报告逐阶段记录状态、耗时与诊断（`failed_stage` 指明停在哪一步）；失败设备不重试、不重放写入。各命令即阶段组合：
+
+| 命令 | 阶段 |
+| --- | --- |
+| `backup run` | [保存，`--save`] → 备份（CLI 采集为 `设备名称-IP.txt`） |
+| `backup tftp` | [保存] → TFTP 上传（有核验根目录时：服务器核验并取回） |
+| `backup remote` | 原生远程导出（SCP/FTP，目前 Juniper；仅设备回执，不支持 verified） |
+| `deploy run` | 执行脚本 → [保存，`--save`] → [备份，`--backup`] |
+| `exec run` | 只读命令采集（输出存为 `设备名称-IP.txt`） |
+| `topology plan/discover/apply` | 审计；apply 在全部计划文件落盘后再逐台重新核验并应用 |
+
+`plan` 类命令只做无 I/O 的准入与目标预览，输出与运行报告同一格式（状态为 `not_started` 或跳过原因）。
+
+`deploy`：`--script` 适用于所有平台，`--script-for 平台=文件` 按规范平台键覆盖；缺少对应脚本的设备记为 `missing_script` 且不连接。全部脚本在读取配置、凭据与清单之前完成校验（NUL、控制字符、非 UTF-8 均拒绝并报告行号）。`--save` 只以平台正向保存回执为成功；未声明保存脚本的平台记为 `save_unsupported`，不会先改配置再发现无法保存。`--stop-after-failures N` 只阻止尚未开始的设备。被拒绝或保存未确认的设备可能已部分生效，状态为 `partial`，应按报告逐台核对而不是整份重跑。
+
+`exec`：每个平台声明只读命令（如 `show`、`display`、`get`）；管道仅允许 include/exclude/begin/no-more 等显示过滤，`| redirect`、`| tee`、`| append`、Junos `| save` 与 `>` 均拒绝。对某平台不是只读的命令使该设备记为 `not_read_only`，零连接。
+
+`backup diff` 只读两个本地批次，经与导出相同的路径和哈希校验后输出 unified diff；退出码 `0` 一致、`1` 有差异、`2` 错误。
+
+连接：`ssh.jump_host`（`NC_SSH_JUMP_HOST`、`--jump-host`）经系统 ssh `-J` 走跳板机，跳板机自身主机密钥按本机 SSH 配置（`~/.ssh/known_hosts`、`~/.ssh/config`）校验，与 Telnet 及 Telnet 回退互斥。`ssh.connect_retries`（默认 1，0–5）只在出现登录提示前的连接被拒、无路由或超时时线性退避重试；认证失败从不重试，以免锁定账户。
 
 帮助、版本、补全、默认配置打印、配置查看和初始化不访问设备或清单；清单预览和备份规划可访问清单但不连接设备。拓扑规划需要只读访问设备，应用前会重新核验。
 
-退出码：`0` 策略成功，`1` 不完整或没有可执行目标，`2` 参数、清单或 I/O 错误，`130` 中断。中文进度写 stderr，JSON 结果写 stdout。批次保留 `plan.json`、`events.jsonl`、`summary.json` 和 `summary.txt`。
+退出码：`0` 策略成功，`1` 不完整或没有可执行目标，`2` 参数、清单或 I/O 错误，`130` 中断。中文进度写 stderr，JSON 结果写 stdout。每个批次目录保留 `plan.json`（计划报告）、`events.jsonl`（逐台完成事件）和 `report.json`（统一报告，schema v3：每台设备的 `status`、`outcome`、`failed_stage`、`diagnostic{code,phase}`、逐阶段记录与产物证据）；`--json` 输出即该报告。诊断只含稳定代码与阶段，不含设备回显或密钥。
 
 | 原用法 | 新用法 |
 | --- | --- |
@@ -104,9 +123,10 @@ TFTP 的 `server`、`servers`、`verification_root`、`verification_roots`、`so
 ## Go API
 
 ```go
-profile, err := vendors.Profile("cisco_ios")
+platform, err := vendors.NewBuiltinRegistry().Lookup("cisco_ios")
 if err != nil { return err }
-device, err := connector.New(profile, connector.ConnectionConfig{
+// A platform is a connector.Driver: terminal grammar plus vendor behavior.
+device, err := connector.New(platform, connector.ConnectionConfig{
     Host: host, Username: username, Password: password,
     KnownHosts: knownHosts, HostKeyPolicy: "strict",
 })
@@ -140,9 +160,9 @@ Go API 直接注入 `ConnectionConfig.Logger` 且不设置 `LogLevel` 时，保�
 
 ## 验证与边界
 
-本轮改进、基准和平台验证见 [2026-10-29 优化记录](docs/2026-10-29-quality-verification.md)，公开 API 变更见 [迁移说明](docs/api-migration.md)。
+设计约束见 [设计约束](docs/design.md)，公开 API 变更见 [迁移说明](docs/api-migration.md)，实施证据见 [实施记录](docs/progress.md)。
 
-首版发布流程与产物校验见 [发布说明](docs/releasing.md)，当前发布验证状态见 [发布验证](docs/release-verification.md)。
+发布流程与产物校验见 [发布说明](docs/releasing.md)。
 
 ```sh
 go test -race ./...
@@ -152,11 +172,11 @@ python3 scripts/verify-consumer.py
 python3 scripts/verify-linux.py
 ```
 
-来源和平台证据见 [验证记录](docs/verification.md)，模块和厂商对应关系见 [兼容矩阵](docs/compatibility.md)，所有权与失败边界见 [架构](docs/architecture.md)，实施中的兼容性与交付裁定见 [决策记录](docs/decisions.md)。本地假设备、PTY、HTTP/TLS、临时 PostgreSQL、localhost sshd 和安装后的 worker 是不同的证据层；这些结果不代表生产设备互通、远端 CI 或发布完成。
+所有权与失败边界见 [架构](docs/architecture.md)，厂商能力矩阵见 [厂商方言](vendors/README.md)。本地假设备、PTY、HTTP/TLS、临时 PostgreSQL、localhost sshd 和安装后的 worker 是不同的证据层；这些结果不代表生产设备互通、远端 CI 或发布完成。
 
 ### TFTP 等待上限与每日归档
 
-CLI 上传命令默认最多等待 180 秒，通过 `tftp.upload_timeout`（秒）或 `NC_TFTP_UPLOAD_TIMEOUT` 调整；不会在超时后自动重发上传命令。该默认与 Ruby TFTP 策略一致。Go API 的 `TFTPOptions.Timeout` 为零时同样沿用 180 秒，正值覆盖上传命令的等待上限。
+CLI 上传命令默认最多等待 180 秒，通过 `tftp.upload_timeout`（秒）或 `NC_TFTP_UPLOAD_TIMEOUT` 调整；不会在超时后自动重发上传命令。Go API 的 `TFTPOptions.Timeout` 为零时同样沿用 180 秒，正值覆盖上传命令的等待上限。
 
 服务器按 UTC+8 日期归档，例如 `/srv/tftp/archive/2026-11-04/设备名-IP.cfg`。同一天多次备份在核验成功后原子更新当天文件；上传失败保留原版本，不创建随机 SSH 子目录。历史日期与此前批次目录保持原位。本机批次报告仍独立保存。worker 必须提供 `daily_latest` 能力，预检失败时不会执行设备上传。
 

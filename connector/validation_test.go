@@ -23,19 +23,14 @@ func validateValue(t *testing.T, value any) error {
 	return validator.Validate()
 }
 
-func TestProfileValidationIsPure(t *testing.T) {
-	p := fixtureProfile()
+func TestTerminalValidationIsPure(t *testing.T) {
+	p := fixtureTerminal()
 	p.ConfigCommands = append(make([]string, 0, 4), "show config")
 	p.SaveCommands = []string{"save"}
-	p.ConfigStrategy = func() ConfigStrategy { t.Fatal("validation invoked strategy"); return nil }
-	p.Prepare = func(context.Context, Command, Executor) (Command, bool, error) {
-		t.Fatal("validation invoked command hook")
-		return Command{}, false, nil
-	}
 	if err := validateValue(t, p); err != nil {
 		t.Fatal(err)
 	}
-	if p.CommandTimeout != 0 || !p.UsernamePrompt.IsZero() || !p.Pager.IsZero() || p.LegacySSHArguments != nil {
+	if p.CommandTimeout != 0 || !p.UsernamePrompt.IsZero() || !p.Pager.IsZero() || p.LegacyCryptoArguments != nil {
 		t.Fatal("validation applied defaults to its input")
 	}
 	if p.ConfigCommands[:cap(p.ConfigCommands)][1] != "" {
@@ -46,28 +41,28 @@ func TestProfileValidationIsPure(t *testing.T) {
 func TestProfileValidationMatchesConstruction(t *testing.T) {
 	tests := []struct {
 		name string
-		edit func(*Profile)
+		edit func(*Terminal)
 	}{
-		{"missing name", func(p *Profile) { p.Name = "" }},
-		{"missing prompt", func(p *Profile) { p.CommandPrompt = testPatternZero() }},
-		{"empty prompt match", func(p *Profile) { p.LoginPrompt = testPattern(".*") }},
-		{"nil error pattern", func(p *Profile) { p.CommandErrors = []*regexp.Regexp{nil} }},
-		{"empty error match", func(p *Profile) { p.AuthenticationErrors = []*regexp.Regexp{regexp.MustCompile(".*")} }},
-		{"invalid privilege", func(p *Profile) { p.PrivilegeCommand = "enable" }},
-		{"invalid interaction", func(p *Profile) { p.Interactions = []Interaction{{Reply: "yes"}} }},
-		{"invalid command", func(p *Profile) { p.ConfigCommands = []string{"show\nchange"} }},
-		{"invalid save", func(p *Profile) { p.SaveCommands = []string{"save\x00"} }},
-		{"invalid recovery", func(p *Profile) { p.LegacySSHArguments = []string{""} }},
-		{"negative timeout", func(p *Profile) { p.CommandTimeout = -time.Second }},
+		{"missing name", func(p *Terminal) { p.Name = "" }},
+		{"missing prompt", func(p *Terminal) { p.CommandPrompt = testPatternZero() }},
+		{"empty prompt match", func(p *Terminal) { p.LoginPrompt = testPattern(".*") }},
+		{"nil error pattern", func(p *Terminal) { p.CommandErrors = []*regexp.Regexp{nil} }},
+		{"empty error match", func(p *Terminal) { p.AuthenticationErrors = []*regexp.Regexp{regexp.MustCompile(".*")} }},
+		{"invalid privilege", func(p *Terminal) { p.PrivilegeCommand = "enable" }},
+		{"invalid interaction", func(p *Terminal) { p.Interactions = []Interaction{{Reply: "yes"}} }},
+		{"invalid command", func(p *Terminal) { p.ConfigCommands = []string{"show\nchange"} }},
+		{"invalid save", func(p *Terminal) { p.SaveCommands = []string{"save\x00"} }},
+		{"invalid recovery", func(p *Terminal) { p.LegacyCryptoArguments = []string{""} }},
+		{"negative timeout", func(p *Terminal) { p.CommandTimeout = -time.Second }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := fixtureProfile()
+			p := fixtureTerminal()
 			tt.edit(&p)
 			if err := validateValue(t, p); !errors.Is(err, ErrInvalid) {
 				t.Fatalf("Validate = %v", err)
 			}
-			if _, err := New(p, ConnectionConfig{Host: "fixture"}); !errors.Is(err, ErrInvalid) {
+			if _, err := New(StaticDriver{Grammar: p}, ConnectionConfig{Host: "fixture"}); !errors.Is(err, ErrInvalid) {
 				t.Fatalf("New = %v", err)
 			}
 		})
@@ -122,7 +117,7 @@ func TestConnectionValidationMatchesConstruction(t *testing.T) {
 			if err := validateValue(t, cfg); !errors.Is(err, ErrInvalid) {
 				t.Fatalf("Validate = %v", err)
 			}
-			if _, err := New(fixtureProfile(), cfg); !errors.Is(err, ErrInvalid) {
+			if _, err := New(fixtureDriver(), cfg); !errors.Is(err, ErrInvalid) {
 				t.Fatalf("New = %v", err)
 			}
 		})
@@ -134,13 +129,13 @@ type validationWriter struct{}
 func (*validationWriter) Write([]byte) (int, error) { panic("validation performed I/O") }
 
 func TestNewSnapshotsValidatedConfiguration(t *testing.T) {
-	p := fixtureProfile()
+	p := fixtureTerminal()
 	p.CommandPrompt = testPattern("a|ab")
 	p.Interactions = []Interaction{{Pattern: testPattern("q|question"), Reply: "yes"}}
-	p.LegacySSHArguments = []string{}
-	cfg := ConnectionConfig{Host: "fixture", Challenges: []Interaction{{Pattern: testPattern("p|password"), Reply: "secret"}}, LegacySSHArguments: []string{"-1"}}
+	p.LegacyCryptoArguments = []string{}
+	cfg := ConnectionConfig{Host: "fixture", Challenges: []Interaction{{Pattern: testPattern("p|password"), Reply: "secret"}}, LegacyCryptoArguments: []string{"-1"}}
 	opens := 0
-	d, err := New(p, cfg, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
+	d, err := New(StaticDriver{Grammar: p}, cfg, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 		opens++
 		return nil, ErrConnection
 	}))
@@ -157,20 +152,20 @@ func TestNewSnapshotsValidatedConfiguration(t *testing.T) {
 	p.ConfigCommands[0] = "changed"
 	cfg.Challenges[0].Pattern = testPattern("changed")
 	cfg.Challenges[0].Reply = "changed"
-	cfg.LegacySSHArguments[0] = "changed"
-	if testMatchText(d.profile.CommandPrompt, "ab") != "a" || testMatchText(d.profile.Interactions[0].Pattern, "question") != "q" || d.profile.Interactions[0].Reply != "yes" || d.profile.ConfigCommands[0] != "show config" {
+	cfg.LegacyCryptoArguments[0] = "changed"
+	if testMatchText(d.terminal.CommandPrompt, "ab") != "a" || testMatchText(d.terminal.Interactions[0].Pattern, "question") != "q" || d.terminal.Interactions[0].Reply != "yes" || d.terminal.ConfigCommands[0] != "show config" {
 		t.Fatal("profile snapshot follows caller mutation")
 	}
-	if testMatchText(d.config.Challenges[0].Pattern, "password") != "p" || d.config.Challenges[0].Reply != "secret" || d.config.LegacySSHArguments[0] != "-1" {
+	if testMatchText(d.config.Challenges[0].Pattern, "password") != "p" || d.config.Challenges[0].Reply != "secret" || d.config.LegacyCryptoArguments[0] != "-1" {
 		t.Fatal("connection snapshot follows caller mutation")
 	}
-	if d.profile.LegacySSHArguments == nil || len(d.profile.LegacySSHArguments) != 0 || d.profile.CommandTimeout != 25*time.Second || d.config.CommandTimeout != 25*time.Second {
+	if d.terminal.LegacyCryptoArguments == nil || len(d.terminal.LegacyCryptoArguments) != 0 || d.terminal.CommandTimeout != 25*time.Second || d.config.CommandTimeout != 25*time.Second {
 		t.Fatal("normalization changed explicit recovery disable or timeouts")
 	}
 }
 
 func TestExecutionStateIsPerScript(t *testing.T) {
-	p := fixtureProfile()
+	p := fixtureDriver()
 	p.Prepare = func(_ context.Context, c Command, ex Executor) (Command, bool, error) {
 		if ex.Value("previous") != "" {
 			t.Error("hook state leaked between scripts")

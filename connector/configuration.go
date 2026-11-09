@@ -53,7 +53,7 @@ func (d *Device) collectConfigWithMode(ctx context.Context, mode configTextMode)
 	if mode > configTextPreserveInvalid {
 		return Result{}, ErrInvalid
 	}
-	if len(d.profile.ConfigCommands) == 0 {
+	if len(d.terminal.ConfigCommands) == 0 {
 		return Result{}, newError("configuration_error", "collect", Command{}, ErrUnsupported)
 	}
 	returned := false
@@ -65,16 +65,14 @@ func (d *Device) collectConfigWithMode(ctx context.Context, mode configTextMode)
 		}
 	}()
 	result, err = func() (Result, error) {
-		commands := make([]Command, len(d.profile.ConfigCommands))
-		for i, text := range d.profile.ConfigCommands {
+		commands := make([]Command, len(d.terminal.ConfigCommands))
+		for i, text := range d.terminal.ConfigCommands {
 			commands[i] = Command{Text: text, OutputSensitive: true}
 		}
 		var strategy ConfigStrategy = renderedConfig{}
-		if d.profile.ConfigStrategy != nil {
-			strategy = d.profile.ConfigStrategy()
-			if strategy == nil {
-				return Result{}, newError("configuration_error", "collect", Command{}, ErrInvalid)
-			}
+		custom := d.driver.NewConfigCollector()
+		if custom != nil {
+			strategy = custom
 		}
 		result, e := d.execute(ctx, Script{Commands: commands}, ExecuteOptions{textMode: mode}, strategy)
 		if e != nil {
@@ -90,7 +88,7 @@ func (d *Device) collectConfigWithMode(ctx context.Context, mode configTextMode)
 		if strings.TrimSpace(config) == "" {
 			return result, ErrIncomplete
 		}
-		hasBody := d.profile.ConfigStrategy != nil
+		hasBody := custom != nil
 		for _, step := range result.steps[len(result.steps)-1:] {
 			body, e := step.Response().Rendered()
 			if e != nil {
@@ -121,7 +119,7 @@ func (d *Device) collectConfigWithMode(ctx context.Context, mode configTextMode)
 
 // SaveConfig distinguishes command completion from profile-confirmed persistence.
 func (d *Device) SaveConfig(ctx context.Context, opts ExecuteOptions) (Result, error) {
-	if len(d.profile.SaveCommands) == 0 {
+	if len(d.terminal.SaveCommands) == 0 {
 		return Result{}, ErrUnsupported
 	}
 	if opts.MaxOutputBytes < 0 || opts.PreserveSessionOnRejection {
@@ -136,7 +134,7 @@ func (d *Device) SaveConfig(ctx context.Context, opts ExecuteOptions) (Result, e
 	return d.saveConfig(ctx, opts)
 }
 func (d *Device) saveConfig(ctx context.Context, opts ExecuteOptions) (result Result, err error) {
-	if len(d.profile.SaveCommands) == 0 {
+	if len(d.terminal.SaveCommands) == 0 {
 		return result, ErrUnsupported
 	}
 	if opts.MaxOutputBytes < 0 || opts.PreserveSessionOnRejection {
@@ -155,18 +153,15 @@ func (d *Device) saveConfig(ctx context.Context, opts ExecuteOptions) (result Re
 	return
 }
 func (d *Device) save(ctx context.Context, opts ExecuteOptions) (result Result, err error) {
-	commands := make([]Command, len(d.profile.SaveCommands))
-	for i, text := range d.profile.SaveCommands {
+	commands := make([]Command, len(d.terminal.SaveCommands))
+	for i, text := range d.terminal.SaveCommands {
 		commands[i] = Command{Text: text}
 	}
 	result, err = d.execute(ctx, Script{Commands: commands}, opts, nil)
 	if err != nil {
 		return
 	}
-	if d.profile.ValidateSave == nil {
-		return result, newError("persistence_unconfirmed", "persist", Command{}, ErrUnconfirmed)
-	}
-	if err = d.profile.ValidateSave(ctx, result); err != nil {
+	if err = d.driver.ValidateSave(ctx, result); err != nil {
 		return result, newError("persistence_unconfirmed", "persist", Command{}, err)
 	}
 	return result, ctx.Err()

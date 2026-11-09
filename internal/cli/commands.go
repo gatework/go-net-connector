@@ -88,7 +88,7 @@ func (r Runtime) commandTree(ctx context.Context, outputErr *error) *cobra.Comma
 			o.config = configFile
 			o.envFile = envFile
 			o.flags = c.Flags()
-			if action == "export" {
+			if action == "export" || action == "diff" {
 				o.export = args[0]
 			}
 			if err := prepareCommandOptions(c, &o); err != nil {
@@ -110,7 +110,8 @@ func (r Runtime) commandTree(ctx context.Context, outputErr *error) *cobra.Comma
 	addBackupCommands(root, leaf)
 	addInventoryCommands(root, leaf)
 	addTopologyCommands(root, leaf)
-	addPushCommands(root, leaf)
+	addDeployCommands(root, leaf)
+	addExecCommands(root, leaf)
 	addConfigCommands(root, leaf)
 	addCompletionCommands(root)
 	root.AddCommand(&cobra.Command{Use: "version", Short: "显示版本与源码修订号", Long: "显示构建身份，不读取配置或凭据。", Example: "  netman version", Args: noArguments, RunE: func(c *cobra.Command, _ []string) error {
@@ -177,7 +178,8 @@ func (w *commandOutput) Write(p []byte) (int, error) {
 func flagCompletions() map[string][]string {
 	return map[string][]string{
 		"layout":          batchreport.Layouts(),
-		"method":          {"cli", "tftp"},
+		"method":          {"cli", "tftp", "remote"},
+		"remote-protocol": {"scp", "ftp"},
 		"success-policy":  batchreport.SuccessPolicies(),
 		"protocol":        {string(connector.ProtocolSSH), string(connector.ProtocolTelnet)},
 		"host-key-policy": {string(connector.HostKeyStrict), string(connector.HostKeyAcceptNew), string(connector.HostKeyReplace)},

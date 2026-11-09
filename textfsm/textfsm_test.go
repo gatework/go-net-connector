@@ -7,35 +7,30 @@ import (
 	"testing"
 )
 
-func TestParseIndexedFixtures(t *testing.T) {
-	cases := []struct{ vendor, command, text, key, want string }{
-		{"h3c", "display lldp neighbor-information list", "Local Interface Chassis ID Port ID System Name\nGE1/0/1 0011-2233-4455 GE1/0/2 peer\n", "NEIGHBOR_NAME", "peer"},
-		{"h3c_wireless", "display lldp neighbor-information list", "System Name Local Interface Chassis ID Port ID\npeer GE1/0/1 0011-2233-4455 GE1/0/2\n", "LOCAL_INTERFACE", "GE1/0/1"},
-		{"cisco_ios", "show ip interface brief", "Interface IP-Address OK? Method Status Protocol\r\nGigabitEthernet0/1 unassigned YES unset administratively down down\r\nrouter#", "STATUS", "administratively down"},
-		{"cisco_ios", "show running-config", "interface Ethernet1\n description uplink\n!\n", "DESCRIPTION", "uplink"},
-		{"cisco_nxos", "show running-config", "interface Ethernet1\n description uplink\n\n", "DESCRIPTION", "uplink"},
-		{"h3c", "dis cur", "interface Ethernet1\n description uplink\n#\n", "DESCRIPTION", "uplink"},
-		{"huawei", "display current-configuration", "interface Ethernet1\n description uplink\n#\n", "DESCRIPTION", "uplink"},
-		{"hillstone", "show configuration running", "interface Ethernet1\n description uplink\nexit\n", "DESCRIPTION", "uplink"},
-		{"palo_alto", "show", "set network interface ethernet Ethernet1 comment uplink\n", "DESCRIPTION", "uplink"},
-		{"radware", "/cfg/dump", "/cfg/port 1/name uplink", "DESCRIPTION", "uplink"},
-		{"fortinet", "show full-configuration", "config system interface\n    edit Ethernet1\n        set description uplink\n    next\nend\n", "DESCRIPTION", "uplink"},
-		{"juniper", "show configuration | display set | no-more", "set interfaces Ethernet1 description uplink\n", "DESCRIPTION", "uplink"},
+func TestParseTemplateFixtures(t *testing.T) {
+	cases := []struct{ template, text, key, want string }{
+		{"h3c/display_lldp_neighbor_information_list.textfsm", "Local Interface Chassis ID Port ID System Name\nGE1/0/1 0011-2233-4455 GE1/0/2 peer\n", "NEIGHBOR_NAME", "peer"},
+		{"h3c/display_lldp_neighbor_information_list.textfsm", "System Name Local Interface Chassis ID Port ID\npeer GE1/0/1 0011-2233-4455 GE1/0/2\n", "LOCAL_INTERFACE", "GE1/0/1"},
+		{"cisco/show_running_config.textfsm", "interface Ethernet1\n description uplink\n!\n", "DESCRIPTION", "uplink"},
+		{"cisco_nxos/show_running_config.textfsm", "interface Ethernet1\n description uplink\n\n", "DESCRIPTION", "uplink"},
+		{"h3c/display_current_configuration.textfsm", "interface Ethernet1\n description uplink\n#\n", "DESCRIPTION", "uplink"},
+		{"huawei/display_current_configuration.textfsm", "interface Ethernet1\n description uplink\n#\n", "DESCRIPTION", "uplink"},
+		{"hillstone/show_configuration_running.textfsm", "interface Ethernet1\n description uplink\nexit\n", "DESCRIPTION", "uplink"},
+		{"palo_alto/show.textfsm", "set network interface ethernet Ethernet1 comment uplink\n", "DESCRIPTION", "uplink"},
+		{"radware/cfg_dump.textfsm", "/cfg/port 1/name uplink", "DESCRIPTION", "uplink"},
+		{"fortinet/show_full_configuration.textfsm", "config system interface\n    edit Ethernet1\n        set description uplink\n    next\nend\n", "DESCRIPTION", "uplink"},
+		{"juniper/show_configuration_display_set.textfsm", "set interfaces Ethernet1 description uplink\n", "DESCRIPTION", "uplink"},
+		{"cisco/show_cdp_neighbors_detail.textfsm", "Device ID: core\nInterface: Gi0/1, Port ID (outgoing port): Gi0/2\n", "NEIGHBOR_NAME", "core"},
+		{"cisco_nxos/show_cdp_neighbors_detail.textfsm", "Device-ID: core\nInterface: Ethernet1/1, Port ID (outgoing port): Ethernet1/2\n", "LOCAL_INTERFACE", "Ethernet1/1"},
+		{"hillstone/show_lldp_neighbor_information.textfsm", "core ethernet0/1 001122334455 Ethernet1/2\n", "NEIGHBOR_NAME", "core"},
+		{"huawei/display_lldp_neighbor_brief.textfsm", "Local Intf Neighbor Dev Neighbor Intf Exptime\nGE0/0/1 core GE0/0/2 120\n", "NEIGHBOR_NAME", "core"},
+		{"palo_alto/show_lldp_neighbors_all.textfsm", "Local information:\nLocal interface: ethernet1/1\nChassis ID: 001122334455\nPort ID: Ethernet1/2\nSystem name: core\n", "LOCAL_INTERFACE", "ethernet1/1"},
+		{"fortinet/diagnose_lldp_rx_neighbor.textfsm", "1 port 'wan1' 5 mac 00:11:22:33:44:55 chassis 00:11:22:33:44:66 port 'Te1/0/1' system 'core01'\n", "NEIGHBOR_NAME", "core01"},
+		{"juniper/show_lldp_neighbors_detail.textfsm", "Local Interface : ge-0/0/0\nChassis ID : 00:11:22:33:44:55\nPort ID : Ethernet1/1\nSystem name : core\nManagement Info\n  Port ID : 1\n", "NEIGHBOR_INTERFACE", "Ethernet1/1"},
 	}
-
-	cases = append(cases, []struct{ vendor, command, text, key, want string }{
-		{"cisco_nxos", "show ip interface brief vrf management", "IP Interface Status for VRF \"management\"(2)\nmgmt0 192.0.2.1 protocol-up/link-up/admin-up\n", "VRF", "management"},
-		{"cisco_ios", "show cdp neighbors detail", "Device ID: core\nInterface: Gi0/1, Port ID (outgoing port): Gi0/2\n", "NEIGHBOR_NAME", "core"},
-		{"cisco_nxos", "show cdp neighbors detail", "Device-ID: core\nInterface: Ethernet1/1, Port ID (outgoing port): Ethernet1/2\n", "LOCAL_INTERFACE", "Ethernet1/1"},
-		{"hillstone", "show lldp neighbor-information", "core ethernet0/1 001122334455 Ethernet1/2\n", "NEIGHBOR_NAME", "core"},
-		{"huawei", "display lldp neighbor brief", "Local Intf Neighbor Dev Neighbor Intf Exptime\nGE0/0/1 core GE0/0/2 120\n", "NEIGHBOR_NAME", "core"},
-		{"palo_alto", "show lldp neighbors all", "Local information:\nLocal interface: ethernet1/1\nChassis ID: 001122334455\nPort ID: Ethernet1/2\nSystem name: core\n", "LOCAL_INTERFACE", "ethernet1/1"},
-		{"fortinet", "diagnose lldp rx neighbor", "1 port 'wan1' 5 mac 00:11:22:33:44:55 chassis 00:11:22:33:44:66 port 'Te1/0/1' system 'core01'\n", "NEIGHBOR_NAME", "core01"},
-		{"juniper", "show lldp neighbors detail | no-more", "Local Interface : ge-0/0/0\nChassis ID : 00:11:22:33:44:55\nPort ID : Ethernet1/1\nSystem name : core\nManagement Info\n  Port ID : 1\n", "NEIGHBOR_INTERFACE", "Ethernet1/1"},
-	}...)
 	for _, c := range cases {
-		t.Run(c.vendor+c.command, func(t *testing.T) {
-			r, e := Parse(c.vendor, c.command, c.text)
+		t.Run(c.template, func(t *testing.T) {
+			r, e := ParseTemplate(c.template, c.text)
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -45,13 +40,15 @@ func TestParseIndexedFixtures(t *testing.T) {
 		})
 	}
 }
-func TestParseMissingAndExactIndex(t *testing.T) {
-	for _, c := range []struct{ v, c string }{{"cisco_ios_other", "show ip interface brief"}, {"cisco_ios", "prefix show ip interface brief"}, {"cisco_ios", "show ip interface brief\n"}} {
-		if _, e := Parse(c.v, c.c, ""); !errors.Is(e, ErrTemplateMissing) {
-			t.Fatalf("error %v", e)
+
+func TestParseTemplateMissing(t *testing.T) {
+	for _, name := range []string{"cisco/absent.textfsm", "../cisco/show_running_config.textfsm"} {
+		if _, e := ParseTemplate(name, ""); !errors.Is(e, ErrTemplateMissing) {
+			t.Fatalf("%q: error %v", name, e)
 		}
 	}
 }
+
 func TestParseTemplateFreshAndStrict(t *testing.T) {
 	template := "Value Required NAME (\\S+)\nValue STATE (up|down)\n\nStart\n  ^${NAME}\\s+${STATE}$$ -> Record\n"
 	for i := range 12 {
@@ -104,7 +101,7 @@ func TestEmbeddedTemplateAndIncompleteRows(t *testing.T) {
 	if _, e = ParseTemplate("missing.textfsm", ""); !errors.Is(e, ErrTemplateMissing) {
 		t.Fatal(e)
 	}
-	if _, e = Parse("fortinet", "show full-configuration", "config system interface\n    edit wan1\n        set description\n    next\nend\n"); !errors.Is(e, ErrParse) {
+	if _, e = ParseTemplate("fortinet/show_full_configuration.textfsm", "config system interface\n    edit wan1\n        set description\n    next\nend\n"); !errors.Is(e, ErrParse) {
 		t.Fatalf("invalid description: %v", e)
 	}
 }
@@ -121,17 +118,27 @@ func TestEmbeddedTemplateDoesNotRecompileEachCall(t *testing.T) {
 		t.Fatalf("steady parse allocations=%v, want <=100", n)
 	}
 }
-func TestEmbeddedTemplateResultsAreIndependent(t *testing.T) {
+
+// filldownTemplate carries Filldown state across records within one parse.
+const filldownTemplate = `Value Filldown VRF (\S+)
+Value Required INTERFACE (\S+)
+
+Start
+  ^IP Interface Status for VRF "${VRF}"
+  ^${INTERFACE}\s+\S+\s+\S+ -> Record
+`
+
+func TestTemplateResultsAreIndependent(t *testing.T) {
 	for i := range 16 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			t.Parallel()
 			for range 10 {
-				rows, err := ParseTemplate("cisco_nxos/show_ip_interface_brief.textfsm", "IP Interface Status for VRF \"management\"(2)\nmgmt0 192.0.2.1 protocol-up/link-up/admin-up\n")
+				rows, err := ParseTemplate(filldownTemplate, "IP Interface Status for VRF \"management\"(2)\nmgmt0 192.0.2.1 protocol-up/link-up/admin-up\n")
 				if err != nil || len(rows) != 1 || rows[0]["VRF"] != "management" {
 					t.Fatalf("filldown %v %v", rows, err)
 				}
 				rows[0]["VRF"] = "caller mutation"
-				rows, err = ParseTemplate("cisco_nxos/show_ip_interface_brief.textfsm", "mgmt0 192.0.2.1 protocol-up/link-up/admin-up\n")
+				rows, err = ParseTemplate(filldownTemplate, "mgmt0 192.0.2.1 protocol-up/link-up/admin-up\n")
 				if err != nil || len(rows) != 1 || rows[0]["VRF"] != "" {
 					t.Fatalf("state leaked: %v %v", rows, err)
 				}

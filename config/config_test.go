@@ -33,7 +33,7 @@ func TestLoadContextCancellationPrecedesDiscovery(t *testing.T) {
 	if err := unix.Mkfifo(path, 0600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := LoadContext(ctx, Options{Name: "backup", CWD: root, Home: root, Directories: []string{root}})
+	_, err := Load(ctx, Options{Name: "backup", CWD: root, Home: root, Directories: []string{root}})
 	if !errors.Is(err, context.Canceled) || errors.Is(err, ErrInvalid) {
 		t.Fatalf("discovery preceded cancellation: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestLayerPrecedenceAndPaths(t *testing.T) {
 	os.WriteFile(filepath.Join(low, "net-connector.yml"), []byte("ssh:\n  protocol: ssh\nbackup:\n  directory: ./saved\n  parallel: 2\n"), 0600)
 	os.WriteFile(filepath.Join(high, "net-connector.yml"), []byte("backup:\n  parallel: 3\n"), 0600)
 	os.WriteFile(filepath.Join(high, ".env"), []byte("NC_PARALLEL=1\nNC_DEVICE_PASSWORD='a#$b'\n"), 0600)
-	s, e := Load(Options{Name: "backup", CWD: root, Home: root, Directories: []string{low, high}, Environment: map[string]string{"NC_PARALLEL": "4"}, Overrides: map[string]any{"backup": map[string]any{"parallel": 5}}})
+	s, e := Load(context.Background(), Options{Name: "backup", CWD: root, Home: root, Directories: []string{low, high}, Environment: map[string]string{"NC_PARALLEL": "4"}, Overrides: map[string]any{"backup": map[string]any{"parallel": 5}}})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -75,7 +75,7 @@ func TestProcessEnvironmentMasksInvalidDotenv(t *testing.T) {
 		t.Fatal(e)
 	}
 	process := map[string]string{"NC_PARALLEL": "4", "ND_CACHE_ENABLED": "true", "NC_HOST_OVERRIDES": `{"192.0.2.1":"cisco_ios"}`}
-	s, e := Load(Options{Name: "backup", CWD: root, Home: root, Directories: []string{}, EnvFile: path, Environment: process})
+	s, e := Load(context.Background(), Options{Name: "backup", CWD: root, Home: root, Directories: []string{}, EnvFile: path, Environment: process})
 	if e != nil || s.Value("backup.parallel") != 4 || s.Value("netdisco.cache_enabled") != true || !reflect.DeepEqual(s.Value("inventory.host_overrides"), map[string]any{"192.0.2.1": "cisco_ios"}) {
 		t.Fatalf("winning process layer: %v", e)
 	}
@@ -84,7 +84,7 @@ func TestProcessEnvironmentMasksInvalidDotenv(t *testing.T) {
 			original := process[key]
 			process[key] = "bad"
 			defer func() { process[key] = original }()
-			if _, e := Load(Options{Name: "backup", CWD: root, Home: root, Directories: []string{}, EnvFile: path, Environment: process}); !errors.Is(e, ErrInvalid) {
+			if _, e := Load(context.Background(), Options{Name: "backup", CWD: root, Home: root, Directories: []string{}, EnvFile: path, Environment: process}); !errors.Is(e, ErrInvalid) {
 				t.Fatalf("invalid winning process value accepted: %v", e)
 			}
 		})
@@ -97,7 +97,7 @@ func TestSnapshotPlainDataOwnership(t *testing.T) {
 		return Options{Name: "backup", CWD: root, Home: root, Directories: []string{}, Overrides: values}
 	}
 	input := map[string]any{"inventory": map[string]any{"host_overrides": map[string]any{"192.0.2.1": map[string]any{"vendor": "cisco_ios"}}}}
-	s, e := Load(options(input))
+	s, e := Load(context.Background(), options(input))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -109,7 +109,7 @@ func TestSnapshotPlainDataOwnership(t *testing.T) {
 		t.Fatalf("snapshot aliased caller: %v", got)
 	}
 	typed := map[string]any{"inventory": map[string]any{"host_overrides": map[string]any{"192.0.2.1": map[string]string{"vendor": "cisco_ios"}}}}
-	if _, e = Load(options(typed)); !errors.Is(e, ErrInvalid) {
+	if _, e = Load(context.Background(), options(typed)); !errors.Is(e, ErrInvalid) {
 		t.Fatalf("unsupported mutable typed map accepted: %v", e)
 	}
 }
@@ -139,7 +139,7 @@ func TestSnapshotRejectsCyclicAndOverBudgetOptions(t *testing.T) {
 				} else {
 					o.Overrides = values
 				}
-				if _, e := Load(o); !errors.Is(e, ErrInvalid) {
+				if _, e := Load(context.Background(), o); !errors.Is(e, ErrInvalid) {
 					t.Fatalf("defaults=%v invalid plain data accepted: %v", defaults, e)
 				}
 			}
@@ -170,7 +170,7 @@ func TestRelativeSourceContextsAreAbsolute(t *testing.T) {
 			if cwd == rel {
 				o.Directories = []string{"."}
 			}
-			s, e := Load(o)
+			s, e := Load(context.Background(), o)
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -212,7 +212,7 @@ func TestConfigurationSymlinkDiscoveryAndExplicitFiles(t *testing.T) {
 				o.ConfigFile = "net-connector.yml"
 				o.EnvFile = ".env"
 			}
-			s, e := Load(o)
+			s, e := Load(context.Background(), o)
 			if e != nil || s.Value("backup.parallel") != 6 || s.Secret("NC_DEVICE_PASSWORD") != "fixture" || s.Value("backup.directory") != filepath.Join(root, "saved") {
 				t.Fatalf("symlink config: %v", e)
 			}
@@ -253,7 +253,7 @@ func TestConfigurationRejectsNonregularAndOversizedFiles(t *testing.T) {
 				} else {
 					o.ConfigFile = path
 				}
-				if _, e := Load(o); !errors.Is(e, ErrInvalid) {
+				if _, e := Load(context.Background(), o); !errors.Is(e, ErrInvalid) {
 					t.Fatalf("accepted %s: %v", kind, e)
 				}
 			})
@@ -270,11 +270,11 @@ func TestExplicitEmptyDirectoriesDisableDiscovery(t *testing.T) {
 		t.Fatal(e)
 	}
 	o := Options{Name: "backup", CWD: root, Home: root, Program: filepath.Join(root, "tool"), Directories: []string{}}
-	if _, e := Load(o); e != nil {
+	if _, e := Load(context.Background(), o); e != nil {
 		t.Fatalf("disabled discovery read file: %v", e)
 	}
 	o.Directories = nil
-	if _, e := Load(o); !errors.Is(e, ErrInvalid) {
+	if _, e := Load(context.Background(), o); !errors.Is(e, ErrInvalid) {
 		t.Fatalf("nil directories should discover invalid input: %v", e)
 	}
 }
@@ -289,7 +289,7 @@ func TestIntegerSchemaRejectsFloatingPointScalars(t *testing.T) {
 				if e := os.WriteFile(path, []byte(parts[0]+":\n  "+parts[1]+": "+value+"\n"), 0600); e != nil {
 					t.Fatal(e)
 				}
-				_, e := Load(Options{Name: "backup", CWD: root, Home: root, Directories: []string{}, ConfigFile: path})
+				_, e := Load(context.Background(), Options{Name: "backup", CWD: root, Home: root, Directories: []string{}, ConfigFile: path})
 				if value == "1" {
 					if e != nil {
 						t.Fatal(e)
@@ -302,7 +302,7 @@ func TestIntegerSchemaRejectsFloatingPointScalars(t *testing.T) {
 	}
 	root := t.TempDir()
 	for _, value := range []any{1, 1.0} {
-		if _, e := Load(Options{Name: "backup", CWD: root, Home: root, Directories: []string{}, Overrides: map[string]any{"netdisco": map[string]any{"inventory_timeout": value}}}); e != nil {
+		if _, e := Load(context.Background(), Options{Name: "backup", CWD: root, Home: root, Directories: []string{}, Overrides: map[string]any{"netdisco": map[string]any{"inventory_timeout": value}}}); e != nil {
 			t.Fatalf("number field rejected %T: %v", value, e)
 		}
 	}

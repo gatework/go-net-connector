@@ -33,7 +33,7 @@ func RemoteBackup(ctx context.Context, registry dialect.Registry, d *connector.D
 	if registry == nil || len(registry.Names()) == 0 || d == nil {
 		return result, ErrInvalid
 	}
-	declaration, err := registry.Lookup(d.ProfileName())
+	declaration, err := registry.Lookup(d.PlatformName())
 	if err != nil {
 		return result, ErrUnsupported
 	}

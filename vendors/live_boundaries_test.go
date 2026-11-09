@@ -44,7 +44,7 @@ func TestRadwareLoginNoticeAndReadOnlyDump(t *testing.T) {
 
 func TestRadwareLoginNoticeIsBoundedAndSpecific(t *testing.T) {
 	p := profileForTest(t, "radware")
-	for _, rule := range p.LoginInteractions {
+	for _, rule := range p.Terminal().LoginInteractions {
 		if rule.Unlimited || rule.Limit != 1 {
 			t.Fatal("login notice must be bounded")
 		}

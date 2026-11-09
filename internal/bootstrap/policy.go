@@ -31,7 +31,7 @@ func LoadPolicy(ctx context.Context, o PolicyOptions) (config.Snapshot, error) {
 	if o.Mode == "topology" {
 		name = "topology"
 	}
-	return config.LoadContext(ctx, config.Options{
+	return config.Load(ctx, config.Options{
 		Name: name, CWD: o.CWD, Home: o.Home, Program: o.Program,
 		Directories: o.Directories, ConfigFile: o.ConfigFile, EnvFile: o.EnvFile,
 		Environment: o.Environment, Overrides: overrides, Defaults: config.Defaults(o.Mode),

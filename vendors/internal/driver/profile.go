@@ -47,9 +47,9 @@ func LoginInteraction(expression, response string) connector.Interaction {
 	return interaction
 }
 
-// BaseProfile supplies stable prompt, pager and authentication defaults.
-func BaseProfile(name string) connector.Profile {
-	return connector.Profile{
+// BaseTerminal supplies stable prompt, pager and authentication defaults.
+func BaseTerminal(name string) connector.Terminal {
+	return connector.Terminal{
 		Name:                 name,
 		UsernamePrompt:       Pattern(`(?i)(?:login|username|name):\s*\z`),
 		PasswordPrompt:       Pattern(`(?i)password:\s*\z`),
@@ -60,53 +60,63 @@ func BaseProfile(name string) connector.Profile {
 	}
 }
 
-// FinishProfile adds command timeout, configuration collection and save proof.
-func FinishProfile(profile connector.Profile, timeout time.Duration, configuration func() connector.ConfigStrategy, saveConfirmation *regexp.Regexp) connector.Profile {
-	profile.CommandTimeout = timeout
-	profile.ValidateSave = func(ctx context.Context, result connector.Result) error {
-		return validateSaveConfirmation(ctx, result, saveConfirmation)
+// Base implements connector.Driver and the platform name for a family type.
+// Families embed it and add capability methods and optional hooks.
+type Base struct {
+	terminal         connector.Terminal
+	collector        func() connector.ConfigStrategy
+	saveConfirmation *regexp.Regexp
+}
+
+// NewBase completes a terminal with its command timeout and binds the
+// configuration collector and positive save-confirmation rule. A nil
+// saveConfirmation means saves are never confirmed.
+func NewBase(t connector.Terminal, timeout time.Duration, collector func() connector.ConfigStrategy, saveConfirmation *regexp.Regexp) Base {
+	t.CommandTimeout = timeout
+	return Base{terminal: copyTerminal(t), collector: collector, saveConfirmation: saveConfirmation}
+}
+
+// Name returns the canonical platform key.
+func (b Base) Name() string { return b.terminal.Name }
+
+// Terminal returns an independent copy of the platform grammar.
+func (b Base) Terminal() connector.Terminal { return copyTerminal(b.terminal) }
+
+// NewConfigCollector returns a fresh collection strategy for one run.
+func (b Base) NewConfigCollector() connector.ConfigStrategy {
+	if b.collector == nil {
+		return nil
 	}
-	profile.ConfigStrategy = configuration
-	return profile
+	return b.collector()
 }
 
-// ProfiledPlatform provides the stable Platform methods for a concrete family
-// type. Each call returns detached mutable declarations.
-type ProfiledPlatform struct{ profile connector.Profile }
-
-// NewProfiledPlatform stores an isolated copy of the connector profile.
-func NewProfiledPlatform(profile connector.Profile) ProfiledPlatform {
-	return ProfiledPlatform{profile: copyProfile(profile)}
+// ValidateSave requires the platform's positive save confirmation.
+func (b Base) ValidateSave(ctx context.Context, result connector.Result) error {
+	return validateSaveConfirmation(ctx, result, b.saveConfirmation)
 }
 
-func (p ProfiledPlatform) Name() string { return p.profile.Name }
-
-func (p ProfiledPlatform) Profile() connector.Profile {
-	return copyProfile(p.profile)
-}
-
-func copyProfile(profile connector.Profile) connector.Profile {
+func copyTerminal(t connector.Terminal) connector.Terminal {
 	copyPattern := func(pattern *regexp.Regexp) *regexp.Regexp {
 		if pattern == nil {
 			return nil
 		}
 		return pattern.Copy() //nolint:staticcheck // Copy preserves POSIX/Longest semantics.
 	}
-	for _, list := range []*[]*regexp.Regexp{&profile.AuthenticationErrors, &profile.CommandErrors} {
+	for _, list := range []*[]*regexp.Regexp{&t.AuthenticationErrors, &t.CommandErrors} {
 		*list = append([]*regexp.Regexp(nil), (*list)...)
 		for i, pattern := range *list {
 			(*list)[i] = copyPattern(pattern)
 		}
 	}
-	for _, list := range []*[]connector.Interaction{&profile.LoginInteractions, &profile.Interactions} {
+	for _, list := range []*[]connector.Interaction{&t.LoginInteractions, &t.Interactions} {
 		*list = append([]connector.Interaction(nil), (*list)...)
 	}
-	if profile.LegacySSHArguments != nil {
-		profile.LegacySSHArguments = append([]string{}, profile.LegacySSHArguments...)
+	if t.LegacyCryptoArguments != nil {
+		t.LegacyCryptoArguments = append([]string{}, t.LegacyCryptoArguments...)
 	}
-	profile.ConfigCommands = append([]string(nil), profile.ConfigCommands...)
-	profile.SaveCommands = append([]string(nil), profile.SaveCommands...)
-	return profile
+	t.ConfigCommands = append([]string(nil), t.ConfigCommands...)
+	t.SaveCommands = append([]string(nil), t.SaveCommands...)
+	return t
 }
 
 // PositionMarkerCommandErrors returns the rejection rules of CLIs that report

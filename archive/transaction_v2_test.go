@@ -105,7 +105,7 @@ func TestPoolQueueAndTargetPreparationShareDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer p.Close()
-	if err = p.Prepare(t.Context()); err != nil {
+	if err = p.Prepare(t.Context(), nil); err != nil {
 		t.Fatal(err)
 	}
 	slot := <-p.available

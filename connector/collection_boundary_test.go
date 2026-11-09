@@ -21,8 +21,8 @@ func (s boundaryStrategy) Finish(context.Context, Result) (string, error) {
 	return "invented", nil
 }
 func TestBackupAbnormalCollectionRetiresSession(t *testing.T) {
-	p := fixtureProfile()
-	p.ConfigStrategy = func() ConfigStrategy { return boundaryStrategy{panicFinish: true} }
+	p := fixtureDriver()
+	p.Collector = func() ConfigStrategy { return boundaryStrategy{panicFinish: true} }
 	d, _ := fixtureDevice(t, p, []string{"show config\r\nbody\r\nsw#"})
 	func() {
 		defer func() {
@@ -37,8 +37,8 @@ func TestBackupAbnormalCollectionRetiresSession(t *testing.T) {
 	}
 }
 func TestCollectionRejectsAllSkippedEvidence(t *testing.T) {
-	p := fixtureProfile()
-	p.ConfigStrategy = func() ConfigStrategy { return boundaryStrategy{} }
+	p := fixtureDriver()
+	p.Collector = func() ConfigStrategy { return boundaryStrategy{} }
 	p.Prepare = func(_ context.Context, c Command, _ Executor) (Command, bool, error) { return c, true, nil }
 	d, _ := fixtureDevice(t, p, nil)
 	_, err := d.RunningConfig(t.Context())
@@ -58,8 +58,8 @@ func TestCollectionAbnormalExitRetiresAllEntryPoints(t *testing.T) {
 						}
 						panic("strategy aborted")
 					}
-					p := fixtureProfile()
-					p.ConfigStrategy = func() ConfigStrategy {
+					p := fixtureDriver()
+					p.Collector = func() ConfigStrategy {
 						if factory {
 							abort()
 						}

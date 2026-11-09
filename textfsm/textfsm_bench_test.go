@@ -21,11 +21,3 @@ func BenchmarkEmbeddedTemplate(b *testing.B) {
 		})
 	}
 }
-func BenchmarkIndexedTemplate(b *testing.B) {
-	for b.Loop() {
-		rows, err := Parse("cisco_ios", "show running-config", "interface Ethernet1\n description uplink\n!\n")
-		if err != nil || len(rows) != 1 {
-			b.Fatal(err)
-		}
-	}
-}

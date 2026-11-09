@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -33,14 +34,14 @@ func BenchmarkLoadLayeredConfiguration(b *testing.B) {
 		Environment: map[string]string{"NC_PARALLEL": "8"},
 		Overrides:   map[string]any{"backup": map[string]any{"parallel": 5}},
 	}
-	if _, err := Load(options); err != nil {
+	if _, err := Load(context.Background(), options); err != nil {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
 	b.SetBytes(1 << 10)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := Load(options); err != nil {
+		if _, err := Load(context.Background(), options); err != nil {
 			b.Fatal(err)
 		}
 	}

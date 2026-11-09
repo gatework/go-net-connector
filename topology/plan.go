@@ -67,9 +67,9 @@ func BuildPlan(registry dialect.Registry, host, vendor string, peers []Neighbor,
 	identity, _ := d.(InterfaceIdentity)
 	writer, _ := d.(DescriptionWriter)
 	denial, _ := d.(WriteRestriction)
-	return buildPlan(host, d.Profile(), identity, writer, denial, peers, descriptions, opts)
+	return buildPlan(host, d.Terminal(), identity, writer, denial, peers, descriptions, opts)
 }
-func buildPlan(host string, profile connector.Profile, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Plan, error) {
+func buildPlan(host string, profile connector.Terminal, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Plan, error) {
 	if identity == nil {
 		return Plan{}, newError("description_unsupported", "plan", ErrUnsupported)
 	}
@@ -117,9 +117,9 @@ func BuildAudit(registry dialect.Registry, host, vendor string, peers []Neighbor
 	}
 	writer, _ := d.(DescriptionWriter)
 	denial, _ := d.(WriteRestriction)
-	return buildAudit(host, d.Profile(), identity, writer, denial, peers, descriptions, opts)
+	return buildAudit(host, d.Terminal(), identity, writer, denial, peers, descriptions, opts)
 }
-func buildAudit(host string, profile connector.Profile, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Audit, error) {
+func buildAudit(host string, profile connector.Terminal, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Audit, error) {
 	if identity == nil {
 		return Audit{}, ErrUnsupported
 	}
@@ -210,7 +210,7 @@ func (s stages) commands() []string {
 	all = append(all, s.verify...)
 	return append(all, s.persist...)
 }
-func stagesFor(profile connector.Profile, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction, changes []Change) (stages, error) {
+func stagesFor(profile connector.Terminal, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction, changes []Change) (stages, error) {
 	if identity == nil {
 		return stages{}, newError("description_unsupported", "plan", ErrUnsupported)
 	}
@@ -260,9 +260,9 @@ func ValidatePlan(registry dialect.Registry, p Plan, host, vendor string) error 
 	identity, _ := d.(InterfaceIdentity)
 	writer, _ := d.(DescriptionWriter)
 	denial, _ := d.(WriteRestriction)
-	return validatePlan(p, host, d.Profile(), identity, writer, denial)
+	return validatePlan(p, host, d.Terminal(), identity, writer, denial)
 }
-func validatePlan(p Plan, host string, profile connector.Profile, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction) error {
+func validatePlan(p Plan, host string, profile connector.Terminal, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction) error {
 	if p.Host != host || p.Vendor != profile.Name || (p.Scope != "device" && p.Scope != "interfaces") {
 		return ErrInvalid
 	}

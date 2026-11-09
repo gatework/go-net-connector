@@ -5,8 +5,8 @@ import (
 )
 
 func TestProfileCommandAccessorsReturnCopies(t *testing.T) {
-	p := Profile{Name: "test", LoginPrompt: testPattern(`#`), CommandPrompt: testPattern(`#`), ConfigCommands: []string{"show"}, SaveCommands: []string{"save"}}
-	d, e := New(p, ConnectionConfig{Host: "fixture"})
+	p := Terminal{Name: "test", LoginPrompt: testPattern(`#`), CommandPrompt: testPattern(`#`), ConfigCommands: []string{"show"}, SaveCommands: []string{"save"}}
+	d, e := New(StaticDriver{Grammar: p}, ConnectionConfig{Host: "fixture"})
 	if e != nil {
 		t.Fatal(e)
 	}

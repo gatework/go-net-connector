@@ -32,7 +32,7 @@ func TestSetupAsksOnlyMissingEnvironmentFacts(t *testing.T) {
 			if tc.url != "" {
 				r.Environment["ND_URL"] = tc.url
 			}
-			p, err := config.Load(config.Options{Name: "backup", CWD: r.CWD, Home: r.Home, Directories: []string{}, Environment: r.Environment, Defaults: config.Defaults("backup"), AllowMissing: true})
+			p, err := config.Load(context.Background(), config.Options{Name: "backup", CWD: r.CWD, Home: r.Home, Directories: []string{}, Environment: r.Environment, Defaults: config.Defaults("backup"), AllowMissing: true})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"context"
 	"testing"
 
 	"github.com/gatework/go-net-connector/config"
@@ -10,7 +11,7 @@ var tftpPolicyBenchmarkSink any
 
 func benchmarkServices(b *testing.B) *Services {
 	b.Helper()
-	policy, err := config.Load(config.Options{
+	policy, err := config.Load(context.Background(), config.Options{
 		Name:        "backup",
 		CWD:         b.TempDir(),
 		Home:        b.TempDir(),

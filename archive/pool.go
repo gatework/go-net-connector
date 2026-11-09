@@ -107,13 +107,9 @@ func NewPool(o PoolOptions) (*Pool, error) {
 }
 
 // Prepare preflights every master, protocol version and archive directory.
-// Close can cancel and join this work even when the caller supplied no deadline.
-func (p *Pool) Prepare(ctx context.Context) error {
-	return p.prepare(ctx, nil)
-}
-
-// PrepareWithProgress prepares the pool and reports stage counts without exposing credentials or protocol bodies.
-func (p *Pool) PrepareWithProgress(ctx context.Context, observe func(PrepareProgress)) error {
+// A non-nil observe receives stage counts without credentials or protocol
+// bodies. Close can cancel and join this work even without a caller deadline.
+func (p *Pool) Prepare(ctx context.Context, observe func(PrepareProgress)) error {
 	return p.prepare(ctx, observe)
 }
 

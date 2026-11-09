@@ -1,8 +1,0 @@
-=== RUN   TestCommandAndInteractionKeepWriteProgress
-=== RUN   TestCommandAndInteractionKeepWriteProgress/interaction=false
-=== RUN   TestCommandAndInteractionKeepWriteProgress/interaction=true
---- PASS: TestCommandAndInteractionKeepWriteProgress (0.00s)
-    --- PASS: TestCommandAndInteractionKeepWriteProgress/interaction=false (0.00s)
-    --- PASS: TestCommandAndInteractionKeepWriteProgress/interaction=true (0.00s)
-PASS
-ok  	github.com/gatework/go-net-connector/connector	1.419s

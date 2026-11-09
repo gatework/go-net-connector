@@ -460,14 +460,11 @@ func (p *Reporter) activityLocked() string {
 	}
 	return fmt.Sprintf("登录 %d；配置采集 %d；排队 %d；并发 %d", login, operation+archive, queued, p.workers)
 }
-func isSuccessfulStatus(status string) bool {
-	switch status {
-	case "backed_up", "reported_uploaded", "discovered", "planned", "applied", "unchanged", "pushed", "saved":
-		return true
-	}
-	return false
-}
-func (p *Reporter) Outcome(host, status, errorCode string, duration time.Duration) error {
+
+// Outcome records a finished device. status is the uniform device status
+// (succeeded, partial, failed, interrupted, stopped); outcome is the
+// operation-specific result shown to the operator, such as "backed_up".
+func (p *Reporter) Outcome(host, status, outcome, errorCode string, duration time.Duration) error {
 	if p == nil {
 		return nil
 	}
@@ -478,19 +475,23 @@ func (p *Reporter) Outcome(host, status, errorCode string, duration time.Duratio
 	}
 	delete(p.active, host)
 	p.completed++
-	switch {
-	case isSuccessfulStatus(status):
+	switch status {
+	case "succeeded":
 		p.succeeded++
-	case status == "unsupported_operation", status == "filtered", status == "sample_limit", status == "stopped":
+	case "stopped":
 		p.skipped++
-	case status == "partial_planned", status == "interrupted":
+	case "partial", "interrupted":
 		p.pending++
 	default:
 		p.failed++
 	}
-	isFailure := !isSuccessfulStatus(status) && status != "unsupported_operation" && status != "filtered" && status != "sample_limit" && status != "stopped" && status != "interrupted"
+	isFailure := status == "failed" || status == "partial"
 	if isFailure {
-		message := display.Status(status)
+		label := status
+		if outcome != "" {
+			label = outcome
+		}
+		message := display.Status(label)
 		if errorCode != "" {
 			message += "；" + display.Error(errorCode)
 		}

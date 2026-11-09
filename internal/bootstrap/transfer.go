@@ -53,3 +53,7 @@ func (s *Services) buildTFTPPolicy() (*transfer.Policy, error) {
 func (s *Services) ArchivePassword() string { return s.secret("NC_TFTP_SSH_PASSWORD") }
 
 func (s *Services) ArchiveTimeouts() archive.Timeouts { return s.settings.archiveTimeouts }
+
+// RemoteBackupPassword resolves the remote export credential only when a
+// remote backup actually runs; it is never logged or written to a report.
+func (s *Services) RemoteBackupPassword() string { return s.secret("NC_REMOTE_BACKUP_PASSWORD") }

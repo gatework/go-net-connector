@@ -29,11 +29,11 @@ func prepareCommandOptions(c *cobra.Command, o *options) error {
 	}
 	if f.Lookup("method") != nil {
 		method, _ := f.GetString("method")
-		if method != "cli" && method != "tftp" {
-			return usageError("备份方式必须为 cli 或 tftp")
+		if method != "cli" && method != "tftp" && method != "remote" {
+			return usageError("备份方式必须为 cli、tftp 或 remote")
 		}
-		if method == "tftp" {
-			o.mode = "tftp"
+		if method != "cli" {
+			o.mode = method
 		}
 	}
 	if o.action == "export" && o.batch == "" {
@@ -81,7 +81,7 @@ func prepareCommandOptions(c *cobra.Command, o *options) error {
 			return usageError("清单缓存选项互相冲突")
 		}
 	}
-	public := map[string]string{"netdisco-url": "ND_URL", "source": "ND_SOURCE", "query": "ND_QUERY", "query-params": "ND_QUERY_PARAMS", "cache-mode": "ND_CACHE_MODE", "known-hosts": "NC_KNOWN_HOSTS", "host-key-policy": "NC_HOST_KEY_POLICY", "protocol": "NC_PROTOCOL", "max-script-output-bytes": "NC_MAX_SCRIPT_OUTPUT_BYTES", "tftp-root": "NC_TFTP_ROOT", "tftp-server": "NC_TFTP_HOST", "name-match": "NC_NAME_MATCH", "model-match": "NC_MODEL_MATCH", "layout": "NC_BACKUP_LAYOUT"}
+	public := map[string]string{"netdisco-url": "ND_URL", "source": "ND_SOURCE", "query": "ND_QUERY", "query-params": "ND_QUERY_PARAMS", "cache-mode": "ND_CACHE_MODE", "known-hosts": "NC_KNOWN_HOSTS", "jump-host": "NC_SSH_JUMP_HOST", "connect-retries": "NC_SSH_CONNECT_RETRIES", "host-key-policy": "NC_HOST_KEY_POLICY", "protocol": "NC_PROTOCOL", "max-script-output-bytes": "NC_MAX_SCRIPT_OUTPUT_BYTES", "tftp-root": "NC_TFTP_ROOT", "tftp-server": "NC_TFTP_HOST", "name-match": "NC_NAME_MATCH", "model-match": "NC_MODEL_MATCH", "layout": "NC_BACKUP_LAYOUT"}
 	secrets := map[string]string{"username": "NC_DEVICE_USERNAME", "password": "NC_DEVICE_PASSWORD", "enable-password": "NC_ENABLE_PASSWORD", "netdisco-username": "ND_USERNAME", "netdisco-password": "ND_PASSWORD"}
 	filters := map[string]string{"hosts": "NC_INCLUDE_HOSTS", "host": "NC_INCLUDE_HOSTS", "exclude-hosts": "NC_EXCLUDE_HOSTS", "name": "NC_INCLUDE_NAMES", "exclude-name": "NC_EXCLUDE_NAMES", "vendor": "NC_INCLUDE_VENDORS", "exclude-vendor": "NC_EXCLUDE_VENDORS", "model": "NC_INCLUDE_MODELS", "exclude-model": "NC_EXCLUDE_MODELS"}
 	for name, key := range public {
@@ -106,7 +106,7 @@ func prepareCommandOptions(c *cobra.Command, o *options) error {
 	if only, _ := f.GetBool("cache-only"); only {
 		o.public["ND_CACHE_MODE"] = string(netdisco.CacheOnly)
 	}
-	if o.directory != "" && o.mode != "push" {
+	if o.directory != "" && o.mode != "deploy" && o.mode != "exec" {
 		key := "NC_BACKUP_DIRECTORY"
 		if o.mode == "topology" {
 			key = "NC_TOPOLOGY_DIRECTORY"

@@ -1,6 +1,0 @@
-goos: darwin
-goarch: arm64
-pkg: github.com/gatework/go-net-connector/connector
-cpu: Apple M5
-BenchmarkCommandOutput/32768KiB-10         	       1	3401675500 ns/op	   9.86 MB/s	904377712 B/op	    4944 allocs/op
-PASS

@@ -200,13 +200,16 @@ func sshArguments(cfg ConnectionConfig, knownHosts string, port int) []string {
 	if cfg.HostKeyPolicy == "strict" {
 		checking = "yes"
 	}
-	args := append([]string(nil), cfg.LegacySSHArguments...)
+	args := append([]string(nil), cfg.LegacyCryptoArguments...)
 	args = append(args, "-tt", "-o", "StrictHostKeyChecking="+checking, "-o", "UserKnownHostsFile="+knownHosts, "-o", "GlobalKnownHostsFile=/dev/null", "-o", "UpdateHostKeys=no", "-o", "ConnectTimeout="+strconv.Itoa(max(1, int(cfg.LoginTimeout.Seconds()))), "-p", strconv.Itoa(port))
 	if cfg.IdentityFile != "" {
 		args = append(args, "-i", cfg.IdentityFile)
 	}
 	if cfg.Username != "" {
 		args = append(args, "-l", cfg.Username)
+	}
+	if cfg.JumpHost != "" {
+		args = append(args, "-J", cfg.JumpHost)
 	}
 	args = append(args, "--", cfg.Host)
 	return args

@@ -46,7 +46,7 @@ func TFTP(ctx context.Context, registry dialect.Registry, d *connector.Device, o
 	if d == nil || registry == nil {
 		return result, ErrInvalid
 	}
-	vendor := d.ProfileName()
+	vendor := d.PlatformName()
 	platform, err := registry.Lookup(vendor)
 	if err != nil {
 		return result, ErrUnsupported

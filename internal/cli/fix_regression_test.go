@@ -40,8 +40,8 @@ func tftpReportFixture(t *testing.T, output io.Writer, progress io.Writer, ctx c
 	r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) {
 		return []inventory.Device{{IP: "192.0.2.1", Name: "edge", Vendor: "cisco", OS: "nxos"}}, nil
 	})
-	r.DeviceFactory = func(_ connector.Profile, c connector.ConnectionConfig) (*connector.Device, error) {
-		return connector.New(connector.Profile{Name: "cisco_nxos", LoginPrompt: testPattern(`sw#\s*$`), CommandPrompt: testPattern(`sw#\s*$`)}, c, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
+	r.DeviceFactory = func(_ connector.Driver, c connector.ConnectionConfig) (*connector.Device, error) {
+		return connector.New(connector.StaticDriver{Grammar: connector.Terminal{Name: "cisco_nxos", LoginPrompt: testPattern(`sw#\s*$`), CommandPrompt: testPattern(`sw#\s*$`)}}, c, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
 			a, b := net.Pipe()
 			go func() {
 				defer b.Close()
@@ -66,7 +66,7 @@ func latestReport(t *testing.T, root string) map[string]any {
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("batch directory: %v, %d entries", err, len(entries))
 	}
-	data, err := os.ReadFile(filepath.Join(root, entries[0].Name(), "summary.json"))
+	data, err := os.ReadFile(filepath.Join(root, entries[0].Name(), "report.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,11 +84,11 @@ func TestProgressFailureKeepsCompletedTransferAndEvent(t *testing.T) {
 		t.Fatal(code, output.String())
 	}
 	report := latestReport(t, root)
-	if report["policy_success"] != false || len(report["callback_errors"].([]any)) == 0 {
+	if report["success"] != false || report["report_error"] != "progress_failed" {
 		t.Fatal(report)
 	}
 	row := report["devices"].([]any)[0].(map[string]any)
-	if row["status"] != "reported_uploaded" {
+	if row["status"] != "succeeded" || row["outcome"] != "uploaded" {
 		t.Fatal(row)
 	}
 	events, err := filepath.Glob(filepath.Join(root, "*", "events.jsonl"))
@@ -96,7 +96,7 @@ func TestProgressFailureKeepsCompletedTransferAndEvent(t *testing.T) {
 		t.Fatal(err, events)
 	}
 	data, err := os.ReadFile(events[0])
-	if err != nil || !bytes.Contains(data, []byte("reported_uploaded")) {
+	if err != nil || !bytes.Contains(data, []byte(`"outcome":"uploaded"`)) {
 		t.Fatal(err, string(data))
 	}
 }
@@ -109,7 +109,7 @@ func TestCanceledReportOutputRetains130AndDiagnostic(t *testing.T) {
 		t.Fatal(code)
 	}
 	report := latestReport(t, root)
-	if report["policy_success"] != false || report["report_error"] == nil {
+	if report["success"] != false || report["report_error"] == nil {
 		t.Fatal(report)
 	}
 }
@@ -160,7 +160,7 @@ func TestInteractiveSetupConsentAndCustomization(t *testing.T) {
 			r := Runtime{Args: strings.Fields(tc.args), CWD: root, Home: root, Directories: []string{}, Environment: map[string]string{}, Input: slave, Error: slave, Output: &bytes.Buffer{}}
 			code := 0
 			if tc.args == "consent" {
-				policy, e := config.Load(config.Options{Name: "backup", CWD: root, Home: root, Directories: []string{}, Environment: map[string]string{}, Defaults: config.Defaults("backup"), AllowMissing: true})
+				policy, e := config.Load(context.Background(), config.Options{Name: "backup", CWD: root, Home: root, Directories: []string{}, Environment: map[string]string{}, Defaults: config.Defaults("backup"), AllowMissing: true})
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -271,7 +271,7 @@ func TestInteractiveDeclinedOptionalEnvContinues(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.Args, r.Input, r.Error = []string{"inventory", "list"}, slave, slave
-	policy, e := config.Load(config.Options{Name: "backup", CWD: r.CWD, Home: r.Home, Directories: []string{}, Environment: map[string]string{}, Defaults: config.Defaults("backup"), AllowMissing: true})
+	policy, e := config.Load(context.Background(), config.Options{Name: "backup", CWD: r.CWD, Home: r.Home, Directories: []string{}, Environment: map[string]string{}, Defaults: config.Defaults("backup"), AllowMissing: true})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -351,7 +351,7 @@ func TestTopologyCacheModeSelection(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		p, err := config.Load(config.Options{Name: "topology", CWD: root, Home: root, Directories: []string{}, Environment: map[string]string{"NC_TOPOLOGY_CACHE_MODE": "only"}, Defaults: config.Defaults("topology"), Overrides: overrides, AllowMissing: true})
+		p, err := config.Load(context.Background(), config.Options{Name: "topology", CWD: root, Home: root, Directories: []string{}, Environment: map[string]string{"NC_TOPOLOGY_CACHE_MODE": "only"}, Defaults: config.Defaults("topology"), Overrides: overrides, AllowMissing: true})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -15,7 +16,7 @@ func TestAPICacheRequiresNonSecretNamespace(t *testing.T) {
 				"ND_SOURCE": "http", "ND_URL": "https://inventory.example", "ND_CACHE_ENABLED": "true",
 				"ND_CACHE_NAMESPACE": namespace,
 			}
-			policy, err := config.Load(config.Options{
+			policy, err := config.Load(context.Background(), config.Options{
 				Name: "backup", CWD: t.TempDir(), Home: t.TempDir(), Directories: []string{},
 				Defaults:    config.Defaults("backup"),
 				Environment: environment,

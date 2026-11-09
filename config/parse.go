@@ -244,21 +244,6 @@ func ParseEnvironment(text string, inherited, process map[string]string) (map[st
 					text = text[1:]
 					continue
 				}
-				if next == 'n' || next == 'r' {
-					if lookup("DOTENV_LINEBREAK_MODE") == "legacy" {
-						if next == 'n' {
-							if write("\n") != nil {
-								return nil, ErrInvalid
-							}
-						} else {
-							if write("\r") != nil {
-								return nil, ErrInvalid
-							}
-						}
-						text = text[1:]
-						continue
-					}
-				}
 			}
 			if c == '$' && quote != '\'' {
 				if strings.HasPrefix(text, "(") {

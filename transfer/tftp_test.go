@@ -29,7 +29,7 @@ func tftpPolicyForTest(t testing.TB, vendor string) TFTPPolicy {
 func transferDevice(t *testing.T, vendor string, dialogue [][2]string) *connector.Device {
 	t.Helper()
 	done := make(chan struct{})
-	d, e := connector.New(connector.Profile{Name: vendor, LoginPrompt: testPattern(`sw#\s*$`), CommandPrompt: testPattern(`sw#\s*$`)}, connector.ConnectionConfig{Host: "192.0.2.1", CommandTimeout: time.Second}, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
+	d, e := connector.New(connector.StaticDriver{Grammar: connector.Terminal{Name: vendor, LoginPrompt: testPattern(`sw#\s*$`), CommandPrompt: testPattern(`sw#\s*$`)}}, connector.ConnectionConfig{Host: "192.0.2.1", CommandTimeout: time.Second}, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
 		a, b := net.Pipe()
 		go func() {
 			defer close(done)
@@ -129,7 +129,7 @@ func TestTFTPFileCompletion(t *testing.T) {
 
 func TestTFTPFailureRetainsExecutionCause(t *testing.T) {
 	cause := errors.New("after command failed")
-	profile := connector.Profile{Name: "cisco_nxos", LoginPrompt: testPattern(`sw#$`), CommandPrompt: testPattern(`sw#$`), AfterCommand: func(context.Context, connector.Command, connector.StepResult, connector.Executor) error { return cause }}
+	profile := connector.StaticDriver{Grammar: connector.Terminal{Name: "cisco_nxos", LoginPrompt: testPattern(`sw#$`), CommandPrompt: testPattern(`sw#$`)}, AfterCommand: func(context.Context, connector.Command, connector.StepResult, connector.Executor) error { return cause }}
 	d, e := connector.New(profile, connector.ConnectionConfig{Host: "192.0.2.1", CommandTimeout: time.Second}, connector.WithTransportFactory(func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
 		a, b := net.Pipe()
 		go func() {

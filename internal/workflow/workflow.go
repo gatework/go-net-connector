@@ -5,27 +5,18 @@ import (
 	"context"
 	"errors"
 	"io"
+	"path/filepath"
 	"sync"
 
 	"github.com/gatework/go-net-connector/archive"
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/fleet"
-	"github.com/gatework/go-net-connector/topology"
+	"github.com/gatework/go-net-connector/internal/batchreport"
 	"github.com/gatework/go-net-connector/transfer"
 	"github.com/gatework/go-net-connector/vendors"
 )
 
 var ErrInvalidRequest = errors.New("workflow: invalid request")
-
-type BackupOptions struct{ Policy, Layout string }
-type TFTPOptions struct {
-	BackupOptions
-	Plan, All bool
-}
-type TopologyOptions struct {
-	InventoryOnly bool
-	Limit         int
-}
 
 // Runtime contains the application dependencies shared by operation workflows.
 // Bootstrap builds it from validated settings and resource factories.
@@ -62,92 +53,42 @@ type TopologySettings struct {
 	LowercasePorts       bool
 	NeighborNamePrefixes []string
 }
-type BatchResult struct {
-	ServerArchiveDirectories []string
-	Directory                string
-	Report                   fleet.Report
-	Plan                     fleet.Plan
-	Workers                  int
-}
-type TopologyOutcome struct {
-	Device fleet.Record
-	Audit  topology.Audit
-	Result topology.Result
-	Plan   *topology.Plan
-}
-type TopologyResult struct {
-	Inventory []fleet.PlanEntry
-	Outcomes  []TopologyOutcome
-	Directory string
-	Report    *TopologyReport
-}
 
-// Summary returns a presentation snapshot. Changing it cannot change execution
-// eligibility, retained evidence, or later report persistence.
-func (t *TopologyResult) Summary() map[string]any {
-	if t == nil || t.Report == nil {
-		return nil
-	}
-	return t.Report.view()
-}
-
-type PreviewResult struct {
-	Plan fleet.Plan
-	View PlanView
-}
+// Result is the outcome of one command: a batch report (or, for plan
+// commands, the planned report), or an inventory listing.
 type Result struct {
-	Success  bool
-	Batch    *BatchResult
-	Topology *TopologyResult
-	Preview  *PreviewResult
-	Push     *PushResult
+	Success bool
+	// Report is the batch report; Planned marks a plan preview without I/O.
+	Report  *batchreport.Report
+	Planned bool
+	// ArchiveDirectories lists the TFTP server archive directories used.
+	ArchiveDirectories []string
+	// Inventory is the classified inventory for listing commands.
+	Inventory []fleet.PlanEntry
 }
+
+// Runner executes operations and reports typed events to Observe.
 type Runner struct {
 	Observe     Observer
-	result      Result
 	progressMu  sync.Mutex
 	progressErr error
 }
 
-func (r *Runner) fail(err error) (Result, error) { return r.result, err }
-func (r *Runner) complete(success bool) Result   { r.result.Success = success; return r.result }
-func Preview(plan fleet.Plan) Result {
-	return Result{Success: len(plan.Tasks()) > 0, Preview: &PreviewResult{Plan: plan, View: NewPlanView(plan)}}
-}
-
-// RecordOutputFailure persists output diagnostics without losing committed artifacts.
-func RecordOutputFailure(ctx context.Context, result Result, err error) {
-	if err == nil {
-		return
-	}
-	ctx = context.WithoutCancel(ctx)
-	if b := result.Batch; b != nil {
-		loc, _ := b.Report.Statistics()["report_location"].(string)
-		b.Report = fleet.WriteReport(ctx, b.Report.WithReportError(err, loc), b.Directory, b.Plan, b.Workers)
-	}
-	if t := result.Topology; t != nil && t.Directory != "" {
-		t.Report.Success = false
-		t.Report.OutputError = "IOError"
-		t.Report.ReportError = "IOError"
-		_ = persistTopologySummary(ctx, t.Directory, t.Report)
-	}
-}
-
-// RecordProgressFailure retains committed results while marking display failure.
-func RecordProgressFailure(ctx context.Context, result *Result, err error) {
+// RecordFailure marks the batch failed after its report was written, for
+// example when progress or output rendering failed, and rewrites report.json.
+// Device results and stored artifacts are retained unchanged.
+func RecordFailure(ctx context.Context, result *Result, code string, err error) {
 	if result == nil || err == nil {
 		return
 	}
 	result.Success = false
-	ctx = context.WithoutCancel(ctx)
-	if b := result.Batch; b != nil {
-		loc, _ := b.Report.Statistics()["report_location"].(string)
-		b.Report = fleet.WriteReport(ctx, b.Report.WithReportError(err, loc), b.Directory, b.Plan, b.Workers)
+	report := result.Report
+	if report == nil || result.Planned || report.Directory == "" {
+		return
 	}
-	if t := result.Topology; t != nil && t.Directory != "" {
-		t.Report.Success = false
-		t.Report.ProgressError = "IOError"
-		t.Report.ReportError = "IOError"
-		_ = persistTopologySummary(ctx, t.Directory, t.Report)
+	report.Success = false
+	if report.ReportError == "" {
+		report.ReportError = code
 	}
+	_ = writeJSON(context.WithoutCancel(ctx), filepath.Join(report.Directory, "report.json"), report)
 }

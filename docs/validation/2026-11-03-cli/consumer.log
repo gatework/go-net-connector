@@ -1,3 +1,0 @@
-ok  	github.com/gatework/go-net-connector/consumercheck	0.900s
-net-connector-archive protocol 1; go-net-connector development revision unknown
-{"source_consumer": "passed", "embedded_templates": "passed", "outside_checkout_cli": "passed", "expect_version": "v0.1.2", "external_replacements": false, "paired_expect_source": true, "published_adoption": false}

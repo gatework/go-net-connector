@@ -1,8 +1,0 @@
-go version go1.26.0 linux/arm64
-ok  	github.com/gatework/go-net-connector/connector	1.293s
-ok  	github.com/gatework/go-net-connector/fleet	1.172s
-ok  	github.com/gatework/go-net-connector/internal/cli	1.838s
-go version go1.27.3 linux/arm64
-ok  	github.com/gatework/go-net-connector/connector	1.181s
-ok  	github.com/gatework/go-net-connector/fleet	1.175s
-ok  	github.com/gatework/go-net-connector/internal/cli	1.351s

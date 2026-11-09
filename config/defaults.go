@@ -27,7 +27,7 @@ func Defaults(mode string) map[string]any {
 			"include_models": []any{}, "exclude_models": []any{},
 			"name_match": "contains", "model_match": "contains",
 		},
-		"ssh":    map[string]any{"protocol": "ssh", "host_key_policy": "accept_new", "log_level": "info"},
+		"ssh":    map[string]any{"protocol": "ssh", "host_key_policy": "accept_new", "log_level": "info", "connect_retries": 1},
 		"backup": map[string]any{"directory": "./backups", "parallel": 4, "limit_per_vendor": 0, "layout": "batch"},
 	}
 	// One flat document serves every command; only the command's success policy
@@ -61,11 +61,6 @@ const EnvironmentTemplate = `# CLI > 进程环境 > YAML > .env > 默认值。
 # NC_TFTP_SSH_PASSWORD=
 # 单引号保留 # 和 $ 的字面含义。
 `
-
-// Initialize publishes missing files exclusively; it never replaces an existing entry.
-func Initialize(s Snapshot, name string) ([]string, error) {
-	return InitializeSelected(s, name, true, true)
-}
 
 // InitializeSelected publishes only the files whose creation was approved.
 func InitializeSelected(s Snapshot, name string, createConfig, createEnv bool) ([]string, error) {

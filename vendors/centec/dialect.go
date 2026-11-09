@@ -4,7 +4,6 @@ package centec
 import (
 	"time"
 
-	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/vendors/internal/driver"
 )
 
@@ -12,21 +11,25 @@ var saveConfirmationPattern = driver.Regex(`(?i)^(?:\[OK\]|Copy complete\.)$`)
 
 // Dialect is the built-in Centec platform.
 type Dialect struct {
-	driver.ProfiledPlatform
+	driver.Base
+	driver.ReadOnlyCommands
 	tftpPolicy
 }
 
 // New returns the built-in Centec dialect.
 func New() Dialect {
-	return Dialect{ProfiledPlatform: driver.NewProfiledPlatform(newProfile()), tftpPolicy: newTFTPPolicy()}
+	return Dialect{Base: newBase(), ReadOnlyCommands: readOnly, tftpPolicy: newTFTPPolicy()}
 }
 
-func newProfile() connector.Profile {
-	p := driver.BaseProfile("centec")
+func newBase() driver.Base {
+	p := driver.BaseTerminal("centec")
 	p.ConfigCommands = []string{"terminal length 0", "show running-config"}
 	p.SaveCommands = []string{"copy running-config startup-config"}
 	p.LoginPrompt = driver.Pattern(`(?:\A|[\r\n])\S+[>#]\s*\z`)
 	p.CommandPrompt = p.LoginPrompt
 	p.CommandErrors = driver.Regexps(`(?im)^[ \t]*%[ \t]+(?:Syntax\s+error|Invalid|Incomplete|Ambiguous|Unknown|Error)\b`)
-	return driver.FinishProfile(p, 60*time.Second, configFactory(), saveConfirmationPattern)
+	return driver.NewBase(p, 60*time.Second, configFactory(), saveConfirmationPattern)
 }
+
+// readOnly lists the commands this family accepts for read-only collection.
+var readOnly = driver.ReadOnlyCommands{Verbs: []string{"show", "ping", "traceroute"}}

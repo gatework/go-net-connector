@@ -205,7 +205,7 @@ func (r Runtime) configure(ctx context.Context, snapshot config.Snapshot, o opti
 	if e != nil {
 		return snapshot, e
 	}
-	result, e := config.LoadContext(ctx, config.Options{Name: name, CWD: r.CWD, Home: r.Home, Program: r.Program, Directories: r.Directories, ConfigFile: o.config, EnvFile: o.envFile, Defaults: snapshot.Public(), Overrides: overrides, Environment: r.Environment, AllowMissing: true})
+	result, e := config.Load(ctx, config.Options{Name: name, CWD: r.CWD, Home: r.Home, Program: r.Program, Directories: r.Directories, ConfigFile: o.config, EnvFile: o.envFile, Defaults: snapshot.Public(), Overrides: overrides, Environment: r.Environment, AllowMissing: true})
 	if e == nil {
 		_, e = bootstrap.New(result, nil)
 	}

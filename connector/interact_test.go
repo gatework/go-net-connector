@@ -38,7 +38,7 @@ func TestInteractRelaysAndKeepsBorrowedInputOpen(t *testing.T) {
 		}()
 		return a, nil
 	}
-	d, e := New(fixtureProfile(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(factory))
+	d, e := New(fixtureDriver(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(factory))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -89,7 +89,7 @@ func TestInteractPreservesPrimaryAndCleanup(t *testing.T) {
 				io.WriteString(b, "body")
 				io.Copy(io.Discard, b)
 			}()
-			d, err := New(fixtureProfile(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
+			d, err := New(fixtureDriver(), ConnectionConfig{Host: "fixture"}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 				return &failingCloseConn{a, cleanup}, nil
 			}))
 			if err != nil {
