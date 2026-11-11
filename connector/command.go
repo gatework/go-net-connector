@@ -143,23 +143,8 @@ func (d *Device) runScript(ctx context.Context, script Script, opts ExecuteOptio
 		x.limit = opts.MaxOutputBytes
 	}
 
-	if !opts.SkipPrivilege && d.terminal.PrivilegeCommand != "" && !d.privileged.Load() {
-		secret := d.config.EnablePassword
-		if secret == "" {
-			secret = d.config.Password
-		}
-		ac, cancel := context.WithTimeout(ctx, d.config.LoginTimeout)
-		err = d.sendLine(ac, d.terminal.PrivilegeCommand+d.config.LineEnding, false)
-		if err == nil {
-			var s StepResult
-			s, err = d.readResponse(ac, Command{}, d.terminal.PrivilegePrompt, d.loginInteractions(secret), true, false)
-			if err == nil {
-				d.setPrompt(s.Response())
-				d.privileged.Store(true)
-			}
-		}
-		cancel()
-		if err != nil {
+	if !opts.SkipPrivilege {
+		if err = d.ensurePrivilege(ctx); err != nil {
 			return
 		}
 	}
@@ -167,61 +152,89 @@ func (d *Device) runScript(ctx context.Context, script Script, opts ExecuteOptio
 		if err = ctx.Err(); err != nil {
 			return
 		}
-		c := original
-		if d.preparer != nil {
-			var skip bool
-			err = x.hook(ctx, func(ex Executor) error { var e error; c, skip, e = d.preparer.PrepareCommand(ctx, c, ex); return e })
-			if err != nil {
-				err = newError("prepare_failed", "script", original, err)
-				return
-			}
-			if skip {
-				continue
-			}
-			if err = c.validate(); err != nil {
-				return
-			}
-		}
-		var step StepResult
-		step, err = x.command(ctx, c)
-		if step.Response().RawPrompt() != "" {
-			result.steps = append(result.steps, step)
-		}
-		if err == nil && d.observer != nil {
-			e := x.hook(ctx, func(ex Executor) error { return d.observer.AfterCommand(ctx, c, step, ex) })
-			if e != nil {
-				err = newError("after_command_failed", "script", c, e)
-			}
-		}
-		if err == nil && strategy != nil {
-			e := x.hook(ctx, func(ex Executor) error { return strategy.Validate(ctx, c, step, ex) })
-			if e != nil {
-				err = configurationFailure(c, e)
-			}
-		}
-		if step.Response().RawPrompt() != "" && opts.OnReceipt != nil {
-			if e := opts.OnReceipt(ctx, step); e != nil {
-				err = joinFailures(err, newError("receipt_callback_failed", "script", c, e))
-			}
-		}
-		if err != nil {
-			return
-		}
-		if err = ctx.Err(); err != nil {
-			return
-		}
-		if opts.OnStep != nil {
-			if e := opts.OnStep(ctx, step); e != nil {
-				err = newError("step_callback_failed", "script", c, e)
-				return
-			}
-		}
-		if err = ctx.Err(); err != nil {
+		if err = x.run(ctx, original, opts, &result); err != nil {
 			return
 		}
 	}
 	return
 }
+
+// ensurePrivilege enters the privileged mode once per session, answering
+// the privilege prompt with the enable password (or the login password).
+func (d *Device) ensurePrivilege(ctx context.Context) error {
+	if d.terminal.PrivilegeCommand == "" || d.privileged.Load() {
+		return nil
+	}
+	secret := d.config.EnablePassword
+	if secret == "" {
+		secret = d.config.Password
+	}
+	ac, cancel := context.WithTimeout(ctx, d.config.LoginTimeout)
+	defer cancel()
+	if err := d.sendLine(ac, d.terminal.PrivilegeCommand+d.config.LineEnding, false); err != nil {
+		return err
+	}
+	s, err := d.readResponse(ac, Command{}, d.terminal.PrivilegePrompt, d.loginInteractions(secret), true, false)
+	if err != nil {
+		return err
+	}
+	d.setPrompt(s.Response())
+	d.privileged.Store(true)
+	return nil
+}
+
+// run executes one script command: the driver may rewrite or skip it, then
+// the observer and configuration strategy check the step, and the receipt
+// and step callbacks see it. Completed steps are kept in result.
+func (x *execution) run(ctx context.Context, original Command, opts ExecuteOptions, result *Result) error {
+	d := x.device
+	c := original
+	if d.preparer != nil {
+		var skip bool
+		err := x.hook(ctx, func(ex Executor) error { var e error; c, skip, e = d.preparer.PrepareCommand(ctx, c, ex); return e })
+		if err != nil {
+			return newError("prepare_failed", "script", original, err)
+		}
+		if skip {
+			return nil
+		}
+		if err = c.validate(); err != nil {
+			return err
+		}
+	}
+	step, err := x.command(ctx, c)
+	if step.Response().RawPrompt() != "" {
+		result.steps = append(result.steps, step)
+	}
+	if err == nil && d.observer != nil {
+		if e := x.hook(ctx, func(ex Executor) error { return d.observer.AfterCommand(ctx, c, step, ex) }); e != nil {
+			err = newError("after_command_failed", "script", c, e)
+		}
+	}
+	if err == nil && x.strategy != nil {
+		if e := x.hook(ctx, func(ex Executor) error { return x.strategy.Validate(ctx, c, step, ex) }); e != nil {
+			err = configurationFailure(c, e)
+		}
+	}
+	if step.Response().RawPrompt() != "" && opts.OnReceipt != nil {
+		if e := opts.OnReceipt(ctx, step); e != nil {
+			err = joinFailures(err, newError("receipt_callback_failed", "script", c, e))
+		}
+	}
+	if err != nil {
+		return err
+	}
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+	if opts.OnStep != nil {
+		if e := opts.OnStep(ctx, step); e != nil {
+			return newError("step_callback_failed", "script", c, e)
+		}
+	}
+	return ctx.Err()
+}
+
 func (x *execution) command(ctx context.Context, c Command) (step StepResult, err error) {
 	attempted := false
 	written := 0
@@ -236,16 +249,7 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 	if err = ctx.Err(); err != nil {
 		return step, err
 	}
-	secrets := d.baseSecrets()
-	if c.Sensitive {
-		secrets = append(secrets, c.Text)
-	}
-	private := c.Sensitive || c.OutputSensitive
-	for _, rules := range [][]Interaction{c.Interactions, d.terminal.Interactions} {
-		for _, rule := range rules {
-			private = private || rule.Sensitive
-		}
-	}
+	secrets, private := d.commandPrivacy(c)
 	restore, e := d.log.push(secrets, private)
 	if e != nil {
 		return step, newError("log_error", "logging", c, e)
@@ -286,19 +290,9 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 	}
 	defer cancel()
 	started := time.Now()
-	prompt := c.Prompt
-	if prompt.IsZero() {
-		prompt = d.terminal.CommandPrompt
-	}
-	if x.strategy != nil && c.Prompt.IsZero() {
-		var e error
-		prompt, e = x.strategy.MatchPrompt(c.Text, d.RawPrompt())
-		if e != nil {
-			return step, e
-		}
-		if e = prompt.ValidateText(); e != nil {
-			return step, ErrIncomplete
-		}
+	prompt, e := x.prompt(c)
+	if e != nil {
+		return step, e
 	}
 	attempted = true
 	if err = d.sendLine(cc, c.Text+d.config.LineEnding, c.Poll); err != nil {
@@ -316,6 +310,49 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 	if err != nil {
 		return StepResult{}, err
 	}
+	return x.verify(cc, c, step, response)
+}
+
+// commandPrivacy returns the secrets to mask while c runs, and whether its
+// output is private.
+func (d *Device) commandPrivacy(c Command) (secrets []string, private bool) {
+	secrets = d.baseSecrets()
+	if c.Sensitive {
+		secrets = append(secrets, c.Text)
+	}
+	private = c.Sensitive || c.OutputSensitive
+	for _, rules := range [][]Interaction{c.Interactions, d.terminal.Interactions} {
+		for _, rule := range rules {
+			private = private || rule.Sensitive
+		}
+	}
+	return secrets, private
+}
+
+// prompt returns the prompt that ends c's response: the command's own, the
+// configuration strategy's, or the terminal's command prompt.
+func (x *execution) prompt(c Command) (expect.Pattern, error) {
+	d := x.device
+	prompt := c.Prompt
+	if prompt.IsZero() {
+		prompt = d.terminal.CommandPrompt
+	}
+	if x.strategy != nil && c.Prompt.IsZero() {
+		var e error
+		if prompt, e = x.strategy.MatchPrompt(c.Text, d.RawPrompt()); e != nil {
+			return expect.Pattern{}, e
+		}
+		if e = prompt.ValidateText(); e != nil {
+			return expect.Pattern{}, ErrIncomplete
+		}
+	}
+	return prompt, nil
+}
+
+// verify converts the response text, enforces the output limits and
+// rejects device error output; a rejection is kept for the caller.
+func (x *execution) verify(cc context.Context, c Command, step StepResult, response Response) (StepResult, error) {
+	d := x.device
 	var diagnostic string
 	var conversionErr error
 	switch x.textMode {
@@ -355,7 +392,7 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 		return step, newError("script_output_limit_exceeded", "script", c, ErrScriptLimit)
 	}
 	// The prompt handler records completion before a late cancellation is returned.
-	if err = cc.Err(); err != nil {
+	if err := cc.Err(); err != nil {
 		return step, err
 	}
 	return step, nil
