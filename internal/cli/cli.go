@@ -48,8 +48,10 @@ func (r Runtime) Run(ctx context.Context) int {
 
 	return r.runCommands(ctx)
 }
+
+const program = "netman"
+
 func (r Runtime) executeSelected(ctx context.Context, o options, request commandRequest) int {
-	const program = "netman"
 	if request.kind == requestDefaults {
 		return r.renderDefaults(o.mode, o.json)
 	}
@@ -60,18 +62,16 @@ func (r Runtime) executeSelected(ctx context.Context, o options, request command
 			r.Environment[k] = v
 		}
 	}
-	var reporter *progress.Reporter
-	var stopUpdates func()
-	resumeSetup := func() {}
+	x := &selectedRun{r: &r, o: &o, request: request, resumeSetup: func() {}}
 	if !o.quiet && request.startsProgress() {
-		reporter = progress.New(r.Error, o.verbose)
-		r.reporter = reporter
-		_ = reporter.Section(operationLabel(o))
-		_ = reporter.Phase("正在加载配置")
-		resumeSetup = reporter.Pause()
-		defer resumeSetup()
-		stopUpdates = reporter.RunUpdates(ctx)
-		defer stopUpdates()
+		x.reporter = progress.New(r.Error, o.verbose)
+		r.reporter = x.reporter
+		_ = x.reporter.Section(operationLabel(o))
+		_ = x.reporter.Phase("正在加载配置")
+		x.resumeSetup = x.reporter.Pause()
+		defer x.resumeSetup()
+		x.stopUpdates = x.reporter.RunUpdates(ctx)
+		defer x.stopUpdates()
 	}
 	if request.kind == requestExport {
 		return r.exportBatch(ctx, o.export, o.batch, o.output, o.json)
@@ -84,6 +84,35 @@ func (r Runtime) executeSelected(ctx context.Context, o options, request command
 			return r.fail(program, e)
 		}
 	}
+	if code, done := x.loadPolicy(ctx); done {
+		return code
+	}
+	if code, done := x.setup(ctx); done {
+		return code
+	}
+	if code, done := x.checkOrShow(); done {
+		return code
+	}
+	return x.run(ctx)
+}
+
+// selectedRun is one executeSelected call: the runtime copy it mutates, the
+// options and the state built step by step.
+type selectedRun struct {
+	r           *Runtime
+	o           *options
+	request     commandRequest
+	reporter    *progress.Reporter
+	stopUpdates func()
+	resumeSetup func()
+	policy      config.Snapshot
+	backup      workflow.BackupOptions
+	reader      *bufio.Reader
+}
+
+// loadPolicy loads the layered configuration and the backup options.
+func (x *selectedRun) loadPolicy(ctx context.Context) (code int, done bool) {
+	r, o, request := x.r, x.o, x.request
 	policy, e := bootstrap.LoadPolicy(ctx, bootstrap.PolicyOptions{
 		Mode: o.mode, CWD: r.CWD, Home: r.Home, Program: r.Program,
 		Directories: r.Directories, ConfigFile: o.config, EnvFile: o.envFile,
@@ -91,202 +120,133 @@ func (r Runtime) executeSelected(ctx context.Context, o options, request command
 		AllowMissing: request.kind == requestInitialize || o.interactive,
 	})
 	if e != nil {
-		return r.fail(program, e)
+		return r.fail(program, e), true
 	}
-	backup, e := bootstrap.BackupOptions(policy, o.mode, request.kind == requestInitialize || request.kind == requestShow)
-	if e != nil {
-		return r.fail(program, e)
+	x.policy = policy
+	if x.backup, e = bootstrap.BackupOptions(policy, o.mode, request.kind == requestInitialize || request.kind == requestShow); e != nil {
+		return r.fail(program, e), true
+	}
+	return 0, false
+}
+
+// setup handles --init and interactive setup: it asks which missing files
+// to create, optionally configures them interactively and writes them.
+func (x *selectedRun) setup(ctx context.Context) (code int, done bool) {
+	r, o, request := x.r, x.o, x.request
+	if request.kind != requestInitialize && !o.interactive {
+		return 0, false
 	}
 	name := "backup"
 	if o.mode == "topology" {
 		name = "topology"
 	}
-	if request.kind == requestInitialize || o.interactive {
-		createConfig, createEnv := true, true
-		reader := bufio.NewReader(contextInput(ctx, r.Input))
-		if request.kind == requestInitialize {
-			configPath, envPath := policy.InitPaths()
-			createConfig, e = missingSetupFile(configPath)
-			if e != nil {
-				return r.fail(program, e)
-			}
-			createEnv, e = missingSetupFile(envPath)
-			if e != nil {
-				return r.fail(program, e)
-			}
-			if o.interactive && (createConfig || createEnv) {
-				if _, ok := r.terminal(); !ok {
-					return r.fail(program, config.ErrInvalid)
-				}
-			}
-		} else if o.interactive {
-			createConfig, createEnv, e = r.setupConsent(policy, reader)
-			if errors.Is(e, errSetupDeclined) {
-				return 1
-			}
-			if e != nil {
-				return r.fail(program, e)
+	createConfig, createEnv := true, true
+	reader := bufio.NewReader(contextInput(ctx, r.Input))
+	var e error
+	if request.kind == requestInitialize {
+		configPath, envPath := x.policy.InitPaths()
+		if createConfig, e = missingSetupFile(configPath); e != nil {
+			return r.fail(program, e), true
+		}
+		if createEnv, e = missingSetupFile(envPath); e != nil {
+			return r.fail(program, e), true
+		}
+		if o.interactive && (createConfig || createEnv) {
+			if _, ok := r.terminal(); !ok {
+				return r.fail(program, config.ErrInvalid), true
 			}
 		}
-		if request.kind == requestInitialize || createConfig || createEnv {
-			if o.interactive {
-				if createConfig {
-					policy, e = r.configure(ctx, policy, o, name, reader)
-				}
-				if e != nil {
-					return r.fail(program, e)
-				}
-			}
-			created, e := config.InitializeSelected(policy, name, createConfig, createEnv)
-			return r.renderInitialization(created, o.mode, e, o.json)
+	} else {
+		createConfig, createEnv, e = r.setupConsent(x.policy, reader)
+		if errors.Is(e, errSetupDeclined) {
+			return 1, true
+		}
+		if e != nil {
+			return r.fail(program, e), true
 		}
 	}
+	if request.kind != requestInitialize && !createConfig && !createEnv {
+		return 0, false
+	}
+	if o.interactive && createConfig {
+		if x.policy, e = r.configure(ctx, x.policy, *o, name, reader); e != nil {
+			return r.fail(program, e), true
+		}
+	}
+	created, e := config.InitializeSelected(x.policy, name, createConfig, createEnv)
+	return r.renderInitialization(created, o.mode, e, o.json), true
+}
+
+// checkOrShow validates the configuration for check, prints it for show, and
+// validates TFTP and topology settings before a run.
+func (x *selectedRun) checkOrShow() (code int, done bool) {
+	r, o, request, policy := x.r, x.o, x.request, x.policy
 	if o.mode == "tftp" && (request.kind == requestCheck || request.kind == requestTFTPRun) {
-		if e := bootstrap.ValidateTFTP(policy, backup.Policy); e != nil {
-			return r.fail(program, e)
+		if e := bootstrap.ValidateTFTP(policy, x.backup.Policy); e != nil {
+			return r.fail(program, e), true
 		}
 	}
-	if request.kind == requestCheck {
+	switch request.kind {
+	case requestCheck:
 		if o.mode == "topology" {
 			mode, _ := policy.Value("topology.mode").(string)
 			if e := bootstrap.ValidateTopology(policy, mode); e != nil {
-				return r.fail(program, e)
+				return r.fail(program, e), true
 			}
 		}
-		_, e := bootstrap.New(policy, nil)
-		if e != nil {
-			return r.fail(program, e)
+		if _, e := bootstrap.New(policy, nil); e != nil {
+			return r.fail(program, e), true
 		}
-		return r.renderConfiguration(map[string]any{"valid": true, "scope": o.mode}, o.mode, true, o.json)
-	}
-	if request.kind == requestShow {
+		return r.renderConfiguration(map[string]any{"valid": true, "scope": o.mode}, o.mode, true, o.json), true
+	case requestShow:
 		data := policy.Public()
 		data["sources"] = policy.Sources()
-		return r.renderConfiguration(data, o.mode, false, o.json)
+		return r.renderConfiguration(data, o.mode, false, o.json), true
 	}
 	if o.mode == "topology" {
 		if e := bootstrap.ValidateTopology(policy, request.topologyMode()); e != nil {
-			return r.fail(program, e)
+			return r.fail(program, e), true
 		}
 	}
-	resume := reporter.Pause()
-	passwordErr := r.passwords(ctx, &o)
-	resume()
-	if e := passwordErr; e != nil {
+	return 0, false
+}
+
+// run resolves credentials, reads the inventory, confirms a stdin-driven
+// run and executes the use case.
+func (x *selectedRun) run(ctx context.Context) int {
+	r, o, request, reporter := x.r, x.o, x.request, x.reporter
+	env, e := x.credentials(ctx)
+	if e != nil {
 		return r.fail(program, e)
 	}
-	env := policy.Environment()
-	for key, value := range o.secrets {
-		suffix := ""
-		switch key {
-		case "NC_DEVICE_USERNAME":
-			suffix = "USERNAME"
-		case "NC_DEVICE_PASSWORD":
-			suffix = "PASSWORD"
-		case "NC_ENABLE_PASSWORD":
-			suffix = "ENABLE_PASSWORD"
-		}
-		if suffix != "" {
-			for name := range env {
-				if strings.HasPrefix(name, "NC_") && strings.HasSuffix(name, "_"+suffix) && (suffix != "PASSWORD" || !strings.HasSuffix(name, "_ENABLE_PASSWORD")) {
-					delete(env, name)
-				}
-			}
-		}
-		if key == "ND_USERNAME" || key == "ND_PASSWORD" {
-			delete(env, "ND_API_KEY")
-		}
-		env[key] = value
-	}
-	reader := bufio.NewReader(contextInput(ctx, r.Input))
-	if o.stdin {
-		if reporter != nil {
-			_ = reporter.Phase("等待标准输入凭据：请输入一行 JSON")
-		}
-		line, e := readLine(reader, 64<<10)
-		if e != nil {
-			return r.fail(program, e)
-		}
-		var creds map[string]string
-		if json.Unmarshal([]byte(line), &creds) != nil {
-			return r.fail(program, config.ErrInvalid)
-		}
-		for key, target := range map[string]string{ //nolint:gosec // maps setting names to environment variable names, not secrets
-			"netdisco_username": "ND_USERNAME", "netdisco_password": "ND_PASSWORD", "device_username": "NC_DEVICE_USERNAME", "device_password": "NC_DEVICE_PASSWORD"} {
-			if strings.TrimSpace(creds[key]) == "" {
-				return r.fail(program, config.ErrInvalid)
-			}
-			if target == "NC_DEVICE_USERNAME" || target == "NC_DEVICE_PASSWORD" {
-				suffix := strings.TrimPrefix(target, "NC_DEVICE_")
-				for name := range env {
-					if strings.HasPrefix(name, "NC_") && strings.HasSuffix(name, "_"+suffix) && !strings.HasSuffix(name, "_ENABLE_PASSWORD") {
-						delete(env, name)
-					}
-				}
-			}
-			env[target] = creds[key]
-		}
-		delete(env, "ND_API_KEY")
-	}
-	services, e := bootstrap.New(policy, func(key string) string { return env[key] })
+	services, e := bootstrap.New(x.policy, func(key string) string { return env[key] })
 	if e != nil {
 		return r.fail(program, e)
 	}
 	if r.DeviceFactory != nil {
 		services = services.WithDeviceFactory(r.DeviceFactory)
 	}
-	resumeSetup()
-	if reporter != nil {
-		_ = reporter.Phase("正在读取设备清单")
+	x.resumeSetup()
+	rows, code, ok := x.inventory(ctx, services)
+	if !ok {
+		return code
 	}
-	var rows []inventory.Device
-	if r.Source != nil {
-		rows, e = r.Source.Devices(ctx)
-	} else {
-		var result netdisco.CacheResult
-		result, e = services.Inventory(ctx, bootstrap.InventoryMode(policy, o.mode, o.refresh, o.flags.Changed("cache-only") || o.flags.Changed("cache-mode")))
-		rows = result.Rows
-		if result.RefreshErrorCode != "" {
-			_ = reporter.Warning("设备清单刷新失败，已使用校验通过的缓存") // progress output failures are reported by the reporter itself
-		}
-		if result.WriteErrorType != "" {
-			_ = reporter.Warning("清单缓存写入失败，继续使用本次获取的清单")
-		}
+	if o.stdin && request.needsRunConfirmation() && !x.confirmRun() {
+		return r.fail(program, config.ErrInvalid)
 	}
-	if e != nil {
-		if ctx.Err() != nil {
-			return 130
-		}
-		return r.fail(program, e)
-	}
-	if reporter != nil {
-		_ = reporter.Phase(fmt.Sprintf("设备清单读取完成：%d 台；正在生成计划", len(rows)))
-	}
-	if o.stdin && request.needsRunConfirmation() {
-		if reporter != nil {
-			_ = reporter.Phase("等待执行确认：请输入 RUN")
-		}
-		resumeConfirm := reporter.Pause()
-		_ = reporter.Notice("等待执行确认：请输入 RUN")
-		line, e := readLine(reader, 64)
-		resumeConfirm()
-		if e != nil || strings.TrimSpace(line) != "RUN" {
-			return r.fail(program, config.ErrInvalid)
-		}
-	}
-	backup.Save = o.save
+	x.backup.Save = o.save
 	pipeline := useCaseEnv{
 		runner: &workflow.Runner{Observe: workflowObserver(reporter)}, runtime: services.WorkflowRuntime(),
-		services: services, backup: backup, rows: rows, options: o, cli: r,
+		services: services, backup: x.backup, rows: rows, options: *o, cli: *r,
 	}
 	result, e := request.useCase.run(ctx, pipeline)
-	if stopUpdates != nil {
-		stopUpdates()
+	if x.stopUpdates != nil {
+		x.stopUpdates()
 	}
 	if reporter != nil {
 		workflow.RecordFailure(ctx, &result, "progress_failed", reporter.Err())
 	}
-	outputErr := r.renderResult(result, o, ctx.Err() != nil)
+	outputErr := r.renderResult(result, *o, ctx.Err() != nil)
 	workflow.RecordFailure(ctx, &result, "output_failed", outputErr)
 	if ctx.Err() != nil {
 		return 130
@@ -301,6 +261,121 @@ func (r Runtime) executeSelected(ctx context.Context, o options, request command
 		return 0
 	}
 	return 1
+}
+
+// credentials builds the environment the services read: prompted secrets
+// replace the configured device credentials, and with --stdin a JSON line
+// supplies the Netdisco and device credentials.
+func (x *selectedRun) credentials(ctx context.Context) (map[string]string, error) {
+	resume := x.reporter.Pause()
+	passwordErr := x.r.passwords(ctx, x.o)
+	resume()
+	if passwordErr != nil {
+		return nil, passwordErr
+	}
+	env := x.policy.Environment()
+	for key, value := range x.o.secrets {
+		applySecret(env, key, value)
+	}
+	x.reader = bufio.NewReader(contextInput(ctx, x.r.Input))
+	if !x.o.stdin {
+		return env, nil
+	}
+	if x.reporter != nil {
+		_ = x.reporter.Phase("等待标准输入凭据：请输入一行 JSON")
+	}
+	line, e := readLine(x.reader, 64<<10)
+	if e != nil {
+		return nil, e
+	}
+	var creds map[string]string
+	if json.Unmarshal([]byte(line), &creds) != nil {
+		return nil, config.ErrInvalid
+	}
+	for key, target := range map[string]string{ //nolint:gosec // maps setting names to environment variable names, not secrets
+		"netdisco_username": "ND_USERNAME", "netdisco_password": "ND_PASSWORD", "device_username": "NC_DEVICE_USERNAME", "device_password": "NC_DEVICE_PASSWORD"} {
+		if strings.TrimSpace(creds[key]) == "" {
+			return nil, config.ErrInvalid
+		}
+		if target == "NC_DEVICE_USERNAME" || target == "NC_DEVICE_PASSWORD" {
+			dropVariants(env, strings.TrimPrefix(target, "NC_DEVICE_"))
+		}
+		env[target] = creds[key]
+	}
+	delete(env, "ND_API_KEY")
+	return env, nil
+}
+
+// applySecret sets one prompted secret; a device credential replaces every
+// per-platform variant, and Netdisco user credentials replace an API key.
+func applySecret(env map[string]string, key, value string) {
+	suffix := map[string]string{"NC_DEVICE_USERNAME": "USERNAME", "NC_DEVICE_PASSWORD": "PASSWORD", "NC_ENABLE_PASSWORD": "ENABLE_PASSWORD"}[key]
+	if suffix != "" {
+		for name := range env {
+			if strings.HasPrefix(name, "NC_") && strings.HasSuffix(name, "_"+suffix) && (suffix != "PASSWORD" || !strings.HasSuffix(name, "_ENABLE_PASSWORD")) {
+				delete(env, name)
+			}
+		}
+	}
+	if key == "ND_USERNAME" || key == "ND_PASSWORD" {
+		delete(env, "ND_API_KEY")
+	}
+	env[key] = value
+}
+
+// dropVariants removes every NC_*_suffix device credential except enable
+// passwords.
+func dropVariants(env map[string]string, suffix string) {
+	for name := range env {
+		if strings.HasPrefix(name, "NC_") && strings.HasSuffix(name, "_"+suffix) && !strings.HasSuffix(name, "_ENABLE_PASSWORD") {
+			delete(env, name)
+		}
+	}
+}
+
+// inventory reads the device inventory; ok is false when the command must
+// exit with code.
+func (x *selectedRun) inventory(ctx context.Context, services *bootstrap.Services) (rows []inventory.Device, code int, ok bool) {
+	r, o, reporter := x.r, x.o, x.reporter
+	if reporter != nil {
+		_ = reporter.Phase("正在读取设备清单")
+	}
+	var e error
+	if r.Source != nil {
+		rows, e = r.Source.Devices(ctx)
+	} else {
+		var result netdisco.CacheResult
+		result, e = services.Inventory(ctx, bootstrap.InventoryMode(x.policy, o.mode, o.refresh, o.flags.Changed("cache-only") || o.flags.Changed("cache-mode")))
+		rows = result.Rows
+		if result.RefreshErrorCode != "" {
+			_ = reporter.Warning("设备清单刷新失败，已使用校验通过的缓存") // progress output failures are reported by the reporter itself
+		}
+		if result.WriteErrorType != "" {
+			_ = reporter.Warning("清单缓存写入失败，继续使用本次获取的清单")
+		}
+	}
+	if e != nil {
+		if ctx.Err() != nil {
+			return nil, 130, false
+		}
+		return nil, r.fail(program, e), false
+	}
+	if reporter != nil {
+		_ = reporter.Phase(fmt.Sprintf("设备清单读取完成：%d 台；正在生成计划", len(rows)))
+	}
+	return rows, 0, true
+}
+
+// confirmRun requires the stdin line RUN before a run that changes devices.
+func (x *selectedRun) confirmRun() bool {
+	if x.reporter != nil {
+		_ = x.reporter.Phase("等待执行确认：请输入 RUN")
+	}
+	resumeConfirm := x.reporter.Pause()
+	_ = x.reporter.Notice("等待执行确认：请输入 RUN")
+	line, e := readLine(x.reader, 64)
+	resumeConfirm()
+	return e == nil && strings.TrimSpace(line) == "RUN"
 }
 func readLine(reader *bufio.Reader, limit int) (string, error) {
 	var b strings.Builder
