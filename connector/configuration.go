@@ -36,6 +36,8 @@ func (renderedConfig) Finish(_ context.Context, r Result) (string, error) {
 	}
 	return r.steps[len(r.steps)-1].Response().Rendered()
 }
+
+// RunningConfig collects a nonempty configuration under the device operation lease.
 func (d *Device) RunningConfig(ctx context.Context) (Result, error) {
 	if e := d.acquire(); e != nil {
 		return Result{}, e
@@ -78,43 +80,52 @@ func (d *Device) collectConfigWithMode(ctx context.Context, mode configTextMode)
 		if e != nil {
 			return result, e
 		}
-		if len(result.steps) == 0 {
-			return result, newError("incomplete_configuration", "collect", Command{}, ErrIncomplete)
-		}
-		config, e := strategy.Finish(ctx, result)
+		config, e := finishConfiguration(ctx, result, strategy, custom != nil)
 		if e != nil {
-			return result, configurationFailure(Command{}, e)
-		}
-		if strings.TrimSpace(config) == "" {
-			return result, ErrIncomplete
-		}
-		hasBody := custom != nil
-		for _, step := range result.steps[len(result.steps)-1:] {
-			body, e := step.Response().Rendered()
-			if e != nil {
-				return result, e
-			}
-			prompt, e := step.Response().Prompt()
-			if e != nil {
-				return result, e
-			}
-			body = strings.TrimSuffix(strings.TrimSpace(body), strings.TrimSpace(prompt))
-			body = strings.TrimSpace(body)
-			if after, ok := strings.CutPrefix(body, step.command.Text); ok {
-				body = strings.TrimSpace(after)
-			}
-			if body != "" {
-				hasBody = true
-			}
-		}
-		if !hasBody {
-			return result, newError("incomplete_configuration", "collect", Command{}, ErrIncomplete)
+			return result, e
 		}
 		result.config = &config
 		return result, ctx.Err()
 	}()
 	returned = true
 	return
+}
+
+// finishConfiguration checks the collected result and extracts a nonempty configuration.
+func finishConfiguration(ctx context.Context, result Result, strategy ConfigStrategy, custom bool) (string, error) {
+	if len(result.steps) == 0 {
+		return "", newError("incomplete_configuration", "collect", Command{}, ErrIncomplete)
+	}
+	config, e := strategy.Finish(ctx, result)
+	if e != nil {
+		return "", configurationFailure(Command{}, e)
+	}
+	if strings.TrimSpace(config) == "" {
+		return "", ErrIncomplete
+	}
+	hasBody := custom
+	for _, step := range result.steps[len(result.steps)-1:] {
+		body, e := step.Response().Rendered()
+		if e != nil {
+			return "", e
+		}
+		prompt, e := step.Response().Prompt()
+		if e != nil {
+			return "", e
+		}
+		body = strings.TrimSuffix(strings.TrimSpace(body), strings.TrimSpace(prompt))
+		body = strings.TrimSpace(body)
+		if after, ok := strings.CutPrefix(body, step.command.Text); ok {
+			body = strings.TrimSpace(after)
+		}
+		if body != "" {
+			hasBody = true
+		}
+	}
+	if !hasBody {
+		return "", newError("incomplete_configuration", "collect", Command{}, ErrIncomplete)
+	}
+	return config, nil
 }
 
 // SaveConfig distinguishes command completion from profile-confirmed persistence.
@@ -167,6 +178,7 @@ func (d *Device) save(ctx context.Context, opts ExecuteOptions) (result Result, 
 	return result, ctx.Err()
 }
 
+// BackupOptions controls backup publication, locking and source-byte retention.
 type BackupOptions struct {
 	// PreserveInvalidEncoding retains original configuration bytes with explicit warnings when strict decoding fails.
 	PreserveInvalidEncoding bool
@@ -176,6 +188,8 @@ type BackupOptions struct {
 	LockTimeout   time.Duration
 	RejectSymlink bool
 }
+
+// BackupReceipt retains device completion and separate text/source persistence evidence.
 type BackupReceipt struct {
 	TextOnly        bool            `json:"text_only,omitempty"`
 	Source          *BackupSource   `json:"source,omitempty"`
@@ -192,6 +206,7 @@ type BackupReceipt struct {
 	File            storage.Receipt `json:"file"`
 }
 
+// Backup collects configuration and publishes its text and optional raw source with receipts.
 func (d *Device) Backup(ctx context.Context, opts BackupOptions) (receipt BackupReceipt, err error) {
 	if e := d.acquire(); e != nil {
 		return receipt, e
@@ -246,10 +261,10 @@ func (d *Device) Backup(ctx context.Context, opts BackupOptions) (receipt Backup
 		receipt.TextWarning = sourceWarning(contents, count, offsets)
 	}
 	receipt.PreviousSHA256 = previous.SHA256
-	switch {
-	case previous.SHA256 == "":
+	switch previous.SHA256 {
+	case "":
 		receipt.Change = "created"
-	case previous.SHA256 == digest:
+	case digest:
 		receipt.Change = "unchanged"
 	default:
 		receipt.Change = "changed"
@@ -272,7 +287,9 @@ func (d *Device) Backup(ctx context.Context, opts BackupOptions) (receipt Backup
 // Before commit, Backup returns the original storage.WriteError instead.
 type BackupPersistenceError struct{ failure *Error }
 
-func (e *BackupPersistenceError) Error() string    { return e.failure.Error() }
+func (e *BackupPersistenceError) Error() string { return e.failure.Error() }
+
+// GoString formats safe metadata without the original storage error.
 func (e *BackupPersistenceError) GoString() string { return e.Error() }
 func (e *BackupPersistenceError) Unwrap() error    { return e.failure }
 

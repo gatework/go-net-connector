@@ -16,7 +16,7 @@ func TestPostgresTemporaryReadOnlyCursor(t *testing.T) {
 	if bin == "" {
 		t.Skip("set NC_TEST_POSTGRES_BIN for an isolated temporary PostgreSQL server")
 	}
-	root, e := os.MkdirTemp("/tmp", "ncpg-")
+	root, e := os.MkdirTemp("/tmp", "ncpg-") //nolint:usetesting // PostgreSQL socket paths must stay short
 	if e != nil {
 		t.Fatal(e)
 	}

@@ -34,3 +34,7 @@
 验证：`GOWORK=off go test -race -skip TestInteractiveDeclinedOptionalEnvContinues ./...` PASS；`go vet ./...` PASS；golangci-lint v2.15.0 0 issues；`check-architecture.py`/`test_architecture.py` PASS；`go mod tidy -diff` 无差异；`deadcode ./cmd/...` 仅剩脱敏方法与供下游复用的公开 API。模拟传输覆盖：阶段拦截、认证阶段失败、三种策略、取消、归档上传→报告→移动后导出、deploy 拒绝后不再发送、保存未确认为 partial、exec 写命令零连接、Juniper 导出命令字节与回执解析、diff 退出码、重试边界与跳板机参数。未在真实设备、真实跳板机或远端 SCP/FTP 服务器上验证。
 
 发布准备：版本定为 v0.7.0；更新 `scripts/verify-consumer.py` 至新 API（平台即 Driver、`StaticDriver`、`Pool.Prepare(ctx, nil)`）并覆盖新命令帮助，本地 PASS；三个 fuzz 目标各 20000 次 PASS。
+
+## 2026-11-11 shared Go standard
+
+Adopt go-standards v1.0.2 through standard.mk, the distributed lint configuration and architecture.yaml. Keep the project architecture test, installed archive-worker, PostgreSQL, bounded fuzz and independent consumer checks under make check. Extract phase helpers without changing failure receipts, cache-only password handling, cancellation or cleanup order. The release uses published go-expect v0.6.0 and migrates the internal MatchOption call; the connector public API is unchanged.

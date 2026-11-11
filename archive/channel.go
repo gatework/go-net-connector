@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// Channel owns the bidirectional worker stream and its cleanup callbacks.
 type Channel struct {
 	Input  io.Writer
 	Output io.Reader
@@ -46,11 +47,11 @@ func runChannel(ctx context.Context, launch Launcher, run func(*Protocol) error,
 	if ch.Close == nil || nilEndpoint(ch.Input) || nilEndpoint(ch.Output) {
 		return ErrArchive
 	}
-	input, ok := ch.Input.(interface{ SetWriteDeadline(time.Time) error })
+	input, ok := ch.Input.(interface{ SetWriteDeadline(t time.Time) error })
 	if !ok {
 		return ErrArchive
 	}
-	output, ok := ch.Output.(interface{ SetReadDeadline(time.Time) error })
+	output, ok := ch.Output.(interface{ SetReadDeadline(t time.Time) error })
 	if !ok {
 		return ErrArchive
 	}
@@ -88,6 +89,7 @@ func nilEndpoint(v any) bool {
 	switch r.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
 		return r.IsNil()
+	default:
+		return false
 	}
-	return false
 }

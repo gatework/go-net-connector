@@ -4,18 +4,18 @@ The release owner publishes the downloaded bytes from one successful **exact com
 
 ## Gates and dependency boundary
 
-The runtime matrix is Ubuntu/macOS with the latest Go 1.26 and 1.27 patches. Every cell verifies module checksums and `go mod tidy -diff`, builds both commands (`netman` and `tftp-archive`), enables the installed archive-worker test, then runs shuffled, uncached race tests and vet. Temporary PostgreSQL integration runs when `initdb` and `pg_ctl` are installed; otherwise the log explicitly reports that skip. This is separate from real network-device evidence.
+The runtime matrix is Ubuntu/macOS with the latest Go 1.26 and 1.27 patches. Every cell verifies module checksums and `go mod tidy -diff`, builds both commands (`netman` and `tftp-archive`), enables the installed archive-worker test, then runs shuffled, uncached race tests and vet. `make check` is the shared entry point; `project-checks` retains the installed-worker, PostgreSQL, fuzz and consumer gates in `scripts/ci`. Temporary PostgreSQL integration runs when `initdb` and `pg_ctl` are installed; otherwise the log explicitly reports that skip. This is separate from real network-device evidence.
 
-The quality job uses golangci-lint v2.15.0 (only govet, ineffassign, staticcheck SA checks and unused), govulncheck v1.9.0 and actionlint v1.7.12. Action versions are pinned to reviewed upstream commit SHAs in the workflow. Packaging and security use the latest Go 1.27 patch; the exact compiler version is recorded in `MANIFEST.json` and checked against every binary's Go build information. Go 1.27-built Darwin binaries require macOS 13 or newer.
+The runtime and quality jobs use the published go-standards v1.0.2 configuration and tools through `make check`. The quality job adds actionlint v1.7.12 and release-fixture verification through `CHECK_EXTRA=project-quality`. Action versions are pinned to reviewed upstream commit SHAs in the workflow. Packaging and security use the latest Go 1.27 patch; the exact compiler version is recorded in `MANIFEST.json` and checked against every binary's Go build information. Go 1.27-built Darwin binaries require macOS 13 or newer.
 
-All release checks and builds use `GOWORK=off`, read-only module resolution and the selected local toolchain. `scripts/release.py check-modules` rejects every `replace` directive and `v0.0.0` dependency. The module pins published go-expect `v0.5.0`; future dependency changes must also use a compatible published version before packaging.
+All release checks and builds use `GOWORK=off`, read-only module resolution and the selected local toolchain. `scripts/release.py check-modules` rejects every `replace` directive and `v0.0.0` dependency. The module pins published go-expect `v0.6.0`; future dependency changes must also use a compatible published version before packaging.
 
 ## Artifact contract
 
 Set the committed `VERSION` to a non-placeholder `vMAJOR.MINOR.PATCH`. From a checkout of the intended SHA:
 
 ```sh
-bash scripts/ci
+make check
 python3 scripts/test_release.py -v
 python3 scripts/release.py package --sha "$(git rev-parse HEAD)"
 python3 scripts/release.py verify --sha "$(git rev-parse HEAD)" --version "$(cat VERSION)"

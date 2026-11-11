@@ -65,8 +65,8 @@ func (d *directories) verify() error {
 	if sameEntry(unix.AT_FDCWD, d.path, d.root) != nil {
 		return ErrArchive
 	}
-	real, e := filepath.EvalSymlinks(d.path)
-	if e != nil || real != d.path {
+	resolved, e := filepath.EvalSymlinks(d.path)
+	if e != nil || resolved != d.path {
 		return ErrArchive
 	}
 	for _, link := range d.links {
@@ -106,7 +106,7 @@ type fingerprint struct {
 
 func statFD(fd int) (unix.Stat_t, error) { var s unix.Stat_t; e := unix.Fstat(fd, &s); return s, e }
 func fingerprintOf(s unix.Stat_t) fingerprint {
-	return fingerprint{uint64(s.Dev), uint64(s.Ino), s.Size, mtime(s), ctime(s)}
+	return fingerprint{deviceID(s), s.Ino, s.Size, mtime(s), ctime(s)}
 }
 func readFile(ctx context.Context, parent int, name string, missingOK bool, consume func([]byte) error) (string, *fingerprint, error) {
 	fd, e := unix.Openat(parent, name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
@@ -186,7 +186,7 @@ func persistMode(ctx context.Context, parent int, name string, source int, sourc
 	if e != nil {
 		return e
 	}
-	defer unix.Unlinkat(parent, pending, 0)
+	defer func() { _ = unix.Unlinkat(parent, pending, 0) }() // best-effort removal of the pending name
 	copied, current, e := readFile(ctx, source, sourceName, false, func(b []byte) error { return writeAll(f, b) })
 	if e == nil && (current == nil || *current != expected || copied != digest) {
 		e = ErrArchive

@@ -184,7 +184,7 @@ func openProcess(ctx context.Context, cfg ConnectionConfig) (io.ReadWriteCloser,
 		}
 		args = sshArguments(cfg, trust.snapshot, port)
 	}
-	p, e := startProcess(ctx, exec.Command(program, args...))
+	p, e := startProcess(ctx, exec.Command(program, args...)) //nolint:noctx // the transport owns the process lifetime beyond ctx; program and arguments come from the platform
 	if p == nil {
 		if trust == nil {
 			return nil, e

@@ -105,28 +105,28 @@ func TestFortinetNestedDescriptionsAndPANMixedBlocks(t *testing.T) {
 	}
 }
 
-func neighborPolicyFor(t testing.TB, vendor string) NeighborDiscovery {
-	t.Helper()
+func neighborPolicyFor(tb testing.TB, vendor string) NeighborDiscovery {
+	tb.Helper()
 	platform, err := vendors.NewBuiltinRegistry().Lookup(vendor)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	policy, ok := platform.(NeighborDiscovery)
 	if !ok {
-		t.Fatalf("platform %q does not provide neighbor discovery", vendor)
+		tb.Fatalf("platform %q does not provide neighbor discovery", vendor)
 	}
 	return policy
 }
 
-func descriptionPolicyFor(t testing.TB, vendor string) DescriptionReader {
-	t.Helper()
+func descriptionPolicyFor(tb testing.TB, vendor string) DescriptionReader {
+	tb.Helper()
 	platform, err := vendors.NewBuiltinRegistry().Lookup(vendor)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	policy, ok := platform.(DescriptionReader)
 	if !ok {
-		t.Fatalf("platform %q does not provide interface description parsing", vendor)
+		tb.Fatalf("platform %q does not provide interface description parsing", vendor)
 	}
 	return policy
 }

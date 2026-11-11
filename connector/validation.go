@@ -30,12 +30,8 @@ func (p Terminal) Validate() error {
 			return e
 		}
 	}
-	for _, list := range [][]*regexp.Regexp{p.AuthenticationErrors, p.CommandErrors} {
-		for _, r := range list {
-			if r == nil || r.MatchString("") {
-				return ErrInvalid
-			}
-		}
+	if err := p.validateErrorPatterns(); err != nil {
+		return err
 	}
 	for _, arg := range p.LegacyCryptoArguments {
 		if arg == "" || strings.ContainsAny(arg, "\x00\r\n") {
@@ -46,6 +42,17 @@ func (p Terminal) Validate() error {
 		for _, text := range commands {
 			if e := (Command{Text: text}).validate(); e != nil {
 				return e
+			}
+		}
+	}
+	return nil
+}
+
+func (p Terminal) validateErrorPatterns() error {
+	for _, list := range [][]*regexp.Regexp{p.AuthenticationErrors, p.CommandErrors} {
+		for _, r := range list {
+			if r == nil || r.MatchString("") {
+				return ErrInvalid
 			}
 		}
 	}

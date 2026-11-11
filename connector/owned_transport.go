@@ -35,14 +35,14 @@ type osCloseOwner struct {
 }
 
 func (t *osCloseOwner) SetReadDeadline(deadline time.Time) error {
-	if stream, ok := t.ReadWriteCloser.(interface{ SetReadDeadline(time.Time) error }); ok {
+	if stream, ok := t.ReadWriteCloser.(interface{ SetReadDeadline(t time.Time) error }); ok {
 		return stream.SetReadDeadline(deadline)
 	}
 	return ErrUnsupported
 }
 
 func (t *osCloseOwner) NormalizeReadError(err error) error {
-	if stream, ok := t.ReadWriteCloser.(interface{ NormalizeReadError(error) error }); ok {
+	if stream, ok := t.ReadWriteCloser.(interface{ NormalizeReadError(err error) error }); ok {
 		return stream.NormalizeReadError(err)
 	}
 	return err

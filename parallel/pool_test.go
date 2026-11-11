@@ -43,7 +43,7 @@ func TestCanceledPoolDoesNotDispatchMore(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	calls := 0
 	r, e := Map(ctx, 1, []int{1, 2, 3}, func(context.Context, int) (int, error) { calls++; cancel(); return 1, nil })
-	if e != context.Canceled || calls != 1 || !r[0].Started || r[1].Started {
+	if !errors.Is(e, context.Canceled) || calls != 1 || !r[0].Started || r[1].Started {
 		t.Fatalf("%+v %v calls=%d", r, e, calls)
 	}
 }

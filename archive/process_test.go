@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
 	"github.com/gatework/go-net-connector/transfer"
 )
 

@@ -10,8 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gatework/go-net-connector/inventory"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/gatework/go-net-connector/inventory"
 )
 
 type inventoryRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -42,7 +43,7 @@ func TestHTTPDecodeMatchesLegacyBoundary(t *testing.T) {
 				if r.URL.Query().Get("offset") != "0" {
 					response = `[]`
 				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(response)), Header: make(http.Header)}, nil
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(response)), Header: make(http.Header)}, nil
 			})}
 			source, err := NewHTTP(HTTPOptions{URL: "http://inventory.test", APIKey: "fixture", Client: client, Limits: Limits{MaxDevices: 100}})
 			if err != nil {

@@ -18,9 +18,10 @@ func newTFTPPolicy() tftpPolicy {
 }
 func (r tftpPolicy) Command(_ string, o dialectapi.TFTPOptions, _ bool) connector.Command {
 	command := "/cfg/ptcfg " + o.Server + " -tftp"
-	if o.SourceInterface == "management" {
+	switch o.SourceInterface {
+	case "management":
 		command += " -mgmt"
-	} else if o.SourceInterface == "data" {
+	case "data":
 		command += " -data"
 	}
 	commandInteractions := []connector.Interaction{

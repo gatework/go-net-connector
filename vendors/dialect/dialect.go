@@ -12,8 +12,10 @@ import (
 )
 
 var (
+	// ErrUnsupported reports a platform behavior that is not available.
 	ErrUnsupported = errors.New("vendor dialect: unsupported behavior")
-	ErrParse       = errors.New("vendor dialect: unrecognized output")
+	// ErrParse reports output that the platform cannot recognize.
+	ErrParse = errors.New("vendor dialect: unrecognized output")
 )
 
 // DiagnosticError carries stable machine-readable failure metadata across a
@@ -35,12 +37,16 @@ func (e *DiagnosticError) Unwrap() error {
 	}
 	return e.Cause
 }
+
+// DiagnosticCode returns the stable failure code without formatting its cause.
 func (e *DiagnosticError) DiagnosticCode() string {
 	if e == nil {
 		return ""
 	}
 	return e.Code
 }
+
+// DiagnosticPhase returns the operation phase without formatting its cause.
 func (e *DiagnosticError) DiagnosticPhase() string {
 	if e == nil {
 		return ""
@@ -50,12 +56,15 @@ func (e *DiagnosticError) DiagnosticPhase() string {
 
 // DiagnosticMetadata lets consumers preserve structured errors while keeping
 // the shared dialect package independent of business workflows.
+//
+//nolint:iface // shared contract: topology and workflow classify errors through it
 type DiagnosticMetadata interface {
 	error
 	DiagnosticCode() string
 	DiagnosticPhase() string
 }
 
+// NewDiagnosticError attaches safe failure metadata while retaining the cause for unwrapping.
 func NewDiagnosticError(code, phase string, cause error) error {
 	return &DiagnosticError{Code: code, Phase: phase, Cause: cause}
 }
@@ -67,10 +76,12 @@ type Platform interface {
 	connector.Driver
 	Name() string
 	// MatchInventory classifies a normalized inventory identity.
-	MatchInventory(InventoryIdentity) bool
+	MatchInventory(identity InventoryIdentity) bool
 }
 
 // Registry resolves immutable dialect objects by their canonical platform key.
+//
+//nolint:iface // shared contract consumed by fleet, topology, transfer and workflow
 type Registry interface {
 	Names() []string
 	Lookup(name string) (Platform, error)
@@ -110,6 +121,7 @@ type TFTPOptions struct {
 	Timeout                                        time.Duration
 }
 
+// TFTPReceipt describes the configuration format and requested-path evidence of an upload.
 type TFTPReceipt struct {
 	ConfigurationKind, Format, SourceFile string
 	IncludeRequestedPath                  bool

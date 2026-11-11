@@ -9,8 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gatework/go-net-connector/internal/display"
 	"golang.org/x/term"
+
+	"github.com/gatework/go-net-connector/internal/display"
 )
 
 type taskStage uint8
@@ -89,6 +90,7 @@ type Reporter struct {
 	archivePreflight                                      *ArchivePreflight
 }
 
+// New creates a reporter that borrows out for the duration of the run.
 func New(out io.Writer, verbose bool) *Reporter {
 	p := &Reporter{out: out, verbose: verbose, interval: 5 * time.Second, started: time.Now(), active: make(map[string]task)}
 	if f, ok := out.(*os.File); ok {
@@ -103,10 +105,6 @@ func New(out io.Writer, verbose bool) *Reporter {
 	return p
 }
 func safeText(text string) string { return display.Text(text) }
-func (p *Reporter) writeLocked(text string) error {
-	p.clearLocked()
-	return p.writeRawLocked(safeText(text) + "\n")
-}
 
 // Notice serializes persistent diagnostics with the live panel.
 func (p *Reporter) Notice(text string) error {
@@ -129,10 +127,6 @@ func (p *Reporter) Section(title string) error {
 	defer p.mu.Unlock()
 	return p.sectionLocked(title)
 }
-func (p *Reporter) sectionLocked(title string) error {
-	p.clearLocked()
-	return p.writeRawLocked(display.Section(p.out, title))
-}
 
 // Warning keeps exceptional diagnostics together above the live panel.
 func (p *Reporter) Warning(text string) error {
@@ -145,12 +139,6 @@ func (p *Reporter) Warning(text string) error {
 	err := p.writeLocked(text)
 	p.renderLocked(true)
 	return err
-}
-func (p *Reporter) warningLocked() {
-	if !p.warningSection {
-		_ = p.sectionLocked("异常与警告")
-		p.warningSection = true
-	}
 }
 
 // Pause clears the panel until the returned resume function is called.
@@ -165,17 +153,8 @@ func (p *Reporter) Pause() func() {
 	var once sync.Once
 	return func() { once.Do(func() { p.mu.Lock(); defer p.mu.Unlock(); p.paused--; p.renderLocked(true) }) }
 }
-func (p *Reporter) writeRawLocked(text string) error {
-	if p.err != nil || p.out == nil {
-		return p.err
-	}
-	n, err := io.WriteString(p.out, text)
-	if err == nil && n != len(text) {
-		err = io.ErrShortWrite
-	}
-	p.err = err
-	return err
-}
+
+// Phase displays the current operation phase.
 func (p *Reporter) Phase(text string) error {
 	if p == nil {
 		return nil
@@ -192,6 +171,8 @@ func (p *Reporter) Phase(text string) error {
 	}
 	return p.writeLocked(p.phase)
 }
+
+// Plan displays the inventory selection and worker budget.
 func (p *Reporter) Plan(total, selected, workers int, mode string) error {
 	if p == nil {
 		return nil
@@ -274,13 +255,7 @@ func (p *Reporter) BeginPhase(total, workers int) error {
 	return p.err
 }
 
-func (p *Reporter) archivePreflightLineLocked() string {
-	server := ""
-	if p.archivePreflight.Group > 0 && p.archivePreflight.Groups > 0 {
-		server = fmt.Sprintf("归档服务器 %d/%d；", p.archivePreflight.Group, p.archivePreflight.Groups)
-	}
-	return fmt.Sprintf("%s；%s归档预检 %d/%d；活动 %d；预检并发 %d/%d；设备任务尚未开始 %d/%d；设备并发 %d", p.archivePreflight.Stage, server, p.archivePreflight.Completed, p.archivePreflight.Total, p.archivePreflight.Active, p.archivePreflight.Active, p.archivePreflight.Workers, p.completed, p.total, p.workers)
-}
+// Start records that a device began execution.
 func (p *Reporter) Start(host, vendor string) error {
 	if p == nil {
 		return nil
@@ -311,6 +286,8 @@ func (p *Reporter) Start(host, vendor string) error {
 	p.renderLocked(false)
 	return p.err
 }
+
+// Event updates the named device stage with a safe status.
 func (p *Reporter) Event(host, name, status string) error {
 	if p == nil {
 		return nil
@@ -321,7 +298,214 @@ func (p *Reporter) Event(host, name, status string) error {
 	if !ok {
 		return nil
 	}
-	message := ""
+	item, message, known := p.eventStage(item, name, status)
+	if !known {
+		return nil
+	}
+	if name == "command_start" || item.stage != p.active[host].stage {
+		item.started = time.Now()
+	}
+	p.active[host] = item
+	if p.verbose {
+		p.detail = fmt.Sprintf("[%s] %s", safeText(host), message)
+	} else {
+		p.detail = ""
+	}
+	p.renderLocked(false)
+	return p.err
+}
+
+// Stage accepts only bounded workflow metadata, never command text.
+func (p *Reporter) Stage(host, stage string) error {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	item, ok := p.active[host]
+	if !ok {
+		return p.err
+	}
+	var next taskStage
+	switch stage {
+	case "upload":
+		next = stageTFTPUpload
+	case "archive":
+		next = stageArchiveVerification
+	default:
+		return p.err
+	}
+	if item.stage != next {
+		item.started = time.Now()
+	}
+	item.stage = next
+	p.active[host] = item
+	p.renderLocked(false)
+	return p.err
+}
+
+// Outcome records a finished device. status is the uniform device status
+// (succeeded, partial, failed, interrupted, stopped); outcome is the
+// operation-specific result shown to the operator, such as "backed_up".
+func (p *Reporter) Outcome(host, status, outcome, errorCode string, duration time.Duration) error {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, active := p.active[host]; !active {
+		return p.err
+	}
+	delete(p.active, host)
+	p.completed++
+	switch status {
+	case "succeeded":
+		p.succeeded++
+	case "stopped":
+		p.skipped++
+	case "partial", "interrupted":
+		p.pending++
+	default:
+		p.failed++
+	}
+	isFailure := status == "failed" || status == "partial"
+	if isFailure {
+		label := status
+		if outcome != "" {
+			label = outcome
+		}
+		message := display.Status(label)
+		if errorCode != "" {
+			message += "；" + display.Error(errorCode)
+		}
+		p.warningLocked()
+		p.latestFailure = fmt.Sprintf("[%s] %s", safeText(host), message)
+		_ = p.writeLocked(fmt.Sprintf("[%s] %s；耗时 %.1f 秒", safeText(host), message, duration.Seconds()))
+	}
+	p.renderLocked(isFailure)
+	return p.err
+}
+
+// Finish stops the activity display and returns any output failure.
+func (p *Reporter) Finish() error {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.finished {
+		return p.err
+	}
+	p.finished = true
+	p.clearLocked()
+	p.restoreScrollRegionLocked()
+	if p.err != nil {
+		return p.err
+	}
+	_ = p.writeLocked(fmt.Sprintf("总耗时 %.1f 秒", time.Since(p.started).Seconds()))
+	return p.err
+}
+
+// Err returns the first progress output failure.
+func (p *Reporter) Err() error {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.err
+}
+func (p *Reporter) writeLocked(text string) error {
+	p.clearLocked()
+	return p.writeRawLocked(safeText(text) + "\n")
+}
+
+func (p *Reporter) sectionLocked(title string) error {
+	p.clearLocked()
+	return p.writeRawLocked(display.Section(p.out, title))
+}
+func (p *Reporter) warningLocked() {
+	if !p.warningSection {
+		_ = p.sectionLocked("异常与警告")
+		p.warningSection = true
+	}
+}
+
+func (p *Reporter) writeRawLocked(text string) error {
+	if p.err != nil || p.out == nil {
+		return p.err
+	}
+	n, err := io.WriteString(p.out, text)
+	if err == nil && n != len(text) {
+		err = io.ErrShortWrite
+	}
+	p.err = err
+	return err
+}
+func (p *Reporter) archivePreflightLineLocked() string {
+	server := ""
+	if p.archivePreflight.Group > 0 && p.archivePreflight.Groups > 0 {
+		server = fmt.Sprintf("归档服务器 %d/%d；", p.archivePreflight.Group, p.archivePreflight.Groups)
+	}
+	return fmt.Sprintf("%s；%s归档预检 %d/%d；活动 %d；预检并发 %d/%d；设备任务尚未开始 %d/%d；设备并发 %d", p.archivePreflight.Stage, server, p.archivePreflight.Completed, p.archivePreflight.Total, p.archivePreflight.Active, p.archivePreflight.Active, p.archivePreflight.Workers, p.completed, p.total, p.workers)
+}
+func (p *Reporter) activityLocked() string {
+	if p.archivePreflight != nil {
+		return p.archivePreflightLineLocked()
+	}
+	login, operation, upload, archive, archiveChannel := 0, 0, 0, 0, 0
+	for _, t := range p.active {
+		switch t.stage {
+		case stageConnect:
+			login++
+		case stageArchiveChannel:
+			archiveChannel++
+		case stageTFTPUpload:
+			upload++
+		case stageArchiveVerification:
+			archive++
+		case stageTFTPCommand:
+			operation++
+		default:
+			operation++
+		}
+	}
+	queued := max(p.total-p.completed-len(p.active), 0)
+	if p.cancelling {
+		queued = 0
+	}
+	if p.mode == "tftp" {
+		return fmt.Sprintf("登录 %d；归档通道 %d；上传 %d；归档 %d；设备命令 %d；排队 %d；并发 %d", login, archiveChannel, upload, archive, operation, queued, p.workers)
+	}
+	if p.mode == "topology" {
+		return fmt.Sprintf("登录 %d；邻居采集 %d；排队 %d；并发 %d", login, operation+archive, queued, p.workers)
+	}
+	return fmt.Sprintf("登录 %d；配置采集 %d；排队 %d；并发 %d", login, operation+archive, queued, p.workers)
+}
+func (p *Reporter) countsLocked() string {
+	return fmt.Sprintf("已完成 %d/%d；成功 %d；失败 %d；跳过 %d；待核实 %d；%s", p.completed, p.total, p.succeeded, p.failed, p.skipped, p.pending, p.activityLocked())
+}
+
+func (p *Reporter) cancellingNotice() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.finished || p.stopped || p.err != nil {
+		return
+	}
+	p.cancelling = true
+	p.phase = "正在停止未完成任务"
+	if p.tty {
+		p.renderLocked(true)
+	} else if p.paused == 0 {
+		_ = p.writeLocked(fmt.Sprintf("%s；%s", p.phase, p.countsLocked()))
+	}
+}
+
+func (p *Reporter) eventStage(item task, name, status string) (task, string, bool) {
+	var message string
 	switch name {
 	case "connect":
 		item.stage = stageConnect
@@ -374,178 +558,18 @@ func (p *Reporter) Event(host, name, status string) error {
 			message = "命令结果未确认"
 		}
 	case "operation_complete":
-		if status == "completed" {
+		switch status {
+		case "completed":
 			message = "设备脚本执行完成"
-		} else if status == "failed" {
+		case "failed":
 			message = "设备脚本执行失败"
-		} else {
+		default:
 			message = "设备脚本完成状态未确认"
 		}
 	case "connect_failed":
 		message = "连接失败"
 	default:
-		return nil
+		return item, "", false
 	}
-	if name == "command_start" || item.stage != p.active[host].stage {
-		item.started = time.Now()
-	}
-	p.active[host] = item
-	if p.verbose {
-		p.detail = fmt.Sprintf("[%s] %s", safeText(host), message)
-	} else {
-		p.detail = ""
-	}
-	p.renderLocked(false)
-	return p.err
-}
-
-// Stage accepts only bounded workflow metadata, never command text.
-func (p *Reporter) Stage(host, stage string) error {
-	if p == nil {
-		return nil
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	item, ok := p.active[host]
-	if !ok {
-		return p.err
-	}
-	var next taskStage
-	switch stage {
-	case "upload":
-		next = stageTFTPUpload
-	case "archive":
-		next = stageArchiveVerification
-	default:
-		return p.err
-	}
-	if item.stage != next {
-		item.started = time.Now()
-	}
-	item.stage = next
-	p.active[host] = item
-	p.renderLocked(false)
-	return p.err
-}
-func (p *Reporter) activityLocked() string {
-	if p.archivePreflight != nil {
-		return p.archivePreflightLineLocked()
-	}
-	login, operation, upload, archive, archiveChannel := 0, 0, 0, 0, 0
-	for _, t := range p.active {
-		switch t.stage {
-		case stageConnect:
-			login++
-		case stageArchiveChannel:
-			archiveChannel++
-		case stageTFTPUpload:
-			upload++
-		case stageArchiveVerification:
-			archive++
-		case stageTFTPCommand:
-			operation++
-		default:
-			operation++
-		}
-	}
-	queued := max(p.total-p.completed-len(p.active), 0)
-	if p.cancelling {
-		queued = 0
-	}
-	if p.mode == "tftp" {
-		return fmt.Sprintf("登录 %d；归档通道 %d；上传 %d；归档 %d；设备命令 %d；排队 %d；并发 %d", login, archiveChannel, upload, archive, operation, queued, p.workers)
-	}
-	if p.mode == "topology" {
-		return fmt.Sprintf("登录 %d；邻居采集 %d；排队 %d；并发 %d", login, operation+archive, queued, p.workers)
-	}
-	return fmt.Sprintf("登录 %d；配置采集 %d；排队 %d；并发 %d", login, operation+archive, queued, p.workers)
-}
-
-// Outcome records a finished device. status is the uniform device status
-// (succeeded, partial, failed, interrupted, stopped); outcome is the
-// operation-specific result shown to the operator, such as "backed_up".
-func (p *Reporter) Outcome(host, status, outcome, errorCode string, duration time.Duration) error {
-	if p == nil {
-		return nil
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if _, active := p.active[host]; !active {
-		return p.err
-	}
-	delete(p.active, host)
-	p.completed++
-	switch status {
-	case "succeeded":
-		p.succeeded++
-	case "stopped":
-		p.skipped++
-	case "partial", "interrupted":
-		p.pending++
-	default:
-		p.failed++
-	}
-	isFailure := status == "failed" || status == "partial"
-	if isFailure {
-		label := status
-		if outcome != "" {
-			label = outcome
-		}
-		message := display.Status(label)
-		if errorCode != "" {
-			message += "；" + display.Error(errorCode)
-		}
-		p.warningLocked()
-		p.latestFailure = fmt.Sprintf("[%s] %s", safeText(host), message)
-		_ = p.writeLocked(fmt.Sprintf("[%s] %s；耗时 %.1f 秒", safeText(host), message, duration.Seconds()))
-	}
-	p.renderLocked(isFailure)
-	return p.err
-}
-func (p *Reporter) Finish() error {
-	if p == nil {
-		return nil
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.finished {
-		return p.err
-	}
-	p.finished = true
-	p.clearLocked()
-	p.restoreScrollRegionLocked()
-	if p.err != nil {
-		return p.err
-	}
-	_ = p.writeLocked(fmt.Sprintf("总耗时 %.1f 秒", time.Since(p.started).Seconds()))
-	return p.err
-}
-func (p *Reporter) Err() error {
-	if p == nil {
-		return nil
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.err
-}
-func (p *Reporter) countsLocked() string {
-	return fmt.Sprintf("已完成 %d/%d；成功 %d；失败 %d；跳过 %d；待核实 %d；%s", p.completed, p.total, p.succeeded, p.failed, p.skipped, p.pending, p.activityLocked())
-}
-
-func (p *Reporter) cancellingNotice() {
-	if p == nil {
-		return
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.finished || p.stopped || p.err != nil {
-		return
-	}
-	p.cancelling = true
-	p.phase = "正在停止未完成任务"
-	if p.tty {
-		p.renderLocked(true)
-	} else if p.paused == 0 {
-		_ = p.writeLocked(fmt.Sprintf("%s；%s", p.phase, p.countsLocked()))
-	}
+	return item, message, true
 }

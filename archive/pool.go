@@ -24,6 +24,7 @@ type PoolOptions struct {
 // PrepareStage identifies the safe phase of archive service preparation.
 type PrepareStage string
 
+// Archive preparation stages.
 const (
 	PrepareStageSSH      PrepareStage = "ssh"
 	PrepareStageProtocol PrepareStage = "protocol"
@@ -37,6 +38,7 @@ type PrepareProgress struct {
 	Stage                    PrepareStage
 }
 
+// Pool owns archive clients and their optional SSH masters.
 type Pool struct {
 	timeouts                             Timeouts
 	clients                              []*Client
@@ -53,6 +55,7 @@ type Pool struct {
 	active                               sync.WaitGroup
 }
 
+// NewPool validates and groups archive destinations without connecting.
 func NewPool(o PoolOptions) (*Pool, error) {
 	timeouts, err := o.Timeouts.normalize()
 	if err != nil {
@@ -111,6 +114,87 @@ func NewPool(o PoolOptions) (*Pool, error) {
 // bodies. Close can cancel and join this work even without a caller deadline.
 func (p *Pool) Prepare(ctx context.Context, observe func(PrepareProgress)) error {
 	return p.prepare(ctx, observe)
+}
+
+// Upload borrows one of at most Parallel slots and returns it after the transaction.
+func (p *Pool) Upload(ctx context.Context, filename, archiveName string, upload func(context.Context, string) (transfer.Receipt, error)) (Result, error) {
+	prepare, cancelPrepare := context.WithTimeout(ctx, p.timeouts.Prepare)
+	defer cancelPrepare()
+	p.mu.Lock()
+	if !p.prepared || p.closed {
+		p.mu.Unlock()
+		return Result{}, ErrArchive
+	}
+	p.active.Add(1)
+	p.mu.Unlock()
+	defer p.active.Done()
+	select {
+	case <-prepare.Done():
+		return Result{}, stageFailure("prepare", prepare.Err())
+	case <-p.stop:
+		return Result{}, ErrArchive
+	case client := <-p.available:
+		defer func() { p.available <- client }()
+		select {
+		case <-p.stop:
+			return Result{}, ErrArchive
+		default:
+		}
+		callCtx, cancel := context.WithCancel(ctx)
+		stop := context.AfterFunc(&poolDoneContext{done: p.stop}, cancel)
+		defer func() { stop(); cancel() }()
+		// Prepare admission must also observe Pool.Close, while keeping its
+		// original deadline across the local queue and the server's target lock.
+		admission, cancelAdmission := context.WithCancel(prepare)
+		stopAdmission := context.AfterFunc(callCtx, cancelAdmission)
+		defer func() { stopAdmission(); cancelAdmission() }()
+		receipt, err := client.upload(callCtx, admission, filename, archiveName, upload)
+		if p.endpoint != nil && receipt.Receipt.Server != nil && receipt.Receipt.Server.ArchivePath != "" {
+			u := *p.endpoint
+			u.Path, u.RawPath = receipt.Receipt.Server.ArchivePath, ""
+			receipt.Receipt.Server.ArchivePath = u.String()
+		}
+		return receipt, err
+	}
+}
+
+// Close cancels and joins admitted work before releasing clients and SSH masters.
+func (p *Pool) Close() error {
+	p.mu.Lock()
+	if p.closed && p.cleaned && p.closeErr != nil {
+		// A completed failed attempt retains owners; a later Close retries them.
+		p.cleaned = false
+		p.closeDone = make(chan struct{})
+		defer p.mu.Unlock()
+		return p.closeLocked()
+	}
+	if p.closed {
+		done := p.closeDone
+		p.mu.Unlock()
+		<-done
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.closeErr
+	}
+	p.closed = true
+	close(p.stop)
+	if p.prepareCancel != nil {
+		p.prepareCancel()
+	}
+	prepDone := p.prepareDone
+	p.mu.Unlock()
+	if prepDone != nil {
+		<-prepDone
+	}
+	p.active.Wait()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.closeLocked()
+}
+
+// ArchiveDirectory returns the server directory after successful preparation.
+func (p *Pool) ArchiveDirectory() string {
+	return filepath.Join(p.clients[0].root, "archive", p.clients[0].batch)
 }
 
 func (p *Pool) prepare(ctx context.Context, observe func(PrepareProgress)) error {
@@ -203,6 +287,20 @@ func (p *Pool) prepareAll(ctx context.Context, observe func(PrepareProgress)) er
 	return p.prepareRemote(ctx, observe)
 }
 
+type poolDoneContext struct{ done <-chan struct{} }
+
+func (c *poolDoneContext) Deadline() (deadline time.Time, ok bool) { return }
+func (c *poolDoneContext) Done() <-chan struct{}                   { return c.done }
+func (c *poolDoneContext) Err() error {
+	select {
+	case <-c.done:
+		return context.Canceled
+	default:
+		return nil
+	}
+}
+func (c *poolDoneContext) Value(any) any { return nil }
+
 func (p *Pool) prepareRemote(ctx context.Context, observe func(PrepareProgress)) error {
 	workerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -232,6 +330,27 @@ func (p *Pool) prepareRemote(ctx context.Context, observe func(PrepareProgress))
 		}
 		errorMu.Unlock()
 	}
+	p.runPreparationWorkers(workerCtx, workers, &next, report, recordError)
+
+	errorMu.Lock()
+	err := firstErr
+	errorMu.Unlock()
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if observe != nil {
+		progressMu.Lock()
+		ready := PrepareProgress{Completed: completed, Total: len(p.clients), Workers: workers, Stage: PrepareStageReady}
+		progressMu.Unlock()
+		observe(ready)
+	}
+	return nil
+}
+
+func (p *Pool) runPreparationWorkers(workerCtx context.Context, workers int, next *atomic.Int64, report func(PrepareStage, int, int), recordError func(error)) {
 	var wg sync.WaitGroup
 	wg.Add(workers)
 	for range workers {
@@ -262,22 +381,6 @@ func (p *Pool) prepareRemote(ctx context.Context, observe func(PrepareProgress))
 		}()
 	}
 	wg.Wait()
-	errorMu.Lock()
-	err := firstErr
-	errorMu.Unlock()
-	if err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if observe != nil {
-		progressMu.Lock()
-		ready := PrepareProgress{Completed: completed, Total: len(p.clients), Workers: workers, Stage: PrepareStageReady}
-		progressMu.Unlock()
-		observe(ready)
-	}
-	return nil
 }
 
 func (p *Pool) preparationWorkers() int {
@@ -287,93 +390,27 @@ func (p *Pool) preparationWorkers() int {
 	return min(4, len(p.clients))
 }
 
-// Upload borrows one of at most Parallel slots and returns it after the transaction.
-func (p *Pool) Upload(ctx context.Context, filename, archiveName string, upload func(context.Context, string) (transfer.Receipt, error)) (Result, error) {
-	prepare, cancelPrepare := context.WithTimeout(ctx, p.timeouts.Prepare)
-	defer cancelPrepare()
-	p.mu.Lock()
-	if !p.prepared || p.closed {
-		p.mu.Unlock()
-		return Result{}, ErrArchive
-	}
-	p.active.Add(1)
-	p.mu.Unlock()
-	defer p.active.Done()
-	select {
-	case <-prepare.Done():
-		return Result{}, stageFailure("prepare", prepare.Err())
-	case <-p.stop:
-		return Result{}, ErrArchive
-	case client := <-p.available:
-		defer func() { p.available <- client }()
-		select {
-		case <-p.stop:
-			return Result{}, ErrArchive
-		default:
-		}
-		callCtx, cancel := context.WithCancel(ctx)
-		stop := context.AfterFunc(&poolDoneContext{done: p.stop}, cancel)
-		defer func() { stop(); cancel() }()
-		// Prepare admission must also observe Pool.Close, while keeping its
-		// original deadline across the local queue and the server's target lock.
-		admission, cancelAdmission := context.WithCancel(prepare)
-		stopAdmission := context.AfterFunc(callCtx, cancelAdmission)
-		defer func() { stopAdmission(); cancelAdmission() }()
-		receipt, err := client.upload(callCtx, admission, filename, archiveName, upload)
-		if p.endpoint != nil && receipt.Receipt.Server != nil && receipt.Receipt.Server.ArchivePath != "" {
-			u := *p.endpoint
-			u.Path, u.RawPath = receipt.Receipt.Server.ArchivePath, ""
-			receipt.Receipt.Server.ArchivePath = u.String()
-		}
-		return receipt, err
-	}
+// MarshalJSON exposes operational metadata only; credentials remain available explicitly on the options.
+func (o PoolOptions) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Root, Directory, WorkerPath string
+		Parallel                    int
+	}{safeOptionURL(o.Root), o.Directory, o.WorkerPath, o.Parallel})
 }
+func (o PoolOptions) String() string { b, _ := o.MarshalJSON(); return "PoolOptions" + string(b) }
 
-type poolDoneContext struct{ done <-chan struct{} }
+// GoString formats operational metadata without credentials.
+func (o PoolOptions) GoString() string { return o.String() }
 
-func (c *poolDoneContext) Deadline() (deadline time.Time, ok bool) { return }
-func (c *poolDoneContext) Done() <-chan struct{}                   { return c.done }
-func (c *poolDoneContext) Err() error {
-	select {
-	case <-c.done:
-		return context.Canceled
-	default:
-		return nil
+func safeOptionURL(raw string) string {
+	if !strings.Contains(raw, "://") {
+		return raw
 	}
-}
-func (c *poolDoneContext) Value(any) any { return nil }
-
-func (p *Pool) Close() error {
-	p.mu.Lock()
-	if p.closed && p.cleaned && p.closeErr != nil {
-		// A completed failed attempt retains owners; a later Close retries them.
-		p.cleaned = false
-		p.closeDone = make(chan struct{})
-		defer p.mu.Unlock()
-		return p.closeLocked()
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "ssh" || u.Host == "" {
+		return "[invalid URL]"
 	}
-	if p.closed {
-		done := p.closeDone
-		p.mu.Unlock()
-		<-done
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		return p.closeErr
-	}
-	p.closed = true
-	close(p.stop)
-	if p.prepareCancel != nil {
-		p.prepareCancel()
-	}
-	prepDone := p.prepareDone
-	p.mu.Unlock()
-	if prepDone != nil {
-		<-prepDone
-	}
-	p.active.Wait()
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.closeLocked()
+	return u.Scheme + "://" + u.Host
 }
 
 func (p *Pool) closeLocked() error {
@@ -395,30 +432,4 @@ func (p *Pool) closeLocked() error {
 	p.cleaned = true
 	close(p.closeDone)
 	return err
-}
-
-// MarshalJSON exposes operational metadata only; credentials remain available explicitly on the options.
-func (o PoolOptions) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
-		Root, Directory, WorkerPath string
-		Parallel                    int
-	}{safeOptionURL(o.Root), o.Directory, o.WorkerPath, o.Parallel})
-}
-func (o PoolOptions) String() string   { b, _ := o.MarshalJSON(); return "PoolOptions" + string(b) }
-func (o PoolOptions) GoString() string { return o.String() }
-
-func safeOptionURL(raw string) string {
-	if !strings.Contains(raw, "://") {
-		return raw
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "ssh" || u.Host == "" {
-		return "[invalid URL]"
-	}
-	return u.Scheme + "://" + u.Host
-}
-
-// ArchiveDirectory returns the server directory after successful preparation.
-func (p *Pool) ArchiveDirectory() string {
-	return filepath.Join(p.clients[0].root, "archive", p.clients[0].batch)
 }

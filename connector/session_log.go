@@ -25,6 +25,23 @@ type logWriter struct {
 type writerFunc func([]byte) (int, error)
 
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+func (l *logWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.count != nil {
+		l.count(len(p))
+	}
+	if l.paused || l.target == nil || l.level != "" && l.level != "debug" {
+		return len(p), nil
+	}
+	if l.redactor == nil {
+		return 0, errors.New("connector: missing log redactor")
+	}
+	if _, e := l.renderer.Write(l.redactor.Append(p)); e != nil {
+		return 0, e
+	}
+	return len(p), nil
+}
 func (l *logWriter) scope(secrets []string, paused bool) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -132,23 +149,6 @@ func (l *logWriter) emit(p []byte) error {
 		}
 	}
 	return nil
-}
-func (l *logWriter) Write(p []byte) (int, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.count != nil {
-		l.count(len(p))
-	}
-	if l.paused || l.target == nil || l.level != "" && l.level != "debug" {
-		return len(p), nil
-	}
-	if l.redactor == nil {
-		return 0, errors.New("connector: missing log redactor")
-	}
-	if _, e := l.renderer.Write(l.redactor.Append(p)); e != nil {
-		return 0, e
-	}
-	return len(p), nil
 }
 func (l *logWriter) finishLocked() error {
 	if l.redactor == nil {

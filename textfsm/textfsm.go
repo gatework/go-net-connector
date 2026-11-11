@@ -11,16 +11,22 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/gatework/go-net-connector/internal/terminal"
 	fsm "github.com/sirikothe/gotextfsm"
+
+	"github.com/gatework/go-net-connector/internal/terminal"
 )
 
 var (
+	// ErrTemplateMissing reports an unavailable template for the requested command.
 	ErrTemplateMissing = errors.New("textfsm: template missing")
+	// ErrTemplateInvalid reports a malformed embedded template.
 	ErrTemplateInvalid = errors.New("textfsm: invalid template")
-	ErrParse           = errors.New("textfsm: parse failed")
-	ErrEncoding        = errors.New("textfsm: invalid encoding")
-	ErrIncomplete      = errors.New("textfsm: incomplete output")
+	// ErrParse reports a response that the selected template cannot parse.
+	ErrParse = errors.New("textfsm: parse failed")
+	// ErrEncoding reports invalid response text before parsing.
+	ErrEncoding = errors.New("textfsm: invalid encoding")
+	// ErrIncomplete reports a response without required completion evidence.
+	ErrIncomplete = errors.New("textfsm: incomplete output")
 )
 
 //go:embed templates

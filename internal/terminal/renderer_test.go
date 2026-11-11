@@ -13,7 +13,7 @@ func (shortWriter) Write(p []byte) (int, error) { return 0, nil }
 func TestRenderRejectsShortOutput(t *testing.T) {
 	r := New(shortWriter{}, 1024, true)
 	_, e := r.Write([]byte("body\n"))
-	if e != io.ErrShortWrite {
+	if !errors.Is(e, io.ErrShortWrite) {
 		t.Fatal(e)
 	}
 }

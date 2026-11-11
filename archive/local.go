@@ -16,8 +16,8 @@ func LocalLauncher() Launcher {
 		done := make(chan struct{})
 		go func() { defer close(done); defer server.Close(); _ = Serve(ctx, server, server) }()
 		var once sync.Once
-		close := func() error { once.Do(func() { cancel(); client.Close(); <-done }); return nil }
-		return Channel{Input: client, Output: client, Close: close}, nil
+		closeFn := func() error { once.Do(func() { cancel(); client.Close(); <-done }); return nil }
+		return Channel{Input: client, Output: client, Close: closeFn}, nil
 	}
 }
 

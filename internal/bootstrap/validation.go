@@ -32,6 +32,24 @@ func (s *Services) validatePolicy() error {
 	if n := integerValue(p, "topology.limit"); n < 0 {
 		return config.ErrInvalid
 	}
+	if err := s.validateInventorySource(); err != nil {
+		return err
+	}
+	if n := integerValue(p, "netdisco.db_port"); n < 1 || n > 65535 {
+		return config.ErrInvalid
+	}
+	if n := integerValue(p, "netdisco.db_connect_timeout"); n < 1 {
+		return config.ErrInvalid
+	}
+	mode := stringValue(p, "netdisco.db_sslmode")
+	if mode != "" && !strings.Contains("|disable|allow|prefer|require|verify-ca|verify-full|", "|"+mode+"|") {
+		return config.ErrInvalid
+	}
+	return nil
+}
+
+func (s *Services) validateInventorySource() error {
+	p := s.policy
 	switch stringValue(p, "netdisco.source") {
 	case "http":
 		if p.Value("netdisco.query") != nil || p.Value("netdisco.query_params") != nil {
@@ -49,16 +67,6 @@ func (s *Services) validatePolicy() error {
 			return e
 		}
 	default:
-		return config.ErrInvalid
-	}
-	if n := integerValue(p, "netdisco.db_port"); n < 1 || n > 65535 {
-		return config.ErrInvalid
-	}
-	if n := integerValue(p, "netdisco.db_connect_timeout"); n < 1 {
-		return config.ErrInvalid
-	}
-	mode := stringValue(p, "netdisco.db_sslmode")
-	if mode != "" && !strings.Contains("|disable|allow|prefer|require|verify-ca|verify-full|", "|"+mode+"|") {
 		return config.ErrInvalid
 	}
 	return nil

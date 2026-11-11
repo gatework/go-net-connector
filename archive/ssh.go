@@ -89,13 +89,13 @@ func (m *sshMaster) prepare(ctx context.Context) (err error) {
 	if m.password != "" {
 		// The script contains no credential; OpenSSH receives it in its private environment.
 		helper := filepath.Join(m.dir, "askpass")
-		if err = os.WriteFile(helper, []byte("#!/bin/sh\nprintf '%s\\n' \"$NC_ARCHIVE_ASKPASS_SECRET\"\n"), 0700); err != nil {
+		if err = os.WriteFile(helper, []byte("#!/bin/sh\nprintf '%s\\n' \"$NC_ARCHIVE_ASKPASS_SECRET\"\n"), 0700); err != nil { //nolint:gosec // SSH_ASKPASS must be executable; the private directory is 0700
 			return err
 		}
 		args = append(args, "-o", "PreferredAuthentications=password,keyboard-interactive", "-o", "PubkeyAuthentication=no")
 	}
 	args = append(args, "-M", "-N", "-o", "ControlPersist=no", m.endpoint.Hostname())
-	cmd := exec.Command("ssh", args...)
+	cmd := exec.Command("ssh", args...) //nolint:noctx // the ControlMaster outlives the starting call and is stopped by close; arguments come from validated operator configuration
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdin = nil
 	cmd.Stdout = nil
@@ -110,13 +110,17 @@ func (m *sshMaster) prepare(ctx context.Context) (err error) {
 	m.done = make(chan error, 1)
 	done := m.done
 	go func() { done <- cmd.Wait(); close(done) }()
+	return m.awaitReady(ctx)
+}
+
+func (m *sshMaster) awaitReady(ctx context.Context) error {
 	deadline := time.NewTimer(15 * time.Second)
 	defer deadline.Stop()
 	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()
 	for {
 		checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		check := exec.CommandContext(checkCtx, "ssh", m.commandArgs(true, "-O", "check")...)
+		check := exec.CommandContext(checkCtx, "ssh", m.commandArgs(true, "-O", "check")...) //nolint:gosec // arguments come from validated operator configuration
 		check.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		check.WaitDelay = 750 * time.Millisecond
 		check.Cancel = func() error {
@@ -140,7 +144,7 @@ func (m *sshMaster) prepare(ctx context.Context) (err error) {
 			return ctx.Err()
 		case <-deadline.C:
 			return ErrArchive
-		case <-m.done:
+		case <-m.done: //nolint:errcheck // the master exited early; the archive fails regardless of its status
 			m.done = nil
 			return ErrArchive
 		case <-tick.C:

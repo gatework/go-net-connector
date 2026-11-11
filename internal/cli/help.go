@@ -10,7 +10,8 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// renderChineseHelp derives all content from the command tree and flag metadata.
+// renderChineseHelp writes the help of c: description, usage, subcommands,
+// flags by group, inherited flags and examples.
 func renderChineseHelp(c *cobra.Command, w io.Writer) error {
 	var b strings.Builder
 	description := c.Long
@@ -18,20 +19,9 @@ func renderChineseHelp(c *cobra.Command, w io.Writer) error {
 		description = c.Short
 	}
 	fmt.Fprintln(&b, description)
-	usage := c.CommandPath()
-	if fields := strings.SplitN(c.Use, " ", 2); len(fields) == 2 {
-		usage += " " + fields[1]
-	}
-	if c.HasAvailableSubCommands() {
-		usage += " [子命令]"
-	}
-	if c.HasAvailableFlags() {
-		usage += " [选项]"
-	}
-	fmt.Fprintf(&b, "\n用法：\n  %s\n", usage)
-	children := c.Commands()
+	fmt.Fprintf(&b, "\n用法：\n  %s\n", helpUsage(c))
 	shown := false
-	for _, child := range children {
+	for _, child := range c.Commands() {
 		if child.Hidden {
 			continue
 		}
@@ -41,34 +31,6 @@ func renderChineseHelp(c *cobra.Command, w io.Writer) error {
 		}
 		fmt.Fprintf(&b, "  %-18s %s\n", child.Name(), child.Short)
 	}
-	writeFlags := func(title string, flags *pflag.FlagSet) {
-		shown := false
-		flags.VisitAll(func(f *pflag.Flag) {
-			if f.Hidden {
-				return
-			}
-			if !shown {
-				fmt.Fprintf(&b, "\n%s：\n", title)
-				shown = true
-			}
-			placeholder, usage := pflag.UnquoteUsage(f)
-			if f.Value.Type() != "bool" && !strings.Contains(f.Usage, "`") {
-				placeholder = "值"
-			}
-			label := "--" + f.Name
-			if f.Shorthand != "" {
-				label = "-" + f.Shorthand + ", " + label
-			}
-			if placeholder != "" {
-				label += " <" + placeholder + ">"
-			}
-			fmt.Fprintf(&b, "  %-26s %s", label, usage)
-			if f.DefValue != "" && f.DefValue != "false" && f.DefValue != "0" && f.DefValue != "[]" {
-				fmt.Fprintf(&b, "（默认：%s）", f.DefValue)
-			}
-			b.WriteByte('\n')
-		})
-	}
 	for _, group := range []string{"常用选项", "设备筛选", "连接与认证", "高级选项"} {
 		selected := pflag.NewFlagSet(group, pflag.ContinueOnError)
 		c.LocalFlags().VisitAll(func(f *pflag.Flag) {
@@ -76,9 +38,9 @@ func renderChineseHelp(c *cobra.Command, w io.Writer) error {
 				selected.AddFlag(f)
 			}
 		})
-		writeFlags(group, selected)
+		writeFlagHelp(&b, group, selected)
 	}
-	writeFlags("全局选项", c.InheritedFlags())
+	writeFlagHelp(&b, "全局选项", c.InheritedFlags())
 	if c.Example != "" {
 		fmt.Fprintf(&b, "\n示例：\n%s\n", c.Example)
 	}
@@ -89,6 +51,51 @@ func renderChineseHelp(c *cobra.Command, w io.Writer) error {
 		return io.ErrShortWrite
 	}
 	return err
+}
+
+// helpUsage is the usage line of c.
+func helpUsage(c *cobra.Command) string {
+	usage := c.CommandPath()
+	if fields := strings.SplitN(c.Use, " ", 2); len(fields) == 2 {
+		usage += " " + fields[1]
+	}
+	if c.HasAvailableSubCommands() {
+		usage += " [子命令]"
+	}
+	if c.HasAvailableFlags() {
+		usage += " [选项]"
+	}
+	return usage
+}
+
+// writeFlagHelp writes one titled group of visible flags, if any.
+func writeFlagHelp(b *strings.Builder, title string, flags *pflag.FlagSet) {
+	shown := false
+	flags.VisitAll(func(f *pflag.Flag) {
+		if f.Hidden {
+			return
+		}
+		if !shown {
+			fmt.Fprintf(b, "\n%s：\n", title)
+			shown = true
+		}
+		placeholder, usage := pflag.UnquoteUsage(f)
+		if f.Value.Type() != "bool" && !strings.Contains(f.Usage, "`") {
+			placeholder = "值"
+		}
+		label := "--" + f.Name
+		if f.Shorthand != "" {
+			label = "-" + f.Shorthand + ", " + label
+		}
+		if placeholder != "" {
+			label += " <" + placeholder + ">"
+		}
+		fmt.Fprintf(b, "  %-26s %s", label, usage)
+		if f.DefValue != "" && f.DefValue != "false" && f.DefValue != "0" && f.DefValue != "[]" {
+			fmt.Fprintf(b, "（默认：%s）", f.DefValue)
+		}
+		b.WriteByte('\n')
+	})
 }
 
 // Flag categories are presentation metadata; every flag remains available.

@@ -5,15 +5,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/url"
 	"os"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/internal/bootstrap"
 	"github.com/gatework/go-net-connector/transfer"
-	"golang.org/x/term"
 )
 
 var errSetupDeclined = errors.New("未创建必需的配置文件")
@@ -105,13 +107,16 @@ func (r Runtime) passwords(ctx context.Context, o *options) error {
 		if e != nil {
 			return e
 		}
-		if len(password) == 0 || strings.ContainsAny(string(password), "\r\n\x00") {
+		if len(password) == 0 || strings.ContainsAny(password, "\r\n\x00") {
 			return config.ErrInvalid
 		}
-		o.secrets[p.key] = string(password)
+		o.secrets[p.key] = password
 	}
 	return nil
 }
+
+// configure interviews the operator for the settings a new configuration
+// still lacks and reloads the configuration with them.
 func (r Runtime) configure(ctx context.Context, snapshot config.Snapshot, o options, name string, reader *bufio.Reader) (config.Snapshot, error) {
 	if _, ok := r.terminal(); !ok {
 		return snapshot, config.ErrInvalid
@@ -120,88 +125,22 @@ func (r Runtime) configure(ctx context.Context, snapshot config.Snapshot, o opti
 	if _, e := os.Lstat(path); e == nil {
 		return snapshot, nil
 	}
-	answer := func(label, defaultValue string) (string, error) {
-		if _, e := fmt.Fprintf(r.Error, "%s [%s]: ", label, defaultValue); e != nil {
-			return "", e
-		}
-		line, e := readLine(reader, 64<<10)
-		if e != nil {
-			return "", e
-		}
-		line = strings.TrimSpace(line)
-		if line == "" {
-			line = defaultValue
-		}
-		return line, nil
-	}
-	start, e := answer("是否开始交互式配置？y/N", "n")
+	in := &interview{out: r.Error, reader: reader, values: map[string]string{}}
+	start, e := in.answer("是否开始交互式配置？y/N", "n")
 	if e != nil || !strings.EqualFold(start, "y") {
 		return snapshot, e
 	}
-	values := map[string]string{}
-	maps.Copy(values, o.public)
-	ask := func(key, label, defaultValue string, valid func(string) bool) error {
-		for {
-			value, err := answer(label, defaultValue)
-			if err != nil {
-				return err
-			}
-			if !valid(value) {
-				if _, err = fmt.Fprintln(r.Error, "值无效，请重新输入。"); err != nil {
-					return err
-				}
-				continue
-			}
-			values[key] = value
-			return nil
-		}
-	}
-	source, _ := snapshot.Value("netdisco.source").(string)
-	if source == "" {
-		source = "http"
-	}
-	urlValue, _ := snapshot.Value("netdisco.url").(string)
-	query, _ := snapshot.Value("netdisco.query").(string)
-	fields, _ := snapshot.Sources()["fields"].(map[string]string)
-	if source == "http" && urlValue == "" && query == "" && fields["/netdisco/source"] == "default" {
-		if e = ask("ND_SOURCE", "清单来源 http/postgres", source, func(v string) bool { return v == "http" || v == "postgres" }); e != nil {
-			return snapshot, e
-		}
-		source = values["ND_SOURCE"]
-	}
-	if source == "http" && urlValue == "" {
-		if e = ask("ND_URL", "清单服务地址", "", func(v string) bool {
-			u, err := url.Parse(v)
-			return err == nil && u.Host != "" && u.User == nil && (u.Scheme == "https" || u.Scheme == "http")
-		}); e != nil {
-			return snapshot, e
-		}
-	}
-	if source == "postgres" && query == "" {
-		if e = ask("ND_QUERY", "PostgreSQL 只读清单查询", "", func(v string) bool { return strings.TrimSpace(v) != "" }); e != nil {
-			return snapshot, e
-		}
+	maps.Copy(in.values, o.public)
+	if e = in.inventory(snapshot); e != nil {
+		return snapshot, e
 	}
 	if o.mode == "tftp" {
-		server, _ := snapshot.Value("tftp.server").(string)
-		servers, _ := snapshot.Value("tftp.servers").(map[string]any)
-		if server == "" && len(servers) == 0 {
-			if e = ask("NC_TFTP_HOST", "TFTP 服务器地址", "", func(v string) bool { return transfer.ValidateServer(v) == nil }); e != nil {
-				return snapshot, e
-			}
-			server = values["NC_TFTP_HOST"]
-		}
-		root, _ := snapshot.Value("tftp.verification_root").(string)
-		roots, _ := snapshot.Value("tftp.verification_roots").(map[string]any)
-		if server != "" && root == "" && roots[server] == nil {
-			if e = ask("NC_TFTP_ROOT", "TFTP 归档根目录（本地路径或 ssh://用户@服务器/目录）", "", func(v string) bool { _, err := transfer.VerificationRoot(v); return err == nil }); e != nil {
-				return snapshot, e
-			}
+		if e = in.tftp(snapshot); e != nil {
+			return snapshot, e
 		}
 	}
-
 	// Keep the originally selected config/env paths and environment precedence.
-	overrides, e := config.FromEnvironment(values)
+	overrides, e := config.FromEnvironment(in.values)
 	if e != nil {
 		return snapshot, e
 	}
@@ -210,4 +149,92 @@ func (r Runtime) configure(ctx context.Context, snapshot config.Snapshot, o opti
 		_, e = bootstrap.New(result, nil)
 	}
 	return result, e
+}
+
+// interview asks configuration questions on the terminal and collects the
+// answers as environment overrides.
+type interview struct {
+	out    io.Writer
+	reader *bufio.Reader
+	values map[string]string
+}
+
+// answer asks one question; an empty answer takes defaultValue.
+func (in *interview) answer(label, defaultValue string) (string, error) {
+	if _, e := fmt.Fprintf(in.out, "%s [%s]: ", label, defaultValue); e != nil {
+		return "", e
+	}
+	line, e := readLine(in.reader, 64<<10)
+	if e != nil {
+		return "", e
+	}
+	if line = strings.TrimSpace(line); line == "" {
+		line = defaultValue
+	}
+	return line, nil
+}
+
+// ask repeats a question until valid accepts the answer and records it as key.
+func (in *interview) ask(key, label, defaultValue string, valid func(string) bool) error {
+	for {
+		value, err := in.answer(label, defaultValue)
+		if err != nil {
+			return err
+		}
+		if valid(value) {
+			in.values[key] = value
+			return nil
+		}
+		if _, err = fmt.Fprintln(in.out, "值无效，请重新输入。"); err != nil {
+			return err
+		}
+	}
+}
+
+// inventory asks for the inventory source and its URL or query when the
+// configuration does not set them.
+func (in *interview) inventory(snapshot config.Snapshot) error {
+	source, _ := snapshot.Value("netdisco.source").(string)
+	if source == "" {
+		source = "http"
+	}
+	urlValue, _ := snapshot.Value("netdisco.url").(string)
+	query, _ := snapshot.Value("netdisco.query").(string)
+	fields, _ := snapshot.Sources()["fields"].(map[string]string)
+	if source == "http" && urlValue == "" && query == "" && fields["/netdisco/source"] == "default" {
+		if e := in.ask("ND_SOURCE", "清单来源 http/postgres", source, func(v string) bool { return v == "http" || v == "postgres" }); e != nil {
+			return e
+		}
+		source = in.values["ND_SOURCE"]
+	}
+	if source == "http" && urlValue == "" {
+		if e := in.ask("ND_URL", "清单服务地址", "", func(v string) bool {
+			u, err := url.Parse(v)
+			return err == nil && u.Host != "" && u.User == nil && (u.Scheme == "https" || u.Scheme == "http")
+		}); e != nil {
+			return e
+		}
+	}
+	if source == "postgres" && query == "" {
+		return in.ask("ND_QUERY", "PostgreSQL 只读清单查询", "", func(v string) bool { return strings.TrimSpace(v) != "" })
+	}
+	return nil
+}
+
+// tftp asks for the TFTP server and its archive root when unset.
+func (in *interview) tftp(snapshot config.Snapshot) error {
+	server, _ := snapshot.Value("tftp.server").(string)
+	servers, _ := snapshot.Value("tftp.servers").(map[string]any)
+	if server == "" && len(servers) == 0 {
+		if e := in.ask("NC_TFTP_HOST", "TFTP 服务器地址", "", func(v string) bool { return transfer.ValidateServer(v) == nil }); e != nil {
+			return e
+		}
+		server = in.values["NC_TFTP_HOST"]
+	}
+	root, _ := snapshot.Value("tftp.verification_root").(string)
+	roots, _ := snapshot.Value("tftp.verification_roots").(map[string]any)
+	if server != "" && root == "" && roots[server] == nil {
+		return in.ask("NC_TFTP_ROOT", "TFTP 归档根目录（本地路径或 ssh://用户@服务器/目录）", "", func(v string) bool { _, err := transfer.VerificationRoot(v); return err == nil })
+	}
+	return nil
 }

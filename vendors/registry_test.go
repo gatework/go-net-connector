@@ -39,11 +39,11 @@ func TestBuiltinRegistryReturnsDetachedDialectProfiles(t *testing.T) {
 	}
 }
 
-func profileForTest(t testing.TB, name string) dialect.Platform {
-	t.Helper()
+func profileForTest(tb testing.TB, name string) dialect.Platform {
+	tb.Helper()
 	platform, err := NewBuiltinRegistry().Lookup(name)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return platform
 }
@@ -107,7 +107,7 @@ func TestBuiltinRegistryOwnsTransferAndTopologyExceptions(t *testing.T) {
 func TestBuiltinRegistryResolvesInventoryIdentity(t *testing.T) {
 	registry := NewBuiltinRegistry()
 	resolver, ok := any(registry).(interface {
-		ResolvePlatform(dialect.InventoryIdentity) (string, bool)
+		ResolvePlatform(identity dialect.InventoryIdentity) (string, bool)
 	})
 	if !ok {
 		t.Fatal("built-in registry does not resolve inventory identities")
@@ -142,7 +142,7 @@ func TestEveryPlatformClassifiesReadOnlyCommands(t *testing.T) {
 	registry := NewBuiltinRegistry()
 	for _, name := range registry.Names() {
 		platform, _ := registry.Lookup(name)
-		classifier, ok := platform.(interface{ IsReadOnly(string) bool })
+		classifier, ok := platform.(interface{ IsReadOnly(command string) bool })
 		if !ok {
 			t.Fatalf("%s has no read-only classifier", name)
 		}

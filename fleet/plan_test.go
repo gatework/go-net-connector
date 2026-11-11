@@ -93,12 +93,12 @@ func TestPlanFreezesCompleteTransferTargetAndCollisionUsesRemotePath(t *testing.
 	rules, _ := NewRules(RuleOptions{}, vendors.NewBuiltinRegistry())
 	target := transfer.Target{TFTPOptions: transfer.TFTPOptions{Server: "192.0.2.9", Path: "config.cfg", SourceFile: "flash:/startup.cfg", SourceInterface: "management", VRF: "mgt"}, Root: "/archive"}
 	p, err := NewPlan([]inventory.Device{{IP: "192.0.2.1", Vendor: "H3C"}, {IP: "192.0.2.2", Vendor: "H3C"}}, rules, PlanOptions{Mode: "tftp", Target: func(r Record) (transfer.Target, error) {
-		copy := target
+		adjusted := target
 		if r.Host == "192.0.2.2" {
-			copy.Root = "/different"
-			copy.VRF = "different"
+			adjusted.Root = "/different"
+			adjusted.VRF = "different"
 		}
-		return copy, nil
+		return adjusted, nil
 	}})
 	if err != nil {
 		t.Fatal(err)

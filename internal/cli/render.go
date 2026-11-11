@@ -126,42 +126,12 @@ func targetText(t *batchreport.Target) string {
 	return strings.Join(parts, " ")
 }
 
+// writeReport renders a batch report: warnings, results, the devices that
+// need attention and where the files are.
 func (r Runtime) writeReport(b *strings.Builder, report *batchreport.Report, archives []string, interrupted bool) {
 	failed := report.Counts[batchreport.StatusFailed]
 	partial := report.Counts[batchreport.StatusPartial]
-	textWarnings, unverified := 0, 0
-	for _, d := range report.Devices {
-		if d.Artifacts.Backup != nil && d.Artifacts.Backup.TextWarning != nil && d.Artifacts.Backup.TextWarning.Count > 0 {
-			textWarnings++
-		}
-		if d.Artifacts.Transfer != nil && !d.Verified {
-			unverified++
-		}
-	}
-	if failed > 0 || partial > 0 || unverified > 0 || textWarnings > 0 || report.ReportError != "" || report.Stopped || interrupted {
-		b.WriteString(display.Section(r.Output, "异常与警告"))
-		if failed > 0 || partial > 0 {
-			fmt.Fprintf(b, "任务异常：失败 %d 台；部分完成 %d 台；逐台诊断见下表与报告。\n", failed, partial)
-		}
-		if report.Stopped {
-			b.WriteString("失败数量达到上限，其余设备未启动。\n")
-		}
-		if interrupted {
-			b.WriteString("批次已中断；未开始的设备未连接。\n")
-		}
-		if unverified > 0 {
-			fmt.Fprintf(b, "服务器文件待核验：%d 台设备仅报告上传完成。\n", unverified)
-		}
-		if textWarnings > 0 {
-			fmt.Fprintf(b, "编码警告：%d 台；请核对设备配置中的异常字符。\n", textWarnings)
-		}
-		if report.ReportError != "" {
-			fmt.Fprintf(b, "报告写入异常：%s\n", display.Error(report.ReportError))
-		}
-		if report.Operation == "deploy" && (failed > 0 || partial > 0) {
-			b.WriteString("注意：失败或部分完成的设备可能已部分生效，请按报告逐台核对，不要直接重跑整份脚本。\n")
-		}
-	}
+	r.writeWarnings(b, report, interrupted)
 	b.WriteString(display.Section(r.Output, "执行结果"))
 	state := "完成"
 	if !report.Success {
@@ -169,17 +139,7 @@ func (r Runtime) writeReport(b *strings.Builder, report *batchreport.Report, arc
 	}
 	skipped := report.Total - report.Counts[batchreport.StatusSucceeded] - partial - failed - report.Counts[batchreport.StatusInterrupted] - report.Counts[batchreport.StatusNotStarted] - report.Counts[batchreport.StatusStopped]
 	fmt.Fprintf(b, "批次%s：成功 %d；部分完成 %d；失败 %d；跳过 %d\n", state, report.Counts[batchreport.StatusSucceeded], partial, failed, skipped)
-	attention := [][5]string{}
-	for _, d := range report.Devices {
-		if d.Status != batchreport.StatusSucceeded && d.Status != batchreport.StatusPartial && d.Status != batchreport.StatusFailed && d.Status != batchreport.StatusInterrupted {
-			continue
-		}
-		if d.Status == batchreport.StatusSucceeded && (report.Operation != "topology" || d.Outcome == "unchanged" || d.Outcome == "discovered") {
-			continue
-		}
-		attention = append(attention, [5]string{d.Host, d.Name, d.Platform, display.Status(firstNonEmpty(d.Outcome, d.Status)), deviceNote(d)})
-	}
-	if len(attention) > 0 {
+	if attention := attentionRows(report); len(attention) > 0 {
 		_ = display.Table(b, attention, r.width())
 	}
 	b.WriteString(display.Section(r.Output, "文件与报告"))
@@ -192,6 +152,63 @@ func (r Runtime) writeReport(b *strings.Builder, report *batchreport.Report, arc
 			fmt.Fprintf(b, "命令文件：%s\n", display.Text(filepath.Join(report.Directory, "scripts")))
 		}
 	}
+}
+
+// writeWarnings renders the failure, stop, interruption, verification,
+// encoding and report warnings, if any.
+func (r Runtime) writeWarnings(b *strings.Builder, report *batchreport.Report, interrupted bool) {
+	failed := report.Counts[batchreport.StatusFailed]
+	partial := report.Counts[batchreport.StatusPartial]
+	textWarnings, unverified := 0, 0
+	for _, d := range report.Devices {
+		if d.Artifacts.Backup != nil && d.Artifacts.Backup.TextWarning != nil && d.Artifacts.Backup.TextWarning.Count > 0 {
+			textWarnings++
+		}
+		if d.Artifacts.Transfer != nil && !d.Verified {
+			unverified++
+		}
+	}
+	if failed == 0 && partial == 0 && unverified == 0 && textWarnings == 0 && report.ReportError == "" && !report.Stopped && !interrupted {
+		return
+	}
+	b.WriteString(display.Section(r.Output, "异常与警告"))
+	if failed > 0 || partial > 0 {
+		fmt.Fprintf(b, "任务异常：失败 %d 台；部分完成 %d 台；逐台诊断见下表与报告。\n", failed, partial)
+	}
+	if report.Stopped {
+		b.WriteString("失败数量达到上限，其余设备未启动。\n")
+	}
+	if interrupted {
+		b.WriteString("批次已中断；未开始的设备未连接。\n")
+	}
+	if unverified > 0 {
+		fmt.Fprintf(b, "服务器文件待核验：%d 台设备仅报告上传完成。\n", unverified)
+	}
+	if textWarnings > 0 {
+		fmt.Fprintf(b, "编码警告：%d 台；请核对设备配置中的异常字符。\n", textWarnings)
+	}
+	if report.ReportError != "" {
+		fmt.Fprintf(b, "报告写入异常：%s\n", display.Error(report.ReportError))
+	}
+	if report.Operation == "deploy" && (failed > 0 || partial > 0) {
+		b.WriteString("注意：失败或部分完成的设备可能已部分生效，请按报告逐台核对，不要直接重跑整份脚本。\n")
+	}
+}
+
+// attentionRows lists the devices an operator should look at: every
+// partial, failed or interrupted one, and topology devices that changed.
+func attentionRows(report *batchreport.Report) [][5]string {
+	attention := [][5]string{}
+	for _, d := range report.Devices {
+		if d.Status != batchreport.StatusSucceeded && d.Status != batchreport.StatusPartial && d.Status != batchreport.StatusFailed && d.Status != batchreport.StatusInterrupted {
+			continue
+		}
+		if d.Status == batchreport.StatusSucceeded && (report.Operation != "topology" || d.Outcome == "unchanged" || d.Outcome == "discovered") {
+			continue
+		}
+		attention = append(attention, [5]string{d.Host, d.Name, d.Platform, display.Status(firstNonEmpty(d.Outcome, d.Status)), deviceNote(d)})
+	}
+	return attention
 }
 
 // deviceNote explains a device result: the failed stage and its diagnostic,

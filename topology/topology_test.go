@@ -407,12 +407,13 @@ func TestFortinetVersionAndAuthorizedViewSelection(t *testing.T) {
 					for scan.Scan() {
 						command := scan.Text()
 						sent = append(sent, command)
-						body := ""
-						if command == "get system status" {
+						var body string
+						switch command {
+						case "get system status":
 							body = "Version: FortiGate v" + tc.version + ",build001\r\nCurrent virtual domain: " + tc.statusView + "\r\n"
-						} else if command == tc.command {
+						case tc.command:
 							body = "No LLDP neighbors.\r\n"
-						} else {
+						default:
 							done <- errors.New("unexpected command")
 							return
 						}

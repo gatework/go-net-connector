@@ -31,13 +31,9 @@ func TestGoldenProfileCommands(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			p := profileForTest(t, name)
 			config := []string{}
-			for _, c := range p.Terminal().ConfigCommands {
-				config = append(config, c)
-			}
+			config = append(config, p.Terminal().ConfigCommands...)
 			save := []string{}
-			for _, c := range p.Terminal().SaveCommands {
-				save = append(save, c)
-			}
+			save = append(save, p.Terminal().SaveCommands...)
 			if !reflect.DeepEqual(config, want.Config) || !reflect.DeepEqual(save, want.Save) {
 				t.Fatal("commands differ", config, save)
 			}

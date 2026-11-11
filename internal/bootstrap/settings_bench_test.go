@@ -37,7 +37,7 @@ func BenchmarkTFTPPolicy(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				policy, err := tc.call()
 				if err != nil {
 					b.Fatal(err)

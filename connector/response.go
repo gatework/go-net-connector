@@ -24,24 +24,31 @@ type responseData struct {
 	verifiedText                                       bool // strict conversion, not a backup preservation view
 }
 
+// Raw returns received source bytes without decoding or redaction.
 func (r Response) Raw() string {
 	if r.data == nil {
 		return ""
 	}
 	return r.data.raw
 }
+
+// RawPrompt returns the original prompt bytes without decoding or redaction.
 func (r Response) RawPrompt() string {
 	if r.data == nil {
 		return ""
 	}
 	return r.data.rawPrompt
 }
+
+// Encoding returns the encoding recorded when the response was converted.
 func (r Response) Encoding() string {
 	if r.data == nil {
 		return ""
 	}
 	return r.data.encoding
 }
+
+// Output returns decoded output before terminal edits, or its conversion error.
 func (r Response) Output() (string, error) {
 	if r.data == nil {
 		return "", ErrIncomplete
@@ -51,20 +58,28 @@ func (r Response) Output() (string, error) {
 	}
 	return r.data.output, nil
 }
+
+// Rendered returns output with terminal edits applied, or its conversion error.
 func (r Response) Rendered() (string, error) {
 	if r.data == nil {
 		return "", ErrIncomplete
 	}
 	return r.data.rendered, r.data.renderErr
 }
+
+// Prompt returns the decoded, rendered prompt or its conversion error.
 func (r Response) Prompt() (string, error) {
 	if r.data == nil {
 		return "", ErrIncomplete
 	}
 	return r.data.prompt, r.data.promptErr
 }
-func (r Response) String() string   { return fmt.Sprintf("connector.Response{bytes:%d}", len(r.Raw())) }
+func (r Response) String() string { return fmt.Sprintf("connector.Response{bytes:%d}", len(r.Raw())) }
+
+// GoString formats byte counts without response contents.
 func (r Response) GoString() string { return r.String() }
+
+// MarshalJSON encodes byte counts without response contents.
 func (r Response) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Bytes int `json:"bytes"`

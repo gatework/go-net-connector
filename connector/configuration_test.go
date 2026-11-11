@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -67,7 +68,7 @@ func TestBackupRefusesBusyPathBeforeOpeningDevice(t *testing.T) {
 	d, _ := fixtureDevice(t, fixtureDriver(), []string{"ok\nsw#"})
 	_, e := d.ExecuteCommand(t.Context(), Command{Text: "show"}, ExecuteOptions{OnReceipt: func(_ctx context.Context, _ StepResult) error {
 		_, err := d.Backup(_ctx, BackupOptions{Path: filepath.Join(t.TempDir(), "x")})
-		if err != ErrBusy {
+		if !errors.Is(err, ErrBusy) {
 			t.Error(err)
 		}
 		return nil

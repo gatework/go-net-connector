@@ -16,10 +16,12 @@ import (
 // only by the platform's scoped interaction and is never included in receipts.
 type RemoteOptions struct{ Server, Path, Username, Protocol, Password string }
 
-func (o RemoteOptions) dialectOptions() dialect.RemoteBackupOptions {
-	return dialect.RemoteBackupOptions{Server: o.Server, Path: o.Path, Username: o.Username, Protocol: o.Protocol}
+// MarshalJSON exposes operational metadata only; credentials remain available explicitly on the options.
+func (o RemoteOptions) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct{ Server, Path, Username, Protocol string }{o.Server, o.Path, o.Username, o.Protocol})
 }
 
+// ValidateRemote rejects unsafe remote destinations and unsupported protocols.
 func ValidateRemote(o RemoteOptions) error {
 	if o.Protocol != "" && o.Protocol != "ftp" && o.Protocol != "scp" || ValidateServer(o.Server) != nil || ValidatePath(o.Path) != nil || !vrfPattern.MatchString(o.Username) || strings.ContainsAny(o.Password, "\r\n\x00") {
 		return ErrInvalid
@@ -84,9 +86,10 @@ func remoteRejected(command connector.Command, prompt, output string) bool {
 	return matchesEvidencePattern(command, prompt, output, pattern)
 }
 
-// MarshalJSON exposes operational metadata only; credentials remain available explicitly on the options.
-func (o RemoteOptions) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct{ Server, Path, Username, Protocol string }{o.Server, o.Path, o.Username, o.Protocol})
-}
-func (o RemoteOptions) String() string   { b, _ := o.MarshalJSON(); return "RemoteOptions" + string(b) }
+func (o RemoteOptions) String() string { b, _ := o.MarshalJSON(); return "RemoteOptions" + string(b) }
+
+// GoString formats remote options without the password.
 func (o RemoteOptions) GoString() string { return o.String() }
+func (o RemoteOptions) dialectOptions() dialect.RemoteBackupOptions {
+	return dialect.RemoteBackupOptions{Server: o.Server, Path: o.Path, Username: o.Username, Protocol: o.Protocol}
+}

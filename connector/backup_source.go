@@ -22,6 +22,8 @@ type BackupSource struct {
 	NoWriteVerified bool            `json:"no_write_verified"`
 	Segments        []SourceSegment `json:"segments"`
 }
+
+// SourceSegment maps one accepted command response to its raw backup offset.
 type SourceSegment struct {
 	Step   int `json:"step"`
 	Offset int `json:"offset"`
@@ -34,6 +36,8 @@ type TextPosition struct {
 	Line   int `json:"line"`
 	Column int `json:"column"`
 }
+
+// TextWarning records invalid-encoding counts and bounded source positions.
 type TextWarning struct {
 	Count     int            `json:"count"`
 	Positions []TextPosition `json:"positions"`
@@ -159,10 +163,15 @@ func backupPersistenceFailure(receipt storage.Receipt, err error) error {
 	return &BackupPersistenceError{failure: &Error{Code: code, Phase: "backup", cause: err}}
 }
 
+// Verified reports durable storage or verification of unchanged source bytes.
 func (s BackupSource) Verified() bool { return s.File.Durable() || s.NoWriteVerified }
+
+// HasSavedEvidence reports whether any backup evidence was committed or verified unchanged.
 func (r BackupReceipt) HasSavedEvidence() bool {
 	return r.File.Committed() || (r.DeviceCompleted && r.Change == "unchanged" && r.NoWriteVerified) || (r.Source != nil && r.Source.File.Committed())
 }
+
+// Complete requires device completion and verified text and source persistence.
 func (r BackupReceipt) Complete() bool {
 	return r.DeviceCompleted && (r.File.Durable() || (r.Change == "unchanged" && r.NoWriteVerified)) && (r.TextOnly || r.Source != nil && r.Source.Verified())
 }

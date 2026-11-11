@@ -13,15 +13,15 @@ import (
 	"github.com/gatework/go-net-connector/vendors"
 )
 
-func tftpPolicyForTest(t testing.TB, vendor string) TFTPPolicy {
-	t.Helper()
+func tftpPolicyForTest(tb testing.TB, vendor string) TFTPPolicy {
+	tb.Helper()
 	platform, err := vendors.NewBuiltinRegistry().Lookup(vendor)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	policy, ok := platform.(TFTPPolicy)
 	if !ok {
-		t.Fatalf("platform %q has no TFTP policy", vendor)
+		tb.Fatalf("platform %q has no TFTP policy", vendor)
 	}
 	return policy
 }
@@ -97,6 +97,7 @@ func TestH3CSourceDiscoveryAndIOSDialogue(t *testing.T) {
 }
 
 func TestTFTPFileCompletion(t *testing.T) {
+	t.Parallel()
 	for _, vendor := range []string{"h3c", "h3c_wireless", "huawei"} {
 		for _, test := range []struct {
 			name, body string

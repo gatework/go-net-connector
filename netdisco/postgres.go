@@ -9,16 +9,20 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/gatework/go-net-connector/inventory"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/gatework/go-net-connector/inventory"
 )
 
+// PostgresOptions defines a read-only inventory query and its resource limits.
 type PostgresOptions struct {
 	Connection, Query string
 	Parameters        []any
 	Limits            Limits
 }
+
+// Postgres fetches inventory through a bounded read-only PostgreSQL cursor.
 type Postgres struct {
 	connection *pgx.ConnConfig
 	query      string
@@ -28,6 +32,7 @@ type Postgres struct {
 
 const postgresProtocolOverhead int64 = 1 << 20
 
+// NewPostgres validates and owns query parameters and connection settings.
 func NewPostgres(o PostgresOptions) (*Postgres, error) {
 	if strings.TrimSpace(o.Query) == "" || strings.ContainsRune(o.Query, 0) {
 		return nil, newInventoryError("invalid_query", nil)
@@ -72,8 +77,12 @@ func postgresProtocolBodyLimit(limits Limits) int {
 	return int(budget + postgresProtocolOverhead)
 }
 
-func (p *Postgres) String() string   { return "netdisco.Postgres" }
+func (p *Postgres) String() string { return "netdisco.Postgres" }
+
+// GoString formats safe source metadata without credentials.
 func (p *Postgres) GoString() string { return p.String() }
+
+// Devices fetches rows in a read-only transaction and closes its owned connection.
 func (p *Postgres) Devices(parent context.Context) (result []inventory.Device, err error) {
 	ctx, cancel := context.WithTimeout(parent, p.limits.Timeout)
 	defer cancel()
@@ -105,41 +114,14 @@ func (p *Postgres) Devices(parent context.Context) (result []inventory.Device, e
 	}
 	output := make([]inventory.Device, 0)
 	var total int64
-	for page := 0; page < p.limits.MaxPages; page++ {
+	for range p.limits.MaxPages {
 		rows, e := tx.Query(ctx, fmt.Sprintf("FETCH FORWARD %d FROM net_connector_inventory", p.limits.PageSize), pgx.QueryExecModeExec)
 		if e != nil {
 			return nil, newInventoryError("query_failed", e)
 		}
-		columns, e := postgresColumns(ctx, rows.FieldDescriptions())
+		count, e := p.readPage(ctx, rows, &output, &total)
 		if e != nil {
-			rows.Close()
 			return nil, e
-		}
-
-		count := 0
-		var response int64
-		for rows.Next() {
-			if e := ctx.Err(); e != nil {
-				rows.Close()
-				return nil, newInventoryError("query_failed", e)
-			}
-			count++
-			if len(output) >= p.limits.MaxDevices {
-				rows.Close()
-				return nil, newInventoryError("max_devices", nil)
-			}
-			device, e := decodePostgresRow(ctx, columns, rows.RawValues(), p.limits, &response, &total)
-			if e != nil {
-				rows.Close()
-				return nil, e
-			}
-
-			output = append(output, device)
-		}
-		e = rows.Err()
-		rows.Close()
-		if e != nil {
-			return nil, newInventoryError("query_failed", e)
 		}
 		if count < p.limits.PageSize {
 			if e = tx.Commit(ctx); e != nil {
@@ -152,6 +134,41 @@ func (p *Postgres) Devices(parent context.Context) (result []inventory.Device, e
 		}
 	}
 	return nil, newInventoryError("max_pages", nil)
+}
+
+func (p *Postgres) readPage(ctx context.Context, rows pgx.Rows, output *[]inventory.Device, total *int64) (int, error) {
+	columns, e := postgresColumns(ctx, rows.FieldDescriptions())
+	if e != nil {
+		rows.Close()
+		return 0, e
+	}
+
+	count := 0
+	var response int64
+	for rows.Next() {
+		if e := ctx.Err(); e != nil {
+			rows.Close()
+			return 0, newInventoryError("query_failed", e)
+		}
+		count++
+		if len(*output) >= p.limits.MaxDevices {
+			rows.Close()
+			return 0, newInventoryError("max_devices", nil)
+		}
+		device, e := decodePostgresRow(ctx, columns, rows.RawValues(), p.limits, &response, total)
+		if e != nil {
+			rows.Close()
+			return 0, e
+		}
+
+		*output = append(*output, device)
+	}
+	e = rows.Err()
+	rows.Close()
+	if e != nil {
+		return 0, newInventoryError("query_failed", e)
+	}
+	return count, nil
 }
 
 // Column selection is fixed for one fetched page; raw buffers belong to pgx.
@@ -243,4 +260,6 @@ func (o PostgresOptions) String() string {
 	b, _ := o.MarshalJSON()
 	return "PostgresOptions" + string(b)
 }
+
+// GoString formats safe source metadata without credentials.
 func (o PostgresOptions) GoString() string { return o.String() }

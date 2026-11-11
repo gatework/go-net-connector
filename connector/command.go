@@ -12,9 +12,12 @@ import (
 	expect "github.com/gatework/go-expect"
 )
 
+// ExecuteCommand executes one validated command under the device operation lease.
 func (d *Device) ExecuteCommand(ctx context.Context, c Command, opts ExecuteOptions) (Result, error) {
 	return d.ExecuteScript(ctx, Script{Commands: []Command{c}}, opts)
 }
+
+// ExecuteScript validates the entire script before connecting and retains accepted steps on failure.
 func (d *Device) ExecuteScript(ctx context.Context, script Script, opts ExecuteOptions) (Result, error) {
 	s, e := script.clone()
 	if e != nil {
@@ -143,23 +146,8 @@ func (d *Device) runScript(ctx context.Context, script Script, opts ExecuteOptio
 		x.limit = opts.MaxOutputBytes
 	}
 
-	if !opts.SkipPrivilege && d.terminal.PrivilegeCommand != "" && !d.privileged.Load() {
-		secret := d.config.EnablePassword
-		if secret == "" {
-			secret = d.config.Password
-		}
-		ac, cancel := context.WithTimeout(ctx, d.config.LoginTimeout)
-		err = d.sendLine(ac, d.terminal.PrivilegeCommand+d.config.LineEnding, false)
-		if err == nil {
-			var s StepResult
-			s, err = d.readResponse(ac, Command{}, d.terminal.PrivilegePrompt, d.loginInteractions(secret), true, false)
-			if err == nil {
-				d.setPrompt(s.Response())
-				d.privileged.Store(true)
-			}
-		}
-		cancel()
-		if err != nil {
+	if !opts.SkipPrivilege {
+		if err = d.ensurePrivilege(ctx); err != nil {
 			return
 		}
 	}
@@ -167,61 +155,89 @@ func (d *Device) runScript(ctx context.Context, script Script, opts ExecuteOptio
 		if err = ctx.Err(); err != nil {
 			return
 		}
-		c := original
-		if d.preparer != nil {
-			var skip bool
-			err = x.hook(ctx, func(ex Executor) error { var e error; c, skip, e = d.preparer.PrepareCommand(ctx, c, ex); return e })
-			if err != nil {
-				err = newError("prepare_failed", "script", original, err)
-				return
-			}
-			if skip {
-				continue
-			}
-			if err = c.validate(); err != nil {
-				return
-			}
-		}
-		var step StepResult
-		step, err = x.command(ctx, c)
-		if step.Response().RawPrompt() != "" {
-			result.steps = append(result.steps, step)
-		}
-		if err == nil && d.observer != nil {
-			e := x.hook(ctx, func(ex Executor) error { return d.observer.AfterCommand(ctx, c, step, ex) })
-			if e != nil {
-				err = newError("after_command_failed", "script", c, e)
-			}
-		}
-		if err == nil && strategy != nil {
-			e := x.hook(ctx, func(ex Executor) error { return strategy.Validate(ctx, c, step, ex) })
-			if e != nil {
-				err = configurationFailure(c, e)
-			}
-		}
-		if step.Response().RawPrompt() != "" && opts.OnReceipt != nil {
-			if e := opts.OnReceipt(ctx, step); e != nil {
-				err = joinFailures(err, newError("receipt_callback_failed", "script", c, e))
-			}
-		}
-		if err != nil {
-			return
-		}
-		if err = ctx.Err(); err != nil {
-			return
-		}
-		if opts.OnStep != nil {
-			if e := opts.OnStep(ctx, step); e != nil {
-				err = newError("step_callback_failed", "script", c, e)
-				return
-			}
-		}
-		if err = ctx.Err(); err != nil {
+		if err = x.run(ctx, original, opts, &result); err != nil {
 			return
 		}
 	}
 	return
 }
+
+// ensurePrivilege enters the privileged mode once per session, answering
+// the privilege prompt with the enable password (or the login password).
+func (d *Device) ensurePrivilege(ctx context.Context) error {
+	if d.terminal.PrivilegeCommand == "" || d.privileged.Load() {
+		return nil
+	}
+	secret := d.config.EnablePassword
+	if secret == "" {
+		secret = d.config.Password
+	}
+	ac, cancel := context.WithTimeout(ctx, d.config.LoginTimeout)
+	defer cancel()
+	if err := d.sendLine(ac, d.terminal.PrivilegeCommand+d.config.LineEnding, false); err != nil {
+		return err
+	}
+	s, err := d.readResponse(ac, Command{}, d.terminal.PrivilegePrompt, d.loginInteractions(secret), true, false)
+	if err != nil {
+		return err
+	}
+	d.setPrompt(s.Response())
+	d.privileged.Store(true)
+	return nil
+}
+
+// run executes one script command: the driver may rewrite or skip it, then
+// the observer and configuration strategy check the step, and the receipt
+// and step callbacks see it. Completed steps are kept in result.
+func (x *execution) run(ctx context.Context, original Command, opts ExecuteOptions, result *Result) error {
+	d := x.device
+	c := original
+	if d.preparer != nil {
+		var skip bool
+		err := x.hook(ctx, func(ex Executor) error { var e error; c, skip, e = d.preparer.PrepareCommand(ctx, c, ex); return e })
+		if err != nil {
+			return newError("prepare_failed", "script", original, err)
+		}
+		if skip {
+			return nil
+		}
+		if err = c.validate(); err != nil {
+			return err
+		}
+	}
+	step, err := x.command(ctx, c)
+	if step.Response().RawPrompt() != "" {
+		result.steps = append(result.steps, step)
+	}
+	if err == nil && d.observer != nil {
+		if e := x.hook(ctx, func(ex Executor) error { return d.observer.AfterCommand(ctx, c, step, ex) }); e != nil {
+			err = newError("after_command_failed", "script", c, e)
+		}
+	}
+	if err == nil && x.strategy != nil {
+		if e := x.hook(ctx, func(ex Executor) error { return x.strategy.Validate(ctx, c, step, ex) }); e != nil {
+			err = configurationFailure(c, e)
+		}
+	}
+	if step.Response().RawPrompt() != "" && opts.OnReceipt != nil {
+		if e := opts.OnReceipt(ctx, step); e != nil {
+			err = joinFailures(err, newError("receipt_callback_failed", "script", c, e))
+		}
+	}
+	if err != nil {
+		return err
+	}
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+	if opts.OnStep != nil {
+		if e := opts.OnStep(ctx, step); e != nil {
+			return newError("step_callback_failed", "script", c, e)
+		}
+	}
+	return ctx.Err()
+}
+
 func (x *execution) command(ctx context.Context, c Command) (step StepResult, err error) {
 	attempted := false
 	written := 0
@@ -236,16 +252,7 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 	if err = ctx.Err(); err != nil {
 		return step, err
 	}
-	secrets := d.baseSecrets()
-	if c.Sensitive {
-		secrets = append(secrets, c.Text)
-	}
-	private := c.Sensitive || c.OutputSensitive
-	for _, rules := range [][]Interaction{c.Interactions, d.terminal.Interactions} {
-		for _, rule := range rules {
-			private = private || rule.Sensitive
-		}
-	}
+	secrets, private := d.commandPrivacy(c)
 	restore, e := d.log.push(secrets, private)
 	if e != nil {
 		return step, newError("log_error", "logging", c, e)
@@ -272,33 +279,12 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 	if x.limit > 0 && x.bytes >= x.limit {
 		return step, newError("script_output_limit_exceeded", "script", c, ErrScriptLimit)
 	}
-	timeout := d.config.CommandTimeout
-	if c.Timeout != nil {
-		timeout = *c.Timeout
-	}
-	if c.Poll {
-		timeout = 0
-	}
-	cc := ctx
-	cancel := func() {}
-	if timeout > 0 {
-		cc, cancel = context.WithTimeout(ctx, timeout)
-	}
+	cc, cancel := d.commandContext(ctx, c)
 	defer cancel()
 	started := time.Now()
-	prompt := c.Prompt
-	if prompt.IsZero() {
-		prompt = d.terminal.CommandPrompt
-	}
-	if x.strategy != nil && c.Prompt.IsZero() {
-		var e error
-		prompt, e = x.strategy.MatchPrompt(c.Text, d.RawPrompt())
-		if e != nil {
-			return step, e
-		}
-		if e = prompt.ValidateText(); e != nil {
-			return step, ErrIncomplete
-		}
+	prompt, e := x.prompt(c)
+	if e != nil {
+		return step, e
 	}
 	attempted = true
 	if err = d.sendLine(cc, c.Text+d.config.LineEnding, c.Poll); err != nil {
@@ -316,6 +302,64 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 	if err != nil {
 		return StepResult{}, err
 	}
+	return x.verify(cc, c, step, response)
+}
+
+// commandContext applies the command timeout, with polling disabling relative timing.
+func (d *Device) commandContext(ctx context.Context, c Command) (context.Context, context.CancelFunc) {
+	timeout := d.config.CommandTimeout
+	if c.Timeout != nil {
+		timeout = *c.Timeout
+	}
+	if c.Poll {
+		timeout = 0
+	}
+	if timeout > 0 {
+		return context.WithTimeout(ctx, timeout)
+	}
+	return ctx, func() {}
+}
+
+// commandPrivacy returns the secrets to mask while c runs, and whether its
+// output is private.
+func (d *Device) commandPrivacy(c Command) (secrets []string, private bool) {
+	secrets = d.baseSecrets()
+	if c.Sensitive {
+		secrets = append(secrets, c.Text)
+	}
+	private = c.Sensitive || c.OutputSensitive
+	for _, rules := range [][]Interaction{c.Interactions, d.terminal.Interactions} {
+		for _, rule := range rules {
+			private = private || rule.Sensitive
+		}
+	}
+	return secrets, private
+}
+
+// prompt returns the prompt that ends c's response: the command's own, the
+// configuration strategy's, or the terminal's command prompt.
+func (x *execution) prompt(c Command) (expect.Pattern, error) {
+	d := x.device
+	prompt := c.Prompt
+	if prompt.IsZero() {
+		prompt = d.terminal.CommandPrompt
+	}
+	if x.strategy != nil && c.Prompt.IsZero() {
+		var e error
+		if prompt, e = x.strategy.MatchPrompt(c.Text, d.RawPrompt()); e != nil {
+			return expect.Pattern{}, e
+		}
+		if e = prompt.ValidateText(); e != nil {
+			return expect.Pattern{}, ErrIncomplete
+		}
+	}
+	return prompt, nil
+}
+
+// verify converts the response text, enforces the output limits and
+// rejects device error output; a rejection is kept for the caller.
+func (x *execution) verify(cc context.Context, c Command, step StepResult, response Response) (StepResult, error) {
+	d := x.device
 	var diagnostic string
 	var conversionErr error
 	switch x.textMode {
@@ -355,7 +399,7 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 		return step, newError("script_output_limit_exceeded", "script", c, ErrScriptLimit)
 	}
 	// The prompt handler records completion before a late cancellation is returned.
-	if err = cc.Err(); err != nil {
+	if err := cc.Err(); err != nil {
 		return step, err
 	}
 	return step, nil
@@ -374,175 +418,215 @@ func (d *Device) readResponse(ctx context.Context, c Command, prompt expect.Patt
 	if prompt.IsZero() {
 		return step, ErrInvalid
 	}
-	var raw, body responseCollector
-	var rawPrompt string
-	separate := false
+	r := &responseRead{device: d, command: c, login: login, poll: poll}
 	defer func() {
 		step.command = c.clone()
-		wire := raw.String()
+		wire := r.raw.String()
 		output := wire
-		if separate {
-			output = body.String()
+		if r.separate {
+			output = r.body.String()
 		}
-		step.response = Response{data: &responseData{raw: wire, rawPrompt: rawPrompt, output: output,
+		step.response = Response{data: &responseData{raw: wire, rawPrompt: r.rawPrompt, output: output,
 			outputErr: ErrIncomplete, renderErr: ErrIncomplete, promptErr: ErrIncomplete}}
 	}()
-	completed := false
-	appendSegment := func(r expect.Result, capture bool) error {
-		if !capture && !separate {
-			// Most responses never remove a pager marker: share raw until then.
-			body = raw.clone()
-			separate = true
-		}
-		raw.WriteString(r.Before)
-		raw.WriteString(r.Match)
-		if separate {
-			body.WriteString(r.Before)
-		}
-		if capture {
-			if separate {
-				body.WriteString(r.Match)
-			}
-		} else {
-			// Regex boundaries consume line delimiters that belong to the response; restore them.
-			for _, b := range r.Match {
-				if b == '\r' || b == '\n' {
-					body.WriteRune(b)
-				}
-			}
-		}
-		if int64(raw.Len()) > d.config.MaxOutputBytes {
-			return ErrOutputLimit
-		}
-		return nil
-	}
-	var cases []expect.Case
-	add := func(p expect.Pattern, h expect.Handler) {
-		pattern := p
-		cases = append(cases, expect.Case{Pattern: pattern, Handler: h})
-	}
 	if login {
-		for _, failure := range loginFailures {
-			add(failure.pattern, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
-				return expect.Return, failure.cause
-			})
-		}
-		add(loginAuthError, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
-			return expect.Return, ErrAuthentication
-		})
-		for _, r := range d.terminal.AuthenticationErrors {
-			p, _ := expect.FromRegexp(r)
-			add(p, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
-				return expect.Return, ErrAuthentication
-			})
-		}
+		r.addLoginFailures()
 	}
 	counts := make([]int, len(replies))
 	for i, reply := range replies {
 		if reply.Pattern.IsZero() {
 			return step, ErrInvalid
 		}
-		add(reply.Pattern, func(hctx context.Context, _ *expect.Session, r expect.Result) (expect.Action, error) {
-			if e := appendSegment(r, reply.Capture); e != nil {
-				return expect.Return, e
-			}
-			counts[i]++
-			if !reply.Unlimited && counts[i] > max(1, reply.Limit) {
-				if login {
-					return expect.Return, ErrAuthentication
-				}
-				return expect.Return, ErrResponseLimit
-			}
-			answer := reply.Reply
-			if reply.Respond != nil {
-				var e error
-				answer, e = reply.Respond(hctx, r.Match)
-				if e != nil {
-					return expect.Return, e
-				}
-			}
-			if reply.Sensitive {
-				if e := d.log.protectReply(strings.TrimSuffix(answer, "\n")); e != nil {
-					return expect.Return, e
-				}
-			}
-			if e := hctx.Err(); e != nil {
-				return expect.Return, e
-			}
-			if e := d.sendLine(hctx, answer, poll); e != nil {
-				return expect.Return, writeFailure(map[bool]string{true: "login", false: "command"}[login], c, e)
-			}
-			return expect.ContinueKeepTimer, nil
-		})
+		r.add(reply.Pattern, r.replyHandler(reply, &counts[i]))
 	}
-	add(prompt, func(_ context.Context, _ *expect.Session, r expect.Result) (expect.Action, error) {
-		if e := appendSegment(r, true); e != nil {
+	r.add(prompt, func(_ context.Context, _ *expect.Session, m expect.Result) (expect.Action, error) {
+		if e := r.appendSegment(m, true); e != nil {
 			return expect.Return, e
 		}
-		rawPrompt = r.Match
-		completed = true
+		r.rawPrompt = m.Match
+		r.completed = true
 		return expect.Return, nil
 	})
-	options := []expect.ExpectOption{expect.WithTimeout(0), expect.WithMatchOrder(expect.Declaration), expect.WithStreamingFallback(func(_ context.Context, _ *expect.Session, r expect.Result) (expect.Action, error) {
-		return expect.ContinueKeepTimer, appendSegment(r, true)
+	options := []expect.MatchOption{expect.WithTimeout(0), expect.WithMatchOrder(expect.Declaration), expect.WithStreamingFallback(func(_ context.Context, _ *expect.Session, m expect.Result) (expect.Action, error) {
+		return expect.ContinueKeepTimer, r.appendSegment(m, true)
 	})}
 	var final expect.Result
 	if poll {
-		final, err = d.session.Poll(ctx, cases, options...)
+		final, err = d.session.Poll(ctx, r.cases, options...)
 	} else {
-		final, err = d.session.Expect(ctx, cases, options...)
+		final, err = d.session.Expect(ctx, r.cases, options...)
 	}
-	if err != nil && !completed && final.CaseIndex < 0 && final.Before != "" {
-		// The unmatched prefix has not passed a handler or streaming fallback.
-		remaining := max(0, int(d.config.MaxOutputBytes)-raw.Len())
-		prefix := final.Before[:min(len(final.Before), remaining)]
-		if len(prefix) < len(final.Before) {
-			prefix = strings.Clone(prefix)
-		}
-		raw.WriteString(prefix)
-		if separate {
-			body.WriteString(prefix)
-		}
+	if err != nil && !r.completed && final.CaseIndex < 0 && final.Before != "" {
+		r.keepUnmatched(final.Before)
 	}
-	if err != nil && !completed {
-		phase := map[bool]string{true: "login", false: "command"}[login]
-		if _, ok := errors.AsType[*Error](err); ok {
-			return StepResult{}, err
-		}
-		code := "transport_error"
-		switch {
-		case errors.Is(err, errConnectionRefused):
-			code = "connection_refused"
-		case errors.Is(err, errNoRoute):
-			code = "no_route"
-		case errors.Is(err, errConnectTimeout):
-			code = "connection_timeout"
-		case errors.Is(err, ErrResponseLimit):
-			code = "response_limit_exceeded"
-		case errors.Is(err, ErrAuthentication):
-			code = "authentication_error"
-		case errors.Is(err, ErrOutputLimit), errors.Is(err, expect.ErrBufferLimit):
-			code = "output_limit_exceeded"
-		case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
-			code = "connection_closed"
-		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, expect.ErrTimeout):
-			switch {
-			case !c.Prompt.IsZero():
-				code = "prompt_error"
-			case login:
-				code = "login_timeout"
-			default:
-				code = "command_timeout"
-			}
-		case errors.Is(err, context.Canceled):
-			return StepResult{}, err
-		}
-		return StepResult{}, newError(code, phase, c, err)
+	if err != nil && !r.completed {
+		return StepResult{}, r.failure(err)
 	}
-	if completed {
+	if r.completed {
 		return step, nil
 	}
 	return step, err
+}
+
+// responseRead is the state of one readResponse call: the raw wire output,
+// the response body (separate once a pager marker is removed) and the cases.
+type responseRead struct {
+	device      *Device
+	command     Command
+	login, poll bool
+	raw, body   responseCollector
+	rawPrompt   string
+	separate    bool // body diverged from raw
+	completed   bool // the prompt matched
+	cases       []expect.Case
+}
+
+func (r *responseRead) add(p expect.Pattern, h expect.Handler) {
+	r.cases = append(r.cases, expect.Case{Pattern: p, Handler: h})
+}
+
+// appendSegment records one matched segment. capture keeps the match in the
+// body; otherwise (a removed pager marker) only its line delimiters are kept.
+func (r *responseRead) appendSegment(m expect.Result, capture bool) error {
+	if !capture && !r.separate {
+		// Most responses never remove a pager marker: share raw until then.
+		r.body = r.raw.clone()
+		r.separate = true
+	}
+	r.raw.WriteString(m.Before)
+	r.raw.WriteString(m.Match)
+	if r.separate {
+		r.body.WriteString(m.Before)
+	}
+	if capture {
+		if r.separate {
+			r.body.WriteString(m.Match)
+		}
+	} else {
+		// Regex boundaries consume line delimiters that belong to the response; restore them.
+		for _, b := range m.Match {
+			if b == '\r' || b == '\n' {
+				r.body.WriteRune(b)
+			}
+		}
+	}
+	if int64(r.raw.Len()) > r.device.config.MaxOutputBytes {
+		return ErrOutputLimit
+	}
+	return nil
+}
+
+// addLoginFailures adds the cases that end a login with its failure cause.
+func (r *responseRead) addLoginFailures() {
+	for _, failure := range loginFailures {
+		r.add(failure.pattern, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
+			return expect.Return, failure.cause
+		})
+	}
+	r.add(loginAuthError, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
+		return expect.Return, ErrAuthentication
+	})
+	for _, re := range r.device.terminal.AuthenticationErrors {
+		p, _ := expect.FromRegexp(re)
+		r.add(p, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
+			return expect.Return, ErrAuthentication
+		})
+	}
+}
+
+// replyHandler answers one interaction prompt, at most its limit times (a
+// login that loops is an authentication failure). Sensitive answers are
+// masked in the log before they are sent.
+func (r *responseRead) replyHandler(reply Interaction, count *int) expect.Handler {
+	return func(hctx context.Context, _ *expect.Session, m expect.Result) (expect.Action, error) {
+		if e := r.appendSegment(m, reply.Capture); e != nil {
+			return expect.Return, e
+		}
+		*count++
+		if !reply.Unlimited && *count > max(1, reply.Limit) {
+			if r.login {
+				return expect.Return, ErrAuthentication
+			}
+			return expect.Return, ErrResponseLimit
+		}
+		answer := reply.Reply
+		if reply.Respond != nil {
+			var e error
+			if answer, e = reply.Respond(hctx, m.Match); e != nil {
+				return expect.Return, e
+			}
+		}
+		if reply.Sensitive {
+			if e := r.device.log.protectReply(strings.TrimSuffix(answer, "\n")); e != nil {
+				return expect.Return, e
+			}
+		}
+		if e := hctx.Err(); e != nil {
+			return expect.Return, e
+		}
+		if e := r.device.sendLine(hctx, answer, r.poll); e != nil {
+			return expect.Return, writeFailure(r.phase(), r.command, e)
+		}
+		return expect.ContinueKeepTimer, nil
+	}
+}
+
+func (r *responseRead) phase() string {
+	if r.login {
+		return "login"
+	}
+	return "command"
+}
+
+// keepUnmatched records the unmatched prefix that no handler or streaming
+// fallback has seen, within the output limit.
+func (r *responseRead) keepUnmatched(before string) {
+	remaining := max(0, int(r.device.config.MaxOutputBytes)-r.raw.Len())
+	prefix := before[:min(len(before), remaining)]
+	if len(prefix) < len(before) {
+		prefix = strings.Clone(prefix)
+	}
+	r.raw.WriteString(prefix)
+	if r.separate {
+		r.body.WriteString(prefix)
+	}
+}
+
+// failure classifies a read that ended before the prompt. A classified
+// *Error and cancellation pass through unchanged.
+func (r *responseRead) failure(err error) error {
+	if _, ok := errors.AsType[*Error](err); ok {
+		return err
+	}
+	code := "transport_error"
+	switch {
+	case errors.Is(err, errConnectionRefused):
+		code = "connection_refused"
+	case errors.Is(err, errNoRoute):
+		code = "no_route"
+	case errors.Is(err, errConnectTimeout):
+		code = "connection_timeout"
+	case errors.Is(err, ErrResponseLimit):
+		code = "response_limit_exceeded"
+	case errors.Is(err, ErrAuthentication):
+		code = "authentication_error"
+	case errors.Is(err, ErrOutputLimit), errors.Is(err, expect.ErrBufferLimit):
+		code = "output_limit_exceeded"
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		code = "connection_closed"
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, expect.ErrTimeout):
+		switch {
+		case !r.command.Prompt.IsZero():
+			code = "prompt_error"
+		case r.login:
+			code = "login_timeout"
+		default:
+			code = "command_timeout"
+		}
+	case errors.Is(err, context.Canceled):
+		return err
+	}
+	return newError(code, r.phase(), r.command, err)
 }
 
 func writeFailure(phase string, c Command, err error) error {

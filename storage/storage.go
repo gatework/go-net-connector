@@ -18,28 +18,39 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+// ErrBusy means another writer owns the destination lock.
 var ErrBusy = errors.New("storage: destination is busy")
+
+// ErrUnsafe means a path or file violates the storage safety contract.
 var ErrUnsafe = errors.New("storage: unsafe file")
+
+// ErrLimit means a bounded file operation exceeds its limit.
 var ErrLimit = errors.New("storage: file exceeds limit")
 
 // FileState records atomic replacement and confirmed directory durability.
 type FileState string
 
+// Atomic replacement states, from no commit to confirmed durability.
 const (
 	StateNotCommitted FileState = "not_committed"
 	StateCommitted    FileState = "committed"
 	StateDurable      FileState = "durable"
 )
 
+// Receipt records how far an atomic replacement progressed.
 type Receipt struct {
 	Path  string    `json:"path"`
 	State FileState `json:"state"`
 	Phase string    `json:"phase"`
 }
 
+// Committed reports whether the replacement became visible.
 func (r Receipt) Committed() bool { return r.State == "committed" || r.State == "durable" }
-func (r Receipt) Durable() bool   { return r.State == "durable" }
 
+// Durable reports whether the parent directory was synchronized.
+func (r Receipt) Durable() bool { return r.State == "durable" }
+
+// WriteError preserves the receipt when a replacement fails.
 type WriteError struct {
 	Receipt Receipt
 	Cause   error
@@ -100,6 +111,11 @@ func WriteStream(ctx context.Context, path string, produce func(io.Writer) error
 			}
 		}
 	}()
+	err = commitStream(ctx, f, temporary, destination, dir, produce, &r)
+	return
+}
+
+func commitStream(ctx context.Context, f *os.File, temporary, destination, dir string, produce func(io.Writer) error, r *Receipt) (err error) {
 	if err = f.Chmod(0600); err != nil {
 		return
 	}
@@ -145,8 +161,9 @@ func WriteStream(ctx context.Context, path string, produce func(io.Writer) error
 	return
 }
 
+// contextWriter makes one streamed copy observe cancellation.
 type contextWriter struct {
-	ctx context.Context
+	ctx context.Context //nolint:containedctx // an io.Writer adapter cannot take ctx per Write
 	w   io.Writer
 }
 
@@ -176,6 +193,8 @@ func (w *contextWriter) WriteString(text string) (int, error) {
 	}
 	return total, w.ctx.Err()
 }
+
+// Write atomically replaces a file with body and records its durability.
 func Write(ctx context.Context, path string, body []byte) (Receipt, error) {
 	return WriteStream(ctx, path, func(w io.Writer) error {
 		n, e := w.Write(body)
@@ -186,6 +205,7 @@ func Write(ctx context.Context, path string, body []byte) (Receipt, error) {
 	})
 }
 
+// Fingerprint identifies the contents and filesystem identity of a file.
 type Fingerprint struct {
 	SHA256 string
 	Mode   os.FileMode
@@ -242,12 +262,15 @@ func Inspect(ctx context.Context, path string, limit int64) (Fingerprint, error)
 	_, f, e := readFile(ctx, path, limit, false)
 	return f, e
 }
+
+// Read returns bounded regular-file contents and their fingerprint.
 func Read(ctx context.Context, path string, limit int64) ([]byte, Fingerprint, error) {
 	return readFile(ctx, path, limit, true)
 }
 
+// contextReader makes one bounded read observe cancellation.
 type contextReader struct {
-	ctx context.Context
+	ctx context.Context //nolint:containedctx // an io.Reader adapter cannot take ctx per Read
 	r   io.Reader
 }
 
@@ -257,17 +280,23 @@ func (r *contextReader) Read(p []byte) (int, error) {
 	}
 	return r.r.Read(p)
 }
+
+// SameEntry reports whether path still names the fingerprinted regular file.
 func SameEntry(path string, f Fingerprint) bool {
 	s, e := os.Lstat(path)
 	return e == nil && s.Mode().IsRegular() && f.Info != nil && os.SameFile(s, f.Info)
 }
 
+// Lock owns an exclusive destination lock until Close.
 type Lock struct {
 	file           *os.File
 	path, lockPath string
 }
 
+// Path returns the absolute destination protected by the lock.
 func (l *Lock) Path() string { return l.path }
+
+// Close releases the lock; repeated calls succeed.
 func (l *Lock) Close() error {
 	if l.file == nil {
 		return nil
@@ -276,6 +305,8 @@ func (l *Lock) Close() error {
 	l.file = nil
 	return f.Close()
 }
+
+// LockPath returns the normalized stable lock filename for a destination.
 func LockPath(path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", ErrUnsafe
@@ -292,6 +323,8 @@ func LockPath(path string) (string, error) {
 	sum := sha256.Sum256([]byte(name))
 	return filepath.Join(dir, fmt.Sprintf(".net-connector-%x.lock", sum)), nil
 }
+
+// Acquire waits up to timeout for an exclusive, validated destination lock.
 func Acquire(ctx context.Context, path string, timeout time.Duration) (*Lock, error) {
 	if timeout < 0 {
 		return nil, ErrUnsafe

@@ -120,18 +120,12 @@ func (o *Operation) Retire() error {
 	return o.retire()
 }
 
-// retire runs under the operation's lease, either in one admitted call or after
-// scope.end joins it. The first cleanup result survives every enclosing defer.
-func (o *Operation) retire() error {
-	if !o.retired.Swap(true) {
-		o.cleanupErr = joinCleanup(nil, o.device.closeOwnedResources())
-	}
-	return o.cleanupErr
-}
-
+// ExecuteCommand executes one command within this admitted operation scope.
 func (o *Operation) ExecuteCommand(ctx context.Context, c Command, opts ExecuteOptions) (Result, error) {
 	return o.ExecuteScript(ctx, Script{Commands: []Command{c}}, opts)
 }
+
+// ExecuteScript validates and executes a script without releasing the operation lease.
 func (o *Operation) ExecuteScript(ctx context.Context, s Script, opts ExecuteOptions) (Result, error) {
 	script, e := s.clone()
 	if e != nil {
@@ -150,6 +144,8 @@ func (o *Operation) ExecuteScript(ctx context.Context, s Script, opts ExecuteOpt
 	}
 	return o.device.execute(ctx, script, opts, nil)
 }
+
+// RunningConfig collects configuration within this operation scope.
 func (o *Operation) RunningConfig(ctx context.Context) (Result, error) {
 	ctx, leave, e := o.scope.enter(ctx)
 	if e != nil {
@@ -161,6 +157,8 @@ func (o *Operation) RunningConfig(ctx context.Context) (Result, error) {
 	}
 	return o.device.runningConfig(ctx)
 }
+
+// SaveConfig executes the save sequence and requires driver-confirmed persistence.
 func (o *Operation) SaveConfig(ctx context.Context, opts ExecuteOptions) (Result, error) {
 	if opts.PreserveSessionOnRejection {
 		return Result{}, ErrInvalid
@@ -176,7 +174,23 @@ func (o *Operation) SaveConfig(ctx context.Context, opts ExecuteOptions) (Result
 	return o.device.saveConfig(ctx, opts)
 }
 
-func (o *Operation) RawPrompt() string       { return o.device.RawPrompt() }
+// RawPrompt returns the current raw prompt without decoding or redaction.
+func (o *Operation) RawPrompt() string { return o.device.RawPrompt() }
+
+// Prompt returns the current verified prompt text or its conversion error.
 func (o *Operation) Prompt() (string, error) { return o.device.Prompt() }
-func (o *Operation) PlatformName() string    { return o.device.PlatformName() }
-func (o *Operation) Host() string            { return o.device.Host() }
+
+// PlatformName returns the admitted device terminal name.
+func (o *Operation) PlatformName() string { return o.device.PlatformName() }
+
+// Host returns the admitted device host.
+func (o *Operation) Host() string { return o.device.Host() }
+
+// retire runs under the operation's lease, either in one admitted call or after
+// scope.end joins it. The first cleanup result survives every enclosing defer.
+func (o *Operation) retire() error {
+	if !o.retired.Swap(true) {
+		o.cleanupErr = joinCleanup(nil, o.device.closeOwnedResources())
+	}
+	return o.cleanupErr
+}

@@ -11,6 +11,7 @@ import (
 	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
+// ErrEncoding reports invalid text or an unsupported output encoding.
 var ErrEncoding = errors.New("textcodec: invalid or unsupported output encoding")
 
 // SecretVariants protects both UTF-8 secrets and their possible wire encodings

@@ -52,6 +52,7 @@ func (f *fakeSwitch) lines(host string) []string {
 }
 
 func (f *fakeSwitch) opener(t *testing.T, opened *atomic.Int32) workflow.DeviceOpener {
+	t.Helper()
 	return func(_ context.Context, r fleet.Record, logger io.Writer, _ workflow.SessionObserver) (*connector.Device, error) {
 		opened.Add(1)
 		profile := connector.StaticDriver{

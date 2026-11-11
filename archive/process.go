@@ -24,7 +24,7 @@ func reapGroup(pid int, done chan error) error {
 		timer := time.NewTimer(duration)
 		defer timer.Stop()
 		select {
-		case <-done:
+		case <-done: //nolint:errcheck // only reaping matters; the exit status after a signal is not a result
 			reaped = true
 		case <-timer.C:
 		}
@@ -70,7 +70,7 @@ func CommandLauncher(executable string, arguments ...string) Launcher {
 }
 func commandLauncher(executable string, args []string, reap func(int, chan error) error) Launcher {
 	return func(ctx context.Context) (Channel, error) {
-		cmd := exec.CommandContext(ctx, executable, args...)
+		cmd := exec.CommandContext(ctx, executable, args...) //nolint:gosec // the executable is the configured tftp-archive helper path
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		cmd.WaitDelay = 750 * time.Millisecond
 		cmd.Cancel = func() error {
@@ -108,7 +108,7 @@ func commandLauncher(executable string, args []string, reap func(int, chan error
 		var mu sync.Mutex
 		closed := false
 		var closeErr error
-		close := func() error {
+		closeFn := func() error {
 			mu.Lock()
 			defer mu.Unlock()
 			if closed {
@@ -127,6 +127,6 @@ func commandLauncher(executable string, args []string, reap func(int, chan error
 			closed = reapErr == nil
 			return errors.Join(closeErr, reapErr)
 		}
-		return Channel{Input: input, Output: output, Close: close}, nil
+		return Channel{Input: input, Output: output, Close: closeFn}, nil
 	}
 }

@@ -41,7 +41,7 @@ func TestRemoteBackupRequiresDialectCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = RemoteBackup(t.Context(), vendors.NewBuiltinRegistry(), d, RemoteOptions{Server: "192.0.2.9", Path: "config.cfg", Username: "backup"}); err != ErrUnsupported {
+	if _, err = RemoteBackup(t.Context(), vendors.NewBuiltinRegistry(), d, RemoteOptions{Server: "192.0.2.9", Path: "config.cfg", Username: "backup"}); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("remote backup error = %v, want unsupported", err)
 	}
 }

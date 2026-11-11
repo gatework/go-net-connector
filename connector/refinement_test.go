@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/text/encoding/simplifiedchinese"
+
 	expect "github.com/gatework/go-expect"
 	"github.com/gatework/go-net-connector/internal/textcodec"
-	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 func TestHookAndReceiptErrorsBothSurvive(t *testing.T) {

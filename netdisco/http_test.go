@@ -50,7 +50,7 @@ func TestHTTPFallbackAndNoPartialResults(t *testing.T) {
 			json.NewEncoder(w).Encode([]map[string]string{{"ip": "192.0.2.1"}})
 			return
 		}
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		io.WriteString(w, `{"error":"Missing query"}`)
 	}))
 	defer s.Close()
@@ -119,7 +119,7 @@ func TestHTTPRejectsBlankIPWithoutPartialResult(t *testing.T) {
 		t.Run(fmt.Sprintf("fallback_%v", fallback), func(t *testing.T) {
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if fallback && r.URL.Query().Get("q") != "%" {
-					w.WriteHeader(400)
+					w.WriteHeader(http.StatusBadRequest)
 					io.WriteString(w, `{"error":"Missing query"}`)
 					return
 				}

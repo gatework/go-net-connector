@@ -8,6 +8,7 @@ import (
 // CleanupState distinguishes an unrequested cleanup from an uncertain delete.
 type CleanupState string
 
+// Archive cleanup outcomes.
 const (
 	CleanupNotRequested CleanupState = "not_requested"
 	CleanupUnconfirmed  CleanupState = "unconfirmed"
@@ -23,10 +24,15 @@ type Receipt struct {
 	Cleanup CleanupState    `json:"cleanup"`
 }
 
+// Verified reports whether server delivery was independently verified.
 func (r Receipt) Verified() bool { return r.Server != nil && r.Server.Verified }
+
+// Complete requires verified delivery, durable local storage and confirmed cleanup.
 func (r Receipt) Complete() bool {
 	return r.Verified() && r.Local.Durable() && r.Cleanup == CleanupComplete
 }
+
+// Clone returns a receipt with independent server proof storage.
 func (r Receipt) Clone() Receipt {
 	if r.Server != nil {
 		proof := *r.Server

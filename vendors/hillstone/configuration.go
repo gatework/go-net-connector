@@ -14,7 +14,7 @@ func (p configPolicy) Clean(step connector.StepResult, _, _ string) (string, err
 	if err != nil {
 		return "", err
 	}
-	return cleanOutput(string(output))
+	return cleanOutput(output)
 }
 
 func cleanOutput(output string) (string, error) {

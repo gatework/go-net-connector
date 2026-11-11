@@ -10,11 +10,14 @@ import (
 	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
+// PolicyOptions declares default and per-device transfer destinations and vendor options.
 type PolicyOptions struct {
 	Server, Root                        string
 	Servers, Roots                      map[string]string
 	SourceFiles, SourceInterfaces, VRFs map[string]any
 }
+
+// Target combines resolved transfer options and an independent verification root.
 type Target struct {
 	TFTPOptions
 	Root string
@@ -23,6 +26,8 @@ type vendorValue struct {
 	fallback string
 	hosts    map[string]string
 }
+
+// Policy owns validated destination and platform-specific option mappings.
 type Policy struct {
 	server                  string
 	servers, roots          map[string]string
@@ -78,11 +83,13 @@ func VerificationRoot(root string) (string, error) {
 	if e != nil {
 		return "", ErrInvalid
 	}
-	if real, e := filepath.EvalSymlinks(p); e == nil {
-		p = real
+	if resolved, e := filepath.EvalSymlinks(p); e == nil {
+		p = resolved
 	}
 	return p, nil
 }
+
+// NewPolicy validates and copies transfer policy values without device I/O.
 func NewPolicy(o PolicyOptions, registry dialect.Registry) (*Policy, error) {
 	if registry == nil {
 		return nil, ErrInvalid
@@ -109,52 +116,11 @@ func NewPolicy(o PolicyOptions, registry dialect.Registry) (*Policy, error) {
 			return nil, e
 		}
 	}
-	for host, server := range o.Servers {
-		h, e := exactAddress(host)
-		if e != nil {
-			return nil, e
-		}
-		s, e := serverName(server)
-		if e != nil {
-			return nil, e
-		}
-		if _, ok := p.servers[h]; ok {
-			return nil, ErrInvalid
-		}
-		p.servers[h] = s
+	if e = p.configureServers(o); e != nil {
+		return nil, e
 	}
-	for server, root := range o.Roots {
-		s, e := serverName(server)
-		if e != nil {
-			return nil, e
-		}
-		r, e := VerificationRoot(root)
-		if e != nil {
-			return nil, e
-		}
-		if _, ok := p.roots[s]; ok {
-			return nil, ErrInvalid
-		}
-		p.roots[s] = r
-	}
-	if o.Root != "" {
-		root, e := VerificationRoot(o.Root)
-		if e != nil {
-			return nil, e
-		}
-		if p.server != "" {
-			if r, ok := p.roots[p.server]; ok && r != root {
-				return nil, ErrInvalid
-			}
-			p.roots[p.server] = root
-		}
-	}
-	seen := map[string]bool{}
-	for _, root := range p.roots {
-		if seen[root] {
-			return nil, ErrInvalid
-		}
-		seen[root] = true
+	if e = p.configureRoots(o); e != nil {
+		return nil, e
 	}
 	p.files, e = vendorValues(o.SourceFiles, p.platforms, func(platform TFTPPolicy, v string) error {
 		if v == "" {
@@ -189,7 +155,6 @@ func vendorValues(values map[string]any, platforms map[string]TFTPPolicy, valida
 		if !ok {
 			return nil, ErrInvalid
 		}
-		value := vendorValue{hosts: map[string]string{}}
 		normalize := func(raw any) (string, error) {
 			if raw == nil {
 				return "", nil
@@ -200,48 +165,62 @@ func vendorValues(values map[string]any, platforms map[string]TFTPPolicy, valida
 			}
 			return s, validate(platform, s)
 		}
-		if m, ok := raw.(map[string]any); ok {
-			for k := range m {
-				if k != "default" && k != "hosts" {
-					return nil, ErrInvalid
-				}
-			}
-			var e error
-			value.fallback, e = normalize(m["default"])
-			if e != nil {
-				return nil, e
-			}
-			if raw, ok := m["hosts"]; ok {
-				hosts, ok := raw.(map[string]any)
-				if !ok {
-					return nil, ErrInvalid
-				}
-				for host, raw := range hosts {
-					h, e := exactAddress(host)
-					if e != nil {
-						return nil, e
-					}
-					if _, ok := value.hosts[h]; ok {
-						return nil, ErrInvalid
-					}
-					s, e := normalize(raw)
-					if e != nil {
-						return nil, e
-					}
-					value.hosts[h] = s
-				}
-			}
-		} else {
-			var e error
-			value.fallback, e = normalize(raw)
-			if e != nil {
-				return nil, e
-			}
+		value, err := decodeVendorValue(raw, normalize)
+		if err != nil {
+			return nil, err
 		}
 		out[vendor] = value
 	}
 	return out, nil
 }
+func decodeVendorValue(raw any, normalize func(any) (string, error)) (vendorValue, error) {
+	value := vendorValue{hosts: map[string]string{}}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		var err error
+		value.fallback, err = normalize(raw)
+		return value, err
+	}
+	for k := range m {
+		if k != "default" && k != "hosts" {
+			return value, ErrInvalid
+		}
+	}
+	var err error
+	value.fallback, err = normalize(m["default"])
+	if err != nil {
+		return value, err
+	}
+	if raw, ok := m["hosts"]; ok {
+		hosts, ok := raw.(map[string]any)
+		if !ok {
+			return value, ErrInvalid
+		}
+		if err := value.decodeHosts(hosts, normalize); err != nil {
+			return value, err
+		}
+	}
+	return value, nil
+}
+func (v *vendorValue) decodeHosts(hosts map[string]any, normalize func(any) (string, error)) error {
+	for host, raw := range hosts {
+		h, err := exactAddress(host)
+		if err != nil {
+			return err
+		}
+		if _, ok := v.hosts[h]; ok {
+			return ErrInvalid
+		}
+		s, err := normalize(raw)
+		if err != nil {
+			return err
+		}
+		v.hosts[h] = s
+	}
+	return nil
+}
+
+// For resolves a host and vendor to its transfer target.
 func (p *Policy) For(host, vendor string) (Target, error) {
 	h, e := exactAddress(host)
 	if e != nil {
@@ -271,4 +250,58 @@ func (p *Policy) For(host, vendor string) (Target, error) {
 		return Target{}, ErrInvalid
 	}
 	return Target{TFTPOptions: TFTPOptions{Server: server, SourceFile: get(p.files), SourceInterface: get(p.interfaces), VRF: vrf}, Root: root}, nil
+}
+
+func (p *Policy) configureServers(o PolicyOptions) error {
+	for host, server := range o.Servers {
+		h, e := exactAddress(host)
+		if e != nil {
+			return e
+		}
+		s, e := serverName(server)
+		if e != nil {
+			return e
+		}
+		if _, ok := p.servers[h]; ok {
+			return ErrInvalid
+		}
+		p.servers[h] = s
+	}
+	return nil
+}
+func (p *Policy) configureRoots(o PolicyOptions) error {
+	for server, root := range o.Roots {
+		s, e := serverName(server)
+		if e != nil {
+			return e
+		}
+		r, e := VerificationRoot(root)
+		if e != nil {
+			return e
+		}
+		if _, ok := p.roots[s]; ok {
+			return ErrInvalid
+		}
+		p.roots[s] = r
+	}
+	if o.Root != "" {
+		root, e := VerificationRoot(o.Root)
+		if e != nil {
+			return e
+		}
+		if p.server != "" {
+			if r, ok := p.roots[p.server]; ok && r != root {
+				return ErrInvalid
+			}
+			p.roots[p.server] = root
+		}
+	}
+	seen := map[string]bool{}
+	for _, root := range p.roots {
+		if seen[root] {
+			return ErrInvalid
+		}
+		seen[root] = true
+	}
+	return nil
 }

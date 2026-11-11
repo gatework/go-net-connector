@@ -7,22 +7,23 @@ import (
 	"io"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/internal/batchreport"
 	"github.com/gatework/go-net-connector/internal/buildinfo"
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/netdisco"
-	"github.com/spf13/cobra"
 )
 
-type commandExit int
+type exitError int
 
-func (e commandExit) Error() string { return "命令未完成" }
+func (e exitError) Error() string { return "命令未完成" }
 
-type commandUsage struct{ message string }
+type usageError struct{ message string }
 
-func (e *commandUsage) Error() string { return e.message }
-func usageError(message string) error { return &commandUsage{message} }
+func (e *usageError) Error() string      { return e.message }
+func newUsageError(message string) error { return &usageError{message} }
 
 func (r Runtime) runCommands(ctx context.Context) int {
 	var outputErr error
@@ -41,11 +42,11 @@ func (r Runtime) runCommands(ctx context.Context) int {
 	if err == nil {
 		return 0
 	}
-	if exit, ok := errors.AsType[commandExit](err); ok {
+	if exit, ok := errors.AsType[exitError](err); ok {
 		return int(exit)
 	}
 	message := "命令或参数无效，请使用 netman help 查看用法"
-	if bad, ok := errors.AsType[*commandUsage](err); ok {
+	if bad, ok := errors.AsType[*usageError](err); ok {
 		message = bad.message
 	}
 	fmt.Fprintln(r.Error, "netman："+message)
@@ -61,7 +62,7 @@ func (r Runtime) commandTree(ctx context.Context, outputErr *error) *cobra.Comma
 	root.Flags().BoolP("version", "v", false, "显示版本和源码修订号")
 	root.SetVersionTemplate("netman {{.Version}}\n")
 	root.SetFlagErrorFunc(func(c *cobra.Command, _ error) error {
-		return usageError("选项无效或缺少参数，请使用 " + c.CommandPath() + " --help 查看用法")
+		return newUsageError("选项无效或缺少参数，请使用 " + c.CommandPath() + " --help 查看用法")
 	})
 	root.SetHelpFunc(func(c *cobra.Command, _ []string) {
 		if err := renderChineseHelp(c, c.OutOrStdout()); err != nil && *outputErr == nil {
@@ -74,19 +75,39 @@ func (r Runtime) commandTree(ctx context.Context, outputErr *error) *cobra.Comma
 	help := &cobra.Command{Use: "help [命令路径]", Short: "显示指定命令的中文帮助", Long: "按命令层级查询帮助，不读取配置文件或凭据。", Example: "  netman help backup run", RunE: func(c *cobra.Command, args []string) error {
 		target, remaining, err := root.Find(args)
 		if err != nil || len(remaining) > 0 {
-			return usageError("未找到指定命令，请使用 netman --help 查看子命令")
+			return newUsageError("未找到指定命令，请使用 netman --help 查看子命令")
 		}
 		return renderChineseHelp(target, c.OutOrStdout())
 	}}
 	root.SetHelpCommand(help)
-	leaf := func(parent *cobra.Command, name, short, mode, action string, bind func(*cobra.Command, *options)) *cobra.Command {
+	leaf := r.leafFactory(&configFile, &envFile)
+	addBackupCommands(root, leaf)
+	addInventoryCommands(root, leaf)
+	addTopologyCommands(root, leaf)
+	addDeployCommands(root, leaf)
+	addExecCommands(root, leaf)
+	addConfigCommands(root, leaf)
+	addCompletionCommands(root)
+	root.AddCommand(&cobra.Command{Use: "version", Short: "显示版本与源码修订号", Long: "显示构建身份，不读取配置或凭据。", Example: "  netman version", Args: noArguments, RunE: func(c *cobra.Command, _ []string) error {
+		_, err := fmt.Fprintln(c.OutOrStdout(), "netman", buildinfo.Identity)
+		return err
+	}})
+	customizeTree(root)
+	return root
+}
+
+// leafFactory returns the constructor of runnable commands. Each leaf owns
+// its options, prepares them from its flags and the global --config and
+// --env-file before running, and executes the selected request.
+func (r Runtime) leafFactory(configFile, envFile *string) func(parent *cobra.Command, name, short, mode, action string, bind func(*cobra.Command, *options)) *cobra.Command {
+	return func(parent *cobra.Command, name, short, mode, action string, bind func(*cobra.Command, *options)) *cobra.Command {
 		o := options{mode: mode, action: action, policy: "selected", layout: "batch", public: map[string]string{}, secrets: map[string]string{}}
 		var request commandRequest
 		c := &cobra.Command{Use: name, Short: short, Long: short, Args: noArguments, Example: "  netman " + parent.Name() + " " + strings.Fields(name)[0] + " --help"}
 		bind(c, &o)
 		c.PreRunE = func(c *cobra.Command, args []string) error {
-			o.config = configFile
-			o.envFile = envFile
+			o.config = *configFile
+			o.envFile = *envFile
 			o.flags = c.Flags()
 			if action == "export" || action == "diff" {
 				o.export = args[0]
@@ -100,53 +121,47 @@ func (r Runtime) commandTree(ctx context.Context, outputErr *error) *cobra.Comma
 		}
 		c.RunE = func(c *cobra.Command, _ []string) error {
 			if code := r.executeSelected(c.Context(), o, request); code != 0 {
-				return commandExit(code)
+				return exitError(code)
 			}
 			return nil
 		}
 		parent.AddCommand(c)
 		return c
 	}
-	addBackupCommands(root, leaf)
-	addInventoryCommands(root, leaf)
-	addTopologyCommands(root, leaf)
-	addDeployCommands(root, leaf)
-	addExecCommands(root, leaf)
-	addConfigCommands(root, leaf)
-	addCompletionCommands(root)
-	root.AddCommand(&cobra.Command{Use: "version", Short: "显示版本与源码修订号", Long: "显示构建身份，不读取配置或凭据。", Example: "  netman version", Args: noArguments, RunE: func(c *cobra.Command, _ []string) error {
-		_, err := fmt.Fprintln(c.OutOrStdout(), "netman", buildinfo.Identity)
-		return err
-	}})
-	var customize func(*cobra.Command)
-	customize = func(c *cobra.Command) {
-		c.InitDefaultHelpFlag()
-		if f := c.Flags().Lookup("help"); f != nil {
-			f.Usage = "显示当前命令的中文帮助"
-		}
-		for name, values := range flagCompletions() {
-			if c.Flags().Lookup(name) != nil {
-				_ = c.RegisterFlagCompletionFunc(name, func(_ *cobra.Command, _ []string, prefix string) ([]string, cobra.ShellCompDirective) {
-					var matches []string
-					for _, value := range values {
-						if strings.HasPrefix(value, prefix) {
-							matches = append(matches, value)
-						}
-					}
-					return matches, cobra.ShellCompDirectiveNoFileComp
-				})
-			}
-		}
-		for _, child := range c.Commands() {
-			customize(child)
+}
+
+// customizeTree localizes the help flag and registers value completions on
+// c and every descendant.
+func customizeTree(c *cobra.Command) {
+	c.InitDefaultHelpFlag()
+	if f := c.Flags().Lookup("help"); f != nil {
+		f.Usage = "显示当前命令的中文帮助"
+	}
+	for name, values := range flagCompletions() {
+		if c.Flags().Lookup(name) != nil {
+			_ = c.RegisterFlagCompletionFunc(name, completeFrom(values))
 		}
 	}
-	customize(root)
-	return root
+	for _, child := range c.Commands() {
+		customizeTree(child)
+	}
+}
+
+// completeFrom completes a flag value from a fixed list.
+func completeFrom(values []string) cobra.CompletionFunc {
+	return func(_ *cobra.Command, _ []string, prefix string) ([]string, cobra.ShellCompDirective) {
+		var matches []string
+		for _, value := range values {
+			if strings.HasPrefix(value, prefix) {
+				matches = append(matches, value)
+			}
+		}
+		return matches, cobra.ShellCompDirectiveNoFileComp
+	}
 }
 func noArguments(_ *cobra.Command, args []string) error {
 	if len(args) > 0 {
-		return usageError("存在未知子命令或多余的位置参数")
+		return newUsageError("存在未知子命令或多余的位置参数")
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -22,7 +23,7 @@ func TestPolicyDoesNotResolveCredentials(t *testing.T) {
 		t.Fatal(e, calls)
 	}
 	_, e = p.DeviceWithLogger(context.Background(), fleet.Record{Host: "192.0.2.1", Vendor: "h3c"}, nil)
-	if e != ErrCredentials || calls == 0 {
+	if !errors.Is(e, ErrCredentials) || calls == 0 {
 		t.Fatal(e, calls)
 	}
 }

@@ -21,7 +21,7 @@ func BenchmarkParseNeighbors1000(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(int64(len(output)))
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		if _, err := ParseNeighbors(neighborPolicyFor(b, "h3c"), output); err != nil {
 			b.Fatal(err)
 		}
@@ -50,7 +50,7 @@ func BenchmarkBuildPlan1000(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		if _, err := BuildPlan(vendors.NewBuiltinRegistry(), "192.0.2.1", "h3c", peers, descriptions, options); err != nil {
 			b.Fatal(err)
 		}

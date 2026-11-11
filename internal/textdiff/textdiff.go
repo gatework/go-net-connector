@@ -28,14 +28,14 @@ func Lines(text string) []string {
 // Diff returns the shortest edit script from a to b (Myers' O(ND) algorithm).
 func Diff(a, b []string) []Op {
 	n, m := len(a), len(b)
-	max := n + m
-	if max == 0 {
+	limit := n + m
+	if limit == 0 {
 		return nil
 	}
-	offset := max + 1
-	v := make([]int, 2*max+3)
+	offset := limit + 1
+	v := make([]int, 2*limit+3)
 	var trace [][]int
-	for d := 0; d <= max; d++ {
+	for d := 0; d <= limit; d++ {
 		snapshot := make([]int, len(v))
 		copy(snapshot, v)
 		trace = append(trace, snapshot)
@@ -126,22 +126,7 @@ func Unified(fromName, toName string, ops []Op, context int) string {
 			continue
 		}
 		start := max(0, i-context)
-		end := i
-		for end < len(ops) {
-			if ops[end].Kind != ' ' {
-				end++
-				continue
-			}
-			run := end
-			for run < len(ops) && ops[run].Kind == ' ' {
-				run++
-			}
-			if run == len(ops) || run-end > 2*context {
-				end = min(len(ops), end+context)
-				break
-			}
-			end = run
-		}
+		end := hunkEnd(ops, i, context)
 		aStart, bStart := aLine-(i-start), bLine-(i-start)
 		aCount, bCount := 0, 0
 		for _, op := range ops[start:end] {
@@ -169,4 +154,24 @@ func Unified(fromName, toName string, ops []Op, context int) string {
 		i = end
 	}
 	return b.String()
+}
+
+func hunkEnd(ops []Op, start, context int) int {
+	end := start
+	for end < len(ops) {
+		if ops[end].Kind != ' ' {
+			end++
+			continue
+		}
+		run := end
+		for run < len(ops) && ops[run].Kind == ' ' {
+			run++
+		}
+		if run == len(ops) || run-end > 2*context {
+			end = min(len(ops), end+context)
+			break
+		}
+		end = run
+	}
+	return end
 }
