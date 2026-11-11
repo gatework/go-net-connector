@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/netip"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -46,6 +46,8 @@ var labelChars = regexp.MustCompile(`[^a-z0-9]+`)
 func normalizeIdentityField(s string) string {
 	return strings.TrimSpace(labelChars.ReplaceAllString(strings.ToLower(s), " "))
 }
+// NewRules validates o against the connectors in registry and returns the
+// rules that map inventory devices to connectors.
 func NewRules(o RuleOptions, registry dialect.Registry) (*Rules, error) {
 	if registry == nil {
 		return nil, ErrInvalidPlan
@@ -70,51 +72,85 @@ func NewRules(o RuleOptions, registry dialect.Registry) (*Rules, error) {
 		platformResolver: platformResolver(registry),
 		registry:         registry,
 	}
-	valid := func(v string) bool { _, ok := registered[v]; return ok }
 	for _, list := range [][]string{o.Selection.IncludeVendors, o.Selection.ExcludeVendors} {
 		for _, v := range list {
-			if !valid(v) {
+			if !r.known(v) {
 				return nil, ErrInvalidPlan
 			}
 		}
 	}
-	for k, v := range o.VendorOverrides {
+	if e := r.addVendorOverrides(o.VendorOverrides); e != nil {
+		return nil, e
+	}
+	if e := r.addHostOverrides(o.HostOverrides); e != nil {
+		return nil, e
+	}
+	if e := r.addMappings(o.Mappings); e != nil {
+		return nil, e
+	}
+	return r, nil
+}
+
+// known reports whether connector is registered.
+func (r *Rules) known(connector string) bool {
+	_, ok := r.registered[connector]
+	return ok
+}
+
+// addVendorOverrides records connector overrides by normalized vendor
+// label, rejecting labels that normalize to the same key with different
+// connectors.
+func (r *Rules) addVendorOverrides(overrides map[string]string) error {
+	for k, v := range overrides {
 		k = normalizeIdentityField(k)
-		if k == "" || !valid(v) {
-			return nil, ErrInvalidPlan
+		if k == "" || !r.known(v) {
+			return ErrInvalidPlan
 		}
 		if old, ok := r.vendors[k]; ok && old != v {
-			return nil, ErrInvalidPlan
+			return ErrInvalidPlan
 		}
 		r.vendors[k] = v
 	}
-	for k, v := range o.HostOverrides {
+	return nil
+}
+
+// addHostOverrides records connector overrides by canonical address.
+func (r *Rules) addHostOverrides(overrides map[string]string) error {
+	for k, v := range overrides {
 		a, e := netip.ParseAddr(k)
-		if e != nil || a.Zone() != "" || !valid(v) {
-			return nil, ErrInvalidPlan
+		if e != nil || a.Zone() != "" || !r.known(v) {
+			return ErrInvalidPlan
 		}
 		k = a.String()
 		if old, ok := r.hosts[k]; ok && old != v {
-			return nil, ErrInvalidPlan
+			return ErrInvalidPlan
 		}
 		r.hosts[k] = v
 	}
-	for _, m := range o.Mappings {
+	return nil
+}
+
+// addMappings records identity mappings with normalized fields.
+func (r *Rules) addMappings(mappings []Mapping) error {
+	for _, m := range mappings {
 		m.Vendor = normalizeIdentityField(m.Vendor)
-		if m.Vendor == "" || !valid(m.Connector) {
-			return nil, ErrInvalidPlan
+		if m.Vendor == "" || !r.known(m.Connector) {
+			return ErrInvalidPlan
 		}
-		if m.OS != nil {
-			v := normalizeIdentityField(*m.OS)
-			m.OS = &v
-		}
-		if m.ModelPrefix != nil {
-			v := normalizeIdentityField(*m.ModelPrefix)
-			m.ModelPrefix = &v
-		}
+		m.OS = normalizedField(m.OS)
+		m.ModelPrefix = normalizedField(m.ModelPrefix)
 		r.mappings = append(r.mappings, m)
 	}
-	return r, nil
+	return nil
+}
+
+// normalizedField returns a normalized copy of an optional field.
+func normalizedField(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	n := normalizeIdentityField(*v)
+	return &n
 }
 
 func platformResolver(registry dialect.Registry) PlatformResolver {
@@ -232,117 +268,175 @@ type Plan struct {
 	transfers map[int]transfer.Target
 }
 
+// NewPlan classifies every inventory row and schedules the eligible ones as
+// tasks in inventory order, applying the per-vendor sample limit and, for
+// TFTP, the remote filename collision rule.
 func NewPlan(rows []inventory.Device, rules *Rules, o PlanOptions) (Plan, error) {
 	if rules == nil || (o.Mode != "backup" && o.Mode != "tftp") || o.LimitPerVendor < 0 || o.LimitPerVendor > 5 || (o.Mode == "tftp" && o.Target == nil) {
 		return Plan{}, ErrInvalidPlan
 	}
-	planMode := mode(o.Mode)
-	p := Plan{mode: planMode, transfers: map[int]transfer.Target{}}
+	b := &planBuilder{
+		rules:        rules,
+		options:      o,
+		plan:         Plan{mode: mode(o.Mode), transfers: map[int]transfer.Target{}},
+		capabilities: map[string]capability{},
+		groups:       map[string][]int{},
+	}
+	b.record(rows)
+	for i := range b.plan.entries {
+		if e := b.admit(i); e != nil {
+			return Plan{}, e
+		}
+	}
+	b.schedule(b.arbitrate())
+	return b.plan, nil
+}
+
+// capability is what a connector supports in the plan's mode.
+type capability struct {
+	backup, tftp, allowDestinationReuse bool
+}
+
+// planBuilder accumulates one plan.
+type planBuilder struct {
+	rules        *Rules
+	options      PlanOptions
+	plan         Plan
+	capabilities map[string]capability
+	groups       map[string][]int
+	groupOrder   []string
+}
+
+// record resolves every row and marks hosts that appear more than once.
+func (b *planBuilder) record(rows []inventory.Device) {
 	counts := map[string]int{}
 	for _, d := range rows {
-		r := rules.Record(d)
-		p.entries = append(p.entries, PlanEntry{Device: r, Status: string(planStatus(r.Issue))})
+		r := b.rules.Record(d)
+		b.plan.entries = append(b.plan.entries, PlanEntry{Device: r, Status: string(planStatus(r.Issue))})
 		if r.Host != "" {
 			counts[r.Host]++
 		}
 	}
-	type capability struct {
-		backup, tftp, allowDestinationReuse bool
-	}
-	capabilities := make(map[string]capability)
-	groups := map[string][]int{}
-	groupOrder := []string{}
-	for i := range p.entries {
-		entry := &p.entries[i]
-		r := entry.Device
-		if counts[r.Host] > 1 && r.Host != "" {
-			entry.Status = string(planStatusDuplicateHost)
-		}
-		if planStatus(entry.Status) != "" {
-			continue
-		}
-		supported, ok := capabilities[r.Vendor]
-		if !ok {
-			declaration, e := rules.registry.Lookup(r.Vendor)
-			if e != nil {
-				return Plan{}, ErrInvalidPlan
-			}
-			if planMode == modeBackup {
-				profile := declaration.Terminal()
-				supported.backup = len(profile.ConfigCommands) > 0
-			} else {
-				tftpPolicy, hasTransfer := declaration.(transfer.TFTPPolicy)
-				supported.tftp = hasTransfer
-				supported.allowDestinationReuse = hasTransfer && tftpPolicy.AllowsConcurrentDestinationReuse()
-			}
-			capabilities[r.Vendor] = supported
-		}
-		if (planMode == modeBackup && !supported.backup) || (planMode == modeTFTP && !supported.tftp) {
-			entry.Status = string(planStatusUnsupportedOperation)
-			continue
-		}
-		if planMode == modeTFTP {
-			target, e := o.Target(r)
-			if e != nil {
-				return Plan{}, e
-			}
-			if target.Server == "" || target.Path == "" {
-				return Plan{}, ErrInvalidPlan
-			}
-			p.transfers[i] = target
-		}
-		if _, exists := groups[r.Vendor]; !exists {
-			groupOrder = append(groupOrder, r.Vendor)
-		}
-		groups[r.Vendor] = append(groups[r.Vendor], i)
-	}
-	// Arbitration uses sampling order; tasks and outcomes retain inventory order.
-	arbitration := []int{}
-	if o.LimitPerVendor > 0 {
-		for _, vendor := range groupOrder {
-			indices := groups[vendor]
-			sort.SliceStable(indices, func(i, j int) bool { return p.entries[indices[i]].Device.Host < p.entries[indices[j]].Device.Host })
-			for n, i := range indices {
-				if n >= o.LimitPerVendor {
-					p.entries[i].Status = string(planStatusSampleLimit)
-				} else {
-					arbitration = append(arbitration, i)
-				}
-			}
+	for i := range b.plan.entries {
+		if e := &b.plan.entries[i]; e.Device.Host != "" && counts[e.Device.Host] > 1 {
+			e.Status = string(planStatusDuplicateHost)
 		}
 	}
-	if o.LimitPerVendor == 0 {
-		for i, e := range p.entries {
+}
+
+// admit checks that entry i's connector supports the mode, resolves its
+// TFTP target and adds it to its vendor group.
+func (b *planBuilder) admit(i int) error {
+	entry := &b.plan.entries[i]
+	r := entry.Device
+	if planStatus(entry.Status) != "" {
+		return nil
+	}
+	supported, e := b.capability(r.Vendor)
+	if e != nil {
+		return e
+	}
+	tftp := b.plan.mode == modeTFTP
+	if !tftp && !supported.backup || tftp && !supported.tftp {
+		entry.Status = string(planStatusUnsupportedOperation)
+		return nil
+	}
+	if tftp {
+		target, e := b.options.Target(r)
+		if e != nil {
+			return e
+		}
+		if target.Server == "" || target.Path == "" {
+			return ErrInvalidPlan
+		}
+		b.plan.transfers[i] = target
+	}
+	if _, exists := b.groups[r.Vendor]; !exists {
+		b.groupOrder = append(b.groupOrder, r.Vendor)
+	}
+	b.groups[r.Vendor] = append(b.groups[r.Vendor], i)
+	return nil
+}
+
+// capability returns, and caches, what connector supports in the mode.
+func (b *planBuilder) capability(connector string) (capability, error) {
+	if c, ok := b.capabilities[connector]; ok {
+		return c, nil
+	}
+	declaration, e := b.rules.registry.Lookup(connector)
+	if e != nil {
+		return capability{}, ErrInvalidPlan
+	}
+	var c capability
+	if b.plan.mode == modeBackup {
+		c.backup = len(declaration.Terminal().ConfigCommands) > 0
+	} else {
+		policy, ok := declaration.(transfer.TFTPPolicy)
+		c.tftp = ok
+		c.allowDestinationReuse = ok && policy.AllowsConcurrentDestinationReuse()
+	}
+	b.capabilities[connector] = c
+	return c, nil
+}
+
+// arbitrate returns the admitted entries in sampling order: per vendor by
+// host up to the sample limit, or every admitted entry when unlimited.
+// Entries past the limit are marked.
+func (b *planBuilder) arbitrate() []int {
+	entries := b.plan.entries
+	var order []int
+	if b.options.LimitPerVendor == 0 {
+		for i, e := range entries {
 			if planStatus(e.Status) == "" {
-				arbitration = append(arbitration, i)
+				order = append(order, i)
+			}
+		}
+		return order
+	}
+	for _, vendor := range b.groupOrder {
+		indices := b.groups[vendor]
+		slices.SortStableFunc(indices, func(x, y int) int { return strings.Compare(entries[x].Device.Host, entries[y].Device.Host) })
+		for n, i := range indices {
+			if n >= b.options.LimitPerVendor {
+				entries[i].Status = string(planStatusSampleLimit)
+			} else {
+				order = append(order, i)
 			}
 		}
 	}
-	targets := map[[2]string]int{}
-	if planMode == modeTFTP {
-		for _, i := range arbitration {
-			target := p.transfers[i]
-			if _, exists := targets[[2]string{target.Server, target.Path}]; !exists {
-				targets[[2]string{target.Server, target.Path}] = i
+	return order
+}
+
+// schedule marks the remaining entries ready in inventory order. For TFTP
+// the first entry in sampling order owns each remote destination unless the
+// connector allows concurrent reuse.
+func (b *planBuilder) schedule(order []int) {
+	type destination struct{ server, path string }
+	owners := map[destination]int{}
+	if b.plan.mode == modeTFTP {
+		for _, i := range order {
+			t := b.plan.transfers[i]
+			if _, exists := owners[destination{t.Server, t.Path}]; !exists {
+				owners[destination{t.Server, t.Path}] = i
 			}
 		}
 	}
-	for i := range p.entries {
-		e := &p.entries[i]
+	for i := range b.plan.entries {
+		e := &b.plan.entries[i]
 		if planStatus(e.Status) != "" {
 			continue
 		}
-		target := p.transfers[i]
-		reuseDestination := o.AllowFixedNameReuse && capabilities[e.Device.Vendor].allowDestinationReuse
-		if planMode == modeTFTP && targets[[2]string{target.Server, target.Path}] != i && !reuseDestination {
+		target := b.plan.transfers[i]
+		reuse := b.options.AllowFixedNameReuse && b.capabilities[e.Device.Vendor].allowDestinationReuse
+		if b.plan.mode == modeTFTP && owners[destination{target.Server, target.Path}] != i && !reuse {
 			e.Status = string(planStatusRemoteFilenameCollision)
 			continue
 		}
 		e.Status = string(planStatusReady)
-		p.tasks = append(p.tasks, Task{Index: i, Device: e.Device, Target: target})
+		b.plan.tasks = append(b.plan.tasks, Task{Index: i, Device: e.Device, Target: target})
 	}
-	return p, nil
 }
+
 func (p Plan) Entries() []PlanEntry { return append([]PlanEntry(nil), p.entries...) }
 
 // ErrMissingCredentials reports a device with no configured login credentials.
