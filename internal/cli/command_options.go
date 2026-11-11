@@ -67,7 +67,7 @@ func validateCombinations(f *pflag.FlagSet, o *options) error {
 	if o.action == "export" && o.json && o.output == "" {
 		return newUsageError("--json 需与 --output 同时使用；直接导出正文时不附加元数据")
 	}
-	if o.nonInteractive && o.interactive || o.all && o.sample != 0 || o.sample < 0 || o.sample > 5 || f.Changed("sample") && o.sample == 0 || o.parallel < 0 || o.parallel > 500 || f.Changed("parallel") && o.parallel == 0 || o.limit < 0 || f.Changed("limit") && o.limit == 0 {
+	if !boundsValid(f, o) {
 		return newUsageError("抽样、并发、数量上限或交互选项无效")
 	}
 	if !batchreport.Layout(o.layout).Valid() {
@@ -79,9 +79,7 @@ func validateCombinations(f *pflag.FlagSet, o *options) error {
 	if e := validateHosts(f); e != nil {
 		return e
 	}
-	askDevice, _ := f.GetBool("ask-password")
-	askInventory, _ := f.GetBool("ask-netdisco-password")
-	if o.stdin && (askDevice || askInventory) || askDevice && f.Changed("password") || askInventory && f.Changed("netdisco-password") || o.nonInteractive && (askDevice || askInventory) {
+	if !credentialInputValid(f, o) {
 		return newUsageError("凭据输入方式互斥或当前模式禁止交互")
 	}
 	if o.refresh && f.Changed("cache-only") {
@@ -90,14 +88,53 @@ func validateCombinations(f *pflag.FlagSet, o *options) error {
 	if o.quiet && o.verbose {
 		return newUsageError("--quiet 与 --verbose 不能同时指定")
 	}
-	if f.Changed("cache-mode") {
-		cacheMode, _ := f.GetString("cache-mode")
-		only, _ := f.GetBool("cache-only")
-		if o.refresh && netdisco.CacheMode(cacheMode) != netdisco.CacheRefresh || only && netdisco.CacheMode(cacheMode) != netdisco.CacheOnly {
-			return newUsageError("清单缓存选项互相冲突")
-		}
+	if !cacheModeValid(f, o) {
+		return newUsageError("清单缓存选项互相冲突")
 	}
 	return nil
+}
+
+// boundsValid reports whether the interaction, sample, parallelism and
+// limit options are in range and not contradictory.
+func boundsValid(f *pflag.FlagSet, o *options) bool {
+	switch {
+	case o.nonInteractive && o.interactive, o.all && o.sample != 0:
+		return false
+	case o.sample < 0 || o.sample > 5 || f.Changed("sample") && o.sample == 0:
+		return false
+	case o.parallel < 0 || o.parallel > 500 || f.Changed("parallel") && o.parallel == 0:
+		return false
+	case o.limit < 0 || f.Changed("limit") && o.limit == 0:
+		return false
+	}
+	return true
+}
+
+// credentialInputValid reports whether at most one credential input method
+// is selected and prompting is allowed when requested.
+func credentialInputValid(f *pflag.FlagSet, o *options) bool {
+	askDevice, _ := f.GetBool("ask-password")
+	askInventory, _ := f.GetBool("ask-netdisco-password")
+	asks := askDevice || askInventory
+	switch {
+	case o.stdin && asks, o.nonInteractive && asks:
+		return false
+	case askDevice && f.Changed("password"), askInventory && f.Changed("netdisco-password"):
+		return false
+	}
+	return true
+}
+
+// cacheModeValid reports whether --cache-mode agrees with --refresh and
+// --cache-only.
+func cacheModeValid(f *pflag.FlagSet, o *options) bool {
+	if !f.Changed("cache-mode") {
+		return true
+	}
+	value, _ := f.GetString("cache-mode")
+	mode := netdisco.CacheMode(value)
+	only, _ := f.GetBool("cache-only")
+	return !(o.refresh && mode != netdisco.CacheRefresh || only && mode != netdisco.CacheOnly)
 }
 
 // validateHosts requires --host values to be exact addresses and forbids
