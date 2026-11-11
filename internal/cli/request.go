@@ -39,6 +39,17 @@ type commandRequest struct {
 	useCase useCase
 }
 
+// runKinds maps a mode/action pair to its pipeline request.
+var runKinds = map[string]requestKind{
+	"backup/plan": requestBackupPlan, "backup/run": requestBackupRun,
+	"tftp/plan": requestTFTPPlan, "tftp/run": requestTFTPRun,
+	"topology/plan": requestTopologyPlan, "topology/discover": requestTopologyDiscover, "topology/apply": requestTopologyApply,
+	"deploy/plan": requestDeployPlan, "deploy/run": requestDeployRun,
+	"remote/plan": requestRemotePlan, "remote/run": requestRemoteRun,
+	"exec/plan": requestExecPlan, "exec/run": requestExecRun,
+}
+
+// newCommandRequest maps the mode and action to a request kind and use case.
 func newCommandRequest(o options) (commandRequest, error) {
 	if o.mode != "backup" && o.mode != "tftp" && o.mode != "topology" && o.mode != "deploy" && o.mode != "exec" && o.mode != "remote" {
 		return commandRequest{}, newUsageError("用途无效，请查看 --for 选项")
@@ -64,34 +75,7 @@ func newCommandRequest(o options) (commandRequest, error) {
 		request.kind = requestInventory
 		request.topology = workflow.TopologyOptions{InventoryOnly: true, Limit: o.limit}
 	case "plan", "run", "discover", "apply":
-		switch o.mode + "/" + o.action {
-		case "backup/plan":
-			request.kind = requestBackupPlan
-		case "backup/run":
-			request.kind = requestBackupRun
-		case "tftp/plan":
-			request.kind = requestTFTPPlan
-		case "tftp/run":
-			request.kind = requestTFTPRun
-		case "topology/plan":
-			request.kind = requestTopologyPlan
-		case "topology/discover":
-			request.kind = requestTopologyDiscover
-		case "topology/apply":
-			request.kind = requestTopologyApply
-		case "deploy/plan":
-			request.kind = requestDeployPlan
-		case "deploy/run":
-			request.kind = requestDeployRun
-		case "remote/plan":
-			request.kind = requestRemotePlan
-		case "remote/run":
-			request.kind = requestRemoteRun
-		case "exec/plan":
-			request.kind = requestExecPlan
-		case "exec/run":
-			request.kind = requestExecRun
-		}
+		request.kind = runKinds[o.mode+"/"+o.action]
 		if o.mode == "topology" {
 			request.topology = workflow.TopologyOptions{Limit: o.limit}
 		}
