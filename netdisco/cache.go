@@ -93,6 +93,8 @@ func newCache(source Source, o cacheOptions, identity string) (*cache, error) {
 	}
 	return &cache{source, directory, identity, filepath.Join(directory, identity+".json"), filepath.Join(directory, identity+".lock"), ttl, lockTimeout, limits, now}, nil
 }
+// Fetch returns the inventory according to mode: from a fresh or stale
+// cache entry, or by refreshing from the source under the cache lock.
 func (c *cache) Fetch(ctx context.Context, mode CacheMode) (result CacheResult, err error) {
 	if !mode.Valid() {
 		return result, newInventoryError("invalid_cache_mode", nil)
@@ -103,17 +105,9 @@ func (c *cache) Fetch(ctx context.Context, mode CacheMode) (result CacheResult, 
 	if e := ctx.Err(); e != nil {
 		return result, e
 	}
-	if mode != CacheOnly {
-		if e := os.MkdirAll(c.directory, 0700); e != nil {
-			return result, e
-		}
-	}
-	directory, e := os.Lstat(c.directory)
-	if mode == CacheOnly && errors.Is(e, os.ErrNotExist) {
-		return result, newInventoryError("cache_unavailable", ErrCacheRefreshRequired)
-	}
-	if e != nil || !isPrivateCacheEntry(directory, true) {
-		return result, newInventoryError("cache_unavailable", nil)
+	directory, e := c.openDirectory(mode)
+	if e != nil {
+		return result, e
 	}
 	defer func() {
 		after, e := os.Lstat(c.directory)
@@ -125,23 +119,17 @@ func (c *cache) Fetch(ctx context.Context, mode CacheMode) (result CacheResult, 
 	if e != nil {
 		return result, e
 	}
-	fresh := func(entry *cacheEntry) bool {
-		return entry != nil && c.now().Sub(time.Unix(0, int64(entry.FetchedAt*1e9))) < c.ttl
-	}
-	deliver := func(entry *cacheEntry, status string) CacheResult {
-		return CacheResult{Rows: append([]inventory.Device{}, entry.Rows...), Status: status, FetchedAt: time.Unix(0, int64(entry.FetchedAt*1e9)).UTC()}
-	}
 	if mode == CacheOnly {
 		if previous == nil {
 			return result, newInventoryError("cache_unavailable", ErrCacheRefreshRequired)
 		}
 		status := CacheStatusStale
-		if fresh(previous) {
+		if c.fresh(previous) {
 			status = CacheStatusFresh
 		}
 		return deliver(previous, status), nil
 	}
-	if mode == CachePrefer && fresh(previous) {
+	if mode == CachePrefer && c.fresh(previous) {
 		return deliver(previous, CacheStatusFresh), nil
 	}
 	lock, e := storage.AcquireLockFile(ctx, c.lockPath, c.lockTimeout)
@@ -157,26 +145,51 @@ func (c *cache) Fetch(ctx context.Context, mode CacheMode) (result CacheResult, 
 	if e != nil {
 		return result, e
 	}
-	if mode == CachePrefer && fresh(previous) {
+	if mode == CachePrefer && c.fresh(previous) {
 		return deliver(previous, CacheStatusFresh), nil
 	}
+	return c.refresh(ctx, previous)
+}
+
+// openDirectory returns the cache directory's identity, requiring it to be
+// a private directory owned by the current user.
+func (c *cache) openDirectory(mode CacheMode) (os.FileInfo, error) {
+	if mode != CacheOnly {
+		if e := os.MkdirAll(c.directory, 0700); e != nil {
+			return nil, e
+		}
+	}
+	directory, e := os.Lstat(c.directory)
+	if mode == CacheOnly && errors.Is(e, os.ErrNotExist) {
+		return nil, newInventoryError("cache_unavailable", ErrCacheRefreshRequired)
+	}
+	if e != nil || !isPrivateCacheEntry(directory, true) {
+		return nil, newInventoryError("cache_unavailable", nil)
+	}
+	return directory, nil
+}
+
+// refresh fetches the inventory from the source and stores it, serving the
+// stale previous entry when the fetch fails. A failed store is reported in
+// the result, not as an error.
+func (c *cache) refresh(ctx context.Context, previous *cacheEntry) (CacheResult, error) {
 	rows, e := c.source.Devices(ctx)
 	if e == nil {
 		e = c.validateRows(rows)
 	}
 	if ctx.Err() != nil {
-		return result, ctx.Err()
+		return CacheResult{}, ctx.Err()
 	}
 	if e != nil {
 		if previous == nil {
-			return result, e
+			return CacheResult{}, e
 		}
-		result = deliver(previous, CacheStatusStale)
+		result := deliver(previous, CacheStatusStale)
 		result.RefreshErrorCode = errorCode(e)
 		return result, nil
 	}
 	entry := cacheEntry{Schema: 1, Identity: c.identity, FetchedAt: float64(c.now().UnixNano()) / 1e9, Rows: append([]inventory.Device{}, rows...)}
-	result = deliver(&entry, CacheStatusRefreshed)
+	result := deliver(&entry, CacheStatusRefreshed)
 	body, e := json.Marshal(entry)
 	if e == nil && int64(len(body)) > c.limits.MaxInventoryBytes {
 		e = newInventoryError("max_inventory_bytes", nil)
@@ -189,6 +202,17 @@ func (c *cache) Fetch(ctx context.Context, mode CacheMode) (result CacheResult, 
 	}
 	return result, nil
 }
+
+// fresh reports whether entry is younger than the cache TTL.
+func (c *cache) fresh(entry *cacheEntry) bool {
+	return entry != nil && c.now().Sub(time.Unix(0, int64(entry.FetchedAt*1e9))) < c.ttl
+}
+
+// deliver returns a result holding a copy of entry's rows.
+func deliver(entry *cacheEntry, status string) CacheResult {
+	return CacheResult{Rows: append([]inventory.Device{}, entry.Rows...), Status: status, FetchedAt: time.Unix(0, int64(entry.FetchedAt*1e9)).UTC()}
+}
+
 func isPrivateCacheEntry(info os.FileInfo, directory bool) bool {
 	if info == nil {
 		return false
