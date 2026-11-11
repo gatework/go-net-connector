@@ -48,25 +48,11 @@ func ReadBatchSaved(ctx context.Context, directory, host string) ([]byte, BatchA
 	if err != nil {
 		return nil, BatchArtifact{}, err
 	}
-	info, err := os.Lstat(directory)
-	if err != nil {
-		return nil, BatchArtifact{}, err
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return nil, BatchArtifact{}, ErrUnsafe
-	}
-	root, err := os.OpenRoot(directory)
+	root, err := openBatchRoot(directory)
 	if err != nil {
 		return nil, BatchArtifact{}, err
 	}
 	defer root.Close()
-	opened, err := root.Stat(".")
-	if err != nil {
-		return nil, BatchArtifact{}, err
-	}
-	if !os.SameFile(info, opened) {
-		return nil, BatchArtifact{}, ErrUnsafe
-	}
 	data, err := readBatchFile(ctx, root, "report.json", 128<<20)
 	if err != nil {
 		return nil, BatchArtifact{}, err
@@ -79,25 +65,7 @@ func ReadBatchSaved(ctx context.Context, directory, host string) ([]byte, BatchA
 	if err != nil {
 		return nil, BatchArtifact{}, err
 	}
-	var body []byte
-	if selected.Subdirectory == "tftp" {
-		// Anchor the intermediate directory too: NOFOLLOW on tftp/name alone
-		// would still follow an inward-pointing tftp directory symlink.
-		dir, openErr := root.OpenFile("tftp", os.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
-		if openErr != nil {
-			return nil, BatchArtifact{}, openErr
-		}
-		defer dir.Close()
-		fd, openErr := unix.Openat(int(dir.Fd()), name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
-		if openErr != nil {
-			return nil, BatchArtifact{}, openErr
-		}
-		file := os.NewFile(uintptr(fd), name)
-		defer file.Close()
-		body, err = readBatchContents(ctx, file, batchreport.MaxArtifactBytes)
-	} else {
-		body, err = readBatchFile(ctx, root, name, batchreport.MaxArtifactBytes)
-	}
+	body, err := readArtifactBody(ctx, root, selected.Subdirectory, name)
 	if err != nil {
 		return nil, BatchArtifact{}, err
 	}
@@ -109,6 +77,55 @@ func ReadBatchSaved(ctx context.Context, directory, host string) ([]byte, BatchA
 	return body, artifact, nil
 }
 
+// openBatchRoot opens directory as a root, refusing a symlink or a
+// directory replaced between the check and the open.
+func openBatchRoot(directory string) (*os.Root, error) {
+	info, err := os.Lstat(directory)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, ErrUnsafe
+	}
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		return nil, err
+	}
+	opened, err := root.Stat(".")
+	if err == nil && !os.SameFile(info, opened) {
+		err = ErrUnsafe
+	}
+	if err != nil {
+		root.Close()
+		return nil, err
+	}
+	return root, nil
+}
+
+// readArtifactBody reads the named artifact from the batch root or its
+// subdirectory without following symlinks.
+func readArtifactBody(ctx context.Context, root *os.Root, subdirectory, name string) ([]byte, error) {
+	if subdirectory != "tftp" {
+		return readBatchFile(ctx, root, name, batchreport.MaxArtifactBytes)
+	}
+	// Anchor the intermediate directory too: NOFOLLOW on tftp/name alone
+	// would still follow an inward-pointing tftp directory symlink.
+	dir, err := root.OpenFile("tftp", os.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer dir.Close()
+	fd, err := unix.Openat(int(dir.Fd()), name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	file := os.NewFile(uintptr(fd), name)
+	defer file.Close()
+	return readBatchContents(ctx, file, batchreport.MaxArtifactBytes)
+}
+
+// batchBasename returns the file name a stored artifact path refers to,
+// rejecting traversal and control characters.
 func batchBasename(path string) (string, error) {
 	if path == "" || strings.Contains(path, "\\") || strings.IndexFunc(path, unicode.IsControl) >= 0 {
 		return "", ErrBatchEvidence
