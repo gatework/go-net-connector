@@ -214,6 +214,9 @@ func (c *Client) channelWithin(ctx, admission context.Context, run func(*Protoco
 	})
 }
 
+// upload runs one archive transaction: the worker prepares the target,
+// upload delivers the file, and the worker archives, returns and finally
+// removes the staging copy.
 func (c *Client) upload(ctx, prepare context.Context, filename, archiveName string, upload func(context.Context, string) (transfer.Receipt, error)) (result Result, err error) {
 	result.Receipt.Cleanup = CleanupNotRequested
 	c.mu.Lock()
@@ -223,90 +226,139 @@ func (c *Client) upload(ctx, prepare context.Context, filename, archiveName stri
 		return result, stageFailure("prepare", ErrArchive)
 	}
 	err = c.channelWithin(ctx, prepare, func(p *Protocol) error {
-		budgets, e := c.timeouts.wire(prepare)
-		if e != nil {
-			return e
-		}
-		request := Request{Root: c.root, Filename: filename, ArchiveName: archiveName, Batch: c.batch, Timeouts: &budgets}
-		if e := p.Send(prepare, request); e != nil {
-			return stageFailure("prepare", e)
-		}
-		if _, e := p.Expect(prepare, "ready"); e != nil {
-			return stageFailure("prepare", e)
-		}
-		if e := prepare.Err(); e != nil {
-			return stageFailure("prepare", e)
-		}
-
-		uploadCtx, cancelUpload := context.WithTimeout(ctx, c.timeouts.Upload)
-		var primary error
-		result.Transfer, primary = upload(uploadCtx, filename)
-		primary = errors.Join(primary, uploadCtx.Err())
-		cancelUpload()
-		if primary != nil {
-			primary = stageFailure("upload", primary)
-		}
-		if !result.Transfer.Reported() || result.Transfer.Path != filename {
-			c.abort(ctx, p)
-			if primary != nil {
-				return primary
-			}
-			return stageFailure("upload", ErrArchive)
-		}
-
-		verifyCtx, cancelVerify := context.WithTimeout(ctx, c.timeouts.Verify)
-		defer cancelVerify()
-		if e := p.Send(verifyCtx, Request{Action: "verify"}); e != nil {
-			return errors.Join(primary, stageFailure("verify", e))
-		}
-		proof, e := p.Expect(verifyCtx, "archived")
-		if e != nil {
-			return errors.Join(primary, stageFailure("verify", e))
-		}
-		if proof.ArchivePath != filepath.Join(c.root, "archive", c.batch, archiveName) {
-			return errors.Join(primary, stageFailure("verify", ErrArchive))
-		}
-		result.Receipt.Server = &proof
-		destination := filepath.Join(c.directory, "tftp", archiveName)
-		called := false
-		received := proof
-		fileReceipt, persistErr := c.persist(verifyCtx, destination, func(w io.Writer) error {
-			called = true
-			var e error
-			received, e = p.Receive(verifyCtx, proof, w)
-			return e
-		})
-		result.Receipt.Local = fileReceipt
-		if !called {
-			var receiveErr error
-			received, receiveErr = p.Receive(verifyCtx, proof, io.Discard)
-			persistErr = errors.Join(persistErr, receiveErr)
-		}
-		result.Receipt.Server = &received
-		persistErr = errors.Join(persistErr, verifyCtx.Err())
-		if primary != nil || persistErr != nil || !result.Receipt.Verified() || !fileReceipt.Durable() {
-			c.abort(ctx, p)
-			if persistErr != nil {
-				return errors.Join(primary, stageFailure("verify", persistErr))
-			}
-			if primary != nil {
-				return primary
-			}
-			return stageFailure("verify", ErrArchive)
-		}
-		cleanupCtx, cancelCleanup := context.WithTimeout(ctx, c.timeouts.Cleanup)
-		defer cancelCleanup()
-		result.Receipt.Cleanup = CleanupUnconfirmed
-		if e = p.Send(cleanupCtx, Request{Action: "cleanup", SHA256: received.SHA256}); e != nil {
-			return stageFailure("cleanup", e)
-		}
-		if _, e = p.Expect(cleanupCtx, "complete"); e != nil {
-			return stageFailure("cleanup", e)
-		}
-		result.Receipt.Cleanup = CleanupComplete
-		return nil
+		t := &uploadTransaction{client: c, protocol: p, filename: filename, archiveName: archiveName, result: &result}
+		return t.run(ctx, prepare, upload)
 	})
 	return result, err
+}
+
+// uploadTransaction is the client side of one archive transaction.
+type uploadTransaction struct {
+	client      *Client
+	protocol    *Protocol
+	filename    string
+	archiveName string
+	result      *Result
+}
+
+// run drives the prepare, upload, verify and cleanup stages.
+func (t *uploadTransaction) run(ctx, prepare context.Context, upload func(context.Context, string) (transfer.Receipt, error)) error {
+	c, p := t.client, t.protocol
+	if e := t.prepare(prepare); e != nil {
+		return e
+	}
+	uploadCtx, cancelUpload := context.WithTimeout(ctx, c.timeouts.Upload)
+	var primary error
+	t.result.Transfer, primary = upload(uploadCtx, t.filename)
+	primary = errors.Join(primary, uploadCtx.Err())
+	cancelUpload()
+	if primary != nil {
+		primary = stageFailure("upload", primary)
+	}
+	if !t.result.Transfer.Reported() || t.result.Transfer.Path != t.filename {
+		c.abort(ctx, p)
+		if primary != nil {
+			return primary
+		}
+		return stageFailure("upload", ErrArchive)
+	}
+	verifyCtx, cancelVerify := context.WithTimeout(ctx, c.timeouts.Verify)
+	defer cancelVerify()
+	received, e := t.verify(verifyCtx, primary)
+	if e != nil {
+		return e
+	}
+	persistErr := errors.Join(t.receive(verifyCtx, received), verifyCtx.Err())
+	if primary != nil || persistErr != nil || !t.result.Receipt.Verified() || !t.result.Receipt.Local.Durable() {
+		c.abort(ctx, p)
+		if persistErr != nil {
+			return errors.Join(primary, stageFailure("verify", persistErr))
+		}
+		if primary != nil {
+			return primary
+		}
+		return stageFailure("verify", ErrArchive)
+	}
+	cleanupCtx, cancelCleanup := context.WithTimeout(ctx, c.timeouts.Cleanup)
+	defer cancelCleanup()
+	return t.cleanup(cleanupCtx)
+}
+
+// prepare asks the worker to lock and preserve the target and waits for
+// ready.
+func (t *uploadTransaction) prepare(ctx context.Context) error {
+	c, p := t.client, t.protocol
+	budgets, e := c.timeouts.wire(ctx)
+	if e != nil {
+		return e
+	}
+	request := Request{Root: c.root, Filename: t.filename, ArchiveName: t.archiveName, Batch: c.batch, Timeouts: &budgets}
+	if e := p.Send(ctx, request); e != nil {
+		return stageFailure("prepare", e)
+	}
+	if _, e := p.Expect(ctx, "ready"); e != nil {
+		return stageFailure("prepare", e)
+	}
+	if e := ctx.Err(); e != nil {
+		return stageFailure("prepare", e)
+	}
+	return nil
+}
+
+// verify asks the worker to archive the upload and checks the archive
+// path it reports. primary is the upload failure joined to any error.
+func (t *uploadTransaction) verify(ctx context.Context, primary error) (Proof, error) {
+	c, p := t.client, t.protocol
+	if e := p.Send(ctx, Request{Action: "verify"}); e != nil {
+		return Proof{}, errors.Join(primary, stageFailure("verify", e))
+	}
+	proof, e := p.Expect(ctx, "archived")
+	if e != nil {
+		return Proof{}, errors.Join(primary, stageFailure("verify", e))
+	}
+	if proof.ArchivePath != filepath.Join(c.root, "archive", c.batch, t.archiveName) {
+		return Proof{}, errors.Join(primary, stageFailure("verify", ErrArchive))
+	}
+	t.result.Receipt.Server = &proof
+	return proof, nil
+}
+
+// receive streams the archived copy into the local batch, draining it when
+// the local write never starts, and records both receipts.
+func (t *uploadTransaction) receive(ctx context.Context, proof Proof) error {
+	c, p := t.client, t.protocol
+	destination := filepath.Join(c.directory, "tftp", t.archiveName)
+	called := false
+	received := proof
+	fileReceipt, persistErr := c.persist(ctx, destination, func(w io.Writer) error {
+		called = true
+		var e error
+		received, e = p.Receive(ctx, proof, w)
+		return e
+	})
+	t.result.Receipt.Local = fileReceipt
+	if !called {
+		var receiveErr error
+		received, receiveErr = p.Receive(ctx, proof, io.Discard)
+		persistErr = errors.Join(persistErr, receiveErr)
+	}
+	t.result.Receipt.Server = &received
+	return persistErr
+}
+
+// cleanup confirms the delivered digest so the worker removes the staging
+// upload.
+func (t *uploadTransaction) cleanup(ctx context.Context) error {
+	p := t.protocol
+	t.result.Receipt.Cleanup = CleanupUnconfirmed
+	if e := p.Send(ctx, Request{Action: "cleanup", SHA256: t.result.Receipt.Server.SHA256}); e != nil {
+		return stageFailure("cleanup", e)
+	}
+	if _, e := p.Expect(ctx, "complete"); e != nil {
+		return stageFailure("cleanup", e)
+	}
+	t.result.Receipt.Cleanup = CleanupComplete
+	return nil
 }
 
 func (c *Client) abort(ctx context.Context, p *Protocol) {
