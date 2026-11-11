@@ -30,6 +30,12 @@ func (p Terminal) Validate() error {
 			return e
 		}
 	}
+	return p.validateLists()
+}
+
+// validateLists checks the error patterns, legacy crypto arguments and the
+// configuration and save commands.
+func (p Terminal) validateLists() error {
 	for _, list := range [][]*regexp.Regexp{p.AuthenticationErrors, p.CommandErrors} {
 		for _, r := range list {
 			if r == nil || r.MatchString("") {

@@ -64,57 +64,68 @@ func (d *Device) collectConfigWithMode(ctx context.Context, mode configTextMode)
 			err = d.retireFailure(err)
 		}
 	}()
-	result, err = func() (Result, error) {
-		commands := make([]Command, len(d.terminal.ConfigCommands))
-		for i, text := range d.terminal.ConfigCommands {
-			commands[i] = Command{Text: text, OutputSensitive: true}
-		}
-		var strategy ConfigStrategy = renderedConfig{}
-		custom := d.driver.NewConfigCollector()
-		if custom != nil {
-			strategy = custom
-		}
-		result, e := d.execute(ctx, Script{Commands: commands}, ExecuteOptions{textMode: mode}, strategy)
-		if e != nil {
-			return result, e
-		}
-		if len(result.steps) == 0 {
-			return result, newError("incomplete_configuration", "collect", Command{}, ErrIncomplete)
-		}
-		config, e := strategy.Finish(ctx, result)
-		if e != nil {
-			return result, configurationFailure(Command{}, e)
-		}
-		if strings.TrimSpace(config) == "" {
-			return result, ErrIncomplete
-		}
-		hasBody := custom != nil
-		for _, step := range result.steps[len(result.steps)-1:] {
-			body, e := step.Response().Rendered()
-			if e != nil {
-				return result, e
-			}
-			prompt, e := step.Response().Prompt()
-			if e != nil {
-				return result, e
-			}
-			body = strings.TrimSuffix(strings.TrimSpace(body), strings.TrimSpace(prompt))
-			body = strings.TrimSpace(body)
-			if after, ok := strings.CutPrefix(body, step.command.Text); ok {
-				body = strings.TrimSpace(after)
-			}
-			if body != "" {
-				hasBody = true
-			}
-		}
-		if !hasBody {
-			return result, newError("incomplete_configuration", "collect", Command{}, ErrIncomplete)
-		}
-		result.config = &config
-		return result, ctx.Err()
-	}()
+	result, err = d.collectWithStrategy(ctx, mode)
 	returned = true
 	return
+}
+
+// collectWithStrategy runs the configuration commands through the driver's
+// collector (or the rendered-output default) and requires a non-empty
+// configuration with a response body.
+func (d *Device) collectWithStrategy(ctx context.Context, mode configTextMode) (Result, error) {
+	commands := make([]Command, len(d.terminal.ConfigCommands))
+	for i, text := range d.terminal.ConfigCommands {
+		commands[i] = Command{Text: text, OutputSensitive: true}
+	}
+	var strategy ConfigStrategy = renderedConfig{}
+	custom := d.driver.NewConfigCollector()
+	if custom != nil {
+		strategy = custom
+	}
+	result, e := d.execute(ctx, Script{Commands: commands}, ExecuteOptions{textMode: mode}, strategy)
+	if e != nil {
+		return result, e
+	}
+	if len(result.steps) == 0 {
+		return result, newError("incomplete_configuration", "collect", Command{}, ErrIncomplete)
+	}
+	config, e := strategy.Finish(ctx, result)
+	if e != nil {
+		return result, configurationFailure(Command{}, e)
+	}
+	if strings.TrimSpace(config) == "" {
+		return result, ErrIncomplete
+	}
+	// The last response is checked even with a custom collector: an
+	// unreadable response is an error either way.
+	body, e := lastStepHasBody(result.steps)
+	if e != nil {
+		return result, e
+	}
+	if custom == nil && !body {
+		return result, newError("incomplete_configuration", "collect", Command{}, ErrIncomplete)
+	}
+	result.config = &config
+	return result, ctx.Err()
+}
+
+// lastStepHasBody reports whether the last step's rendered response holds
+// anything besides the echoed command and the prompt.
+func lastStepHasBody(steps []StepResult) (bool, error) {
+	step := steps[len(steps)-1]
+	body, e := step.Response().Rendered()
+	if e != nil {
+		return false, e
+	}
+	prompt, e := step.Response().Prompt()
+	if e != nil {
+		return false, e
+	}
+	body = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(body), strings.TrimSpace(prompt)))
+	if after, ok := strings.CutPrefix(body, step.command.Text); ok {
+		body = strings.TrimSpace(after)
+	}
+	return body != "", nil
 }
 
 // SaveConfig distinguishes command completion from profile-confirmed persistence.
