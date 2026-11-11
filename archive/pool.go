@@ -297,81 +297,105 @@ func (c *poolDoneContext) Err() error {
 }
 func (c *poolDoneContext) Value(any) any { return nil }
 
+// prepareRemote starts every SSH master and prepares its client with a
+// bounded set of workers, stopping all of them at the first failure.
 func (p *Pool) prepareRemote(ctx context.Context, observe func(PrepareProgress)) error {
 	workerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	t := &prepareTracker{observe: observe, total: len(p.clients), workers: p.preparationWorkers(), cancel: cancel}
 	var next atomic.Int64
-	var progressMu sync.Mutex
-	var completed, active int
-	workers := p.preparationWorkers()
-	report := func(stage PrepareStage, activeDelta, completedDelta int) {
-		progressMu.Lock()
-		active += activeDelta
-		completed += completedDelta
-		if observe != nil {
-			observe(PrepareProgress{Completed: completed, Total: len(p.clients), Active: active, Workers: workers, Stage: stage})
-		}
-		progressMu.Unlock()
-	}
-	var errorMu sync.Mutex
-	var firstErr error
-	recordError := func(err error) {
-		if err == nil {
-			return
-		}
-		errorMu.Lock()
-		if firstErr == nil {
-			firstErr = err
-			cancel()
-		}
-		errorMu.Unlock()
-	}
 	var wg sync.WaitGroup
-	wg.Add(workers)
-	for range workers {
-		go func() {
-			defer wg.Done()
-			for {
-				if workerCtx.Err() != nil {
-					return
-				}
+	for range t.workers {
+		wg.Go(func() {
+			for workerCtx.Err() == nil {
 				i := int(next.Add(1) - 1)
-				if i >= len(p.clients) {
+				if i >= len(p.clients) || !p.prepareOne(workerCtx, t, i) {
 					return
 				}
-				report(PrepareStageSSH, 1, 0)
-				if err := p.masters[i].prepare(workerCtx); err != nil {
-					recordError(err)
-					report(PrepareStageSSH, -1, 0)
-					return
-				}
-				report(PrepareStageProtocol, 0, 0)
-				if err := p.clients[i].Prepare(workerCtx); err != nil {
-					recordError(err)
-					report(PrepareStageProtocol, -1, 0)
-					return
-				}
-				report(PrepareStageProtocol, -1, 1)
 			}
-		}()
+		})
 	}
 	wg.Wait()
-	errorMu.Lock()
-	err := firstErr
-	errorMu.Unlock()
-	if err != nil {
+	if err := t.err(); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if observe != nil {
-		progressMu.Lock()
-		ready := PrepareProgress{Completed: completed, Total: len(p.clients), Workers: workers, Stage: PrepareStageReady}
-		progressMu.Unlock()
-		observe(ready)
-	}
+	t.ready()
 	return nil
+}
+
+// prepareOne starts master i and prepares client i, reporting each stage.
+// It reports false after a failure.
+func (p *Pool) prepareOne(ctx context.Context, t *prepareTracker, i int) bool {
+	t.report(PrepareStageSSH, 1, 0)
+	if err := p.masters[i].prepare(ctx); err != nil {
+		t.fail(err)
+		t.report(PrepareStageSSH, -1, 0)
+		return false
+	}
+	t.report(PrepareStageProtocol, 0, 0)
+	if err := p.clients[i].Prepare(ctx); err != nil {
+		t.fail(err)
+		t.report(PrepareStageProtocol, -1, 0)
+		return false
+	}
+	t.report(PrepareStageProtocol, -1, 1)
+	return true
+}
+
+// prepareTracker counts preparation progress across workers and keeps the
+// first failure.
+type prepareTracker struct {
+	observe   func(PrepareProgress)
+	total     int
+	workers   int
+	cancel    context.CancelFunc
+	mu        sync.Mutex
+	completed int
+	active    int
+	errorMu   sync.Mutex
+	first     error
+}
+
+// report adjusts the counts and notifies the observer.
+func (t *prepareTracker) report(stage PrepareStage, activeDelta, completedDelta int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.active += activeDelta
+	t.completed += completedDelta
+	if t.observe != nil {
+		t.observe(PrepareProgress{Completed: t.completed, Total: t.total, Active: t.active, Workers: t.workers, Stage: stage})
+	}
+}
+
+// fail records err if it is the first failure and cancels the workers.
+func (t *prepareTracker) fail(err error) {
+	t.errorMu.Lock()
+	defer t.errorMu.Unlock()
+	if t.first == nil {
+		t.first = err
+		t.cancel()
+	}
+}
+
+// err returns the first failure.
+func (t *prepareTracker) err() error {
+	t.errorMu.Lock()
+	defer t.errorMu.Unlock()
+	return t.first
+}
+
+// ready reports the final ready progress outside the lock.
+func (t *prepareTracker) ready() {
+	if t.observe == nil {
+		return
+	}
+	t.mu.Lock()
+	ready := PrepareProgress{Completed: t.completed, Total: t.total, Workers: t.workers, Stage: PrepareStageReady}
+	t.mu.Unlock()
+	t.observe(ready)
 }
 
 func (p *Pool) preparationWorkers() int {
