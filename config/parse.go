@@ -48,85 +48,8 @@ func parseYAML(data []byte, requireMapping bool) (map[string]any, error) {
 	if e := dec.Decode(&extra); !errors.Is(e, io.EOF) {
 		return nil, ErrInvalid
 	}
-	remaining := maxNodes
-	var parseNode func(*yaml.Node, int) (any, error)
-	parseNode = func(n *yaml.Node, depth int) (any, error) {
-		remaining--
-		if depth > maxDepth || remaining < 0 || n.Kind == yaml.AliasNode || n.Anchor != "" {
-			return nil, ErrInvalid
-		}
-		switch n.Kind {
-		case yaml.DocumentNode:
-			if len(n.Content) != 1 {
-				return nil, ErrInvalid
-			}
-			return parseNode(n.Content[0], depth+1)
-		case yaml.MappingNode:
-			if n.Tag != "!!map" {
-				return nil, ErrInvalid
-			}
-			m := map[string]any{}
-			for i := 0; i < len(n.Content); i += 2 {
-				k := n.Content[i]
-				remaining--
-				if remaining < 0 || k.Kind != yaml.ScalarNode || k.Tag != "!!str" || k.Anchor != "" {
-					return nil, ErrInvalid
-				}
-				if _, ok := m[k.Value]; ok {
-					return nil, ErrInvalid
-				}
-				v, e := parseNode(n.Content[i+1], depth+1)
-				if e != nil {
-					return nil, e
-				}
-				m[k.Value] = v
-			}
-			return m, nil
-		case yaml.SequenceNode:
-			if n.Tag != "!!seq" {
-				return nil, ErrInvalid
-			}
-			a := make([]any, 0, len(n.Content))
-			for _, c := range n.Content {
-				v, e := parseNode(c, depth+1)
-				if e != nil {
-					return nil, e
-				}
-				a = append(a, v)
-			}
-			return a, nil
-		case yaml.ScalarNode:
-			switch n.Tag {
-			case "!!str":
-				return n.Value, nil
-			case "!!null":
-				return nil, nil //nolint:nilnil // YAML null decodes to a nil value
-			case "!!bool":
-				var v bool
-				if n.Decode(&v) != nil {
-					return nil, ErrInvalid
-				}
-				return v, nil
-			case "!!int":
-				var v int64
-				if n.Decode(&v) != nil {
-					return nil, ErrInvalid
-				}
-				return int(v), nil
-			case "!!float":
-				var v float64
-				if n.Decode(&v) != nil || math.IsNaN(v) || math.IsInf(v, 0) {
-					return nil, ErrInvalid
-				}
-				return v, nil
-			}
-			return nil, ErrInvalid
-		case yaml.AliasNode: // rejected before the switch; aliases could expand without bound
-			return nil, ErrInvalid
-		}
-		return nil, ErrInvalid
-	}
-	v, e := parseNode(&root, 0)
+	y := &yamlTree{remaining: maxNodes}
+	v, e := y.node(&root, 0)
 	if e != nil {
 		return nil, e
 	}
@@ -373,73 +296,88 @@ func environmentSize(values map[string]string) (int, error) {
 }
 
 // copyPlain owns canonical maps and slices and rejects opaque mutable values.
+// copyPlain deep-copies a plain YAML/JSON value within the node, byte and
+// depth budgets, rejecting cycles, non-finite numbers and other types.
 func copyPlain(v any) (any, error) {
-	nodes, bytes := maxNodes, MaxBytes
-	active := map[uintptr]bool{}
-	var copyValue func(any, int) (any, error)
-	copyValue = func(v any, depth int) (any, error) {
-		nodes--
-		if depth > maxDepth || nodes < 0 {
-			return nil, ErrInvalid
-		}
-		switch x := v.(type) {
-		case map[string]any:
-			id := uintptr(reflect.ValueOf(x).UnsafePointer())
-			if active[id] || len(x) > nodes/2 {
-				return nil, ErrInvalid
-			}
-			active[id] = true
-			defer delete(active, id)
-			m := make(map[string]any, len(x))
-			for k, item := range x {
-				nodes--
-				if nodes < 0 || len(k) > bytes {
-					return nil, ErrInvalid
-				}
-				bytes -= len(k)
-				c, e := copyValue(item, depth+1)
-				if e != nil {
-					return nil, e
-				}
-				m[k] = c
-			}
-			return m, nil
-		case []any:
-			id := reflect.ValueOf(x).Pointer()
-			if len(x) > nodes || (len(x) > 0 && active[id]) {
-				return nil, ErrInvalid
-			}
-			if len(x) > 0 {
-				active[id] = true
-				defer delete(active, id)
-			}
-			a := make([]any, len(x))
-			for i, item := range x {
-				c, e := copyValue(item, depth+1)
-				if e != nil {
-					return nil, e
-				}
-				a[i] = c
-			}
-			return a, nil
-		case string:
-			if len(x) > bytes {
-				return nil, ErrInvalid
-			}
-			bytes -= len(x)
-			return x, nil
-		case nil, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-			return v, nil
-		case float64:
-			if math.IsNaN(x) || math.IsInf(x, 0) {
-				return nil, ErrInvalid
-			}
-			return x, nil
-		default:
-			return nil, ErrInvalid
-		}
+	c := &plainCopy{nodes: maxNodes, bytes: MaxBytes, active: map[uintptr]bool{}}
+	return c.value(v, 0)
+}
+
+// plainCopy is the budget state of one copyPlain call.
+type plainCopy struct {
+	nodes, bytes int
+	active       map[uintptr]bool // containers on the current path
+}
+
+func (c *plainCopy) value(v any, depth int) (any, error) {
+	c.nodes--
+	if depth > maxDepth || c.nodes < 0 {
+		return nil, ErrInvalid
 	}
-	return copyValue(v, 0)
+	switch x := v.(type) {
+	case map[string]any:
+		return c.mapping(x, depth)
+	case []any:
+		return c.list(x, depth)
+	case string:
+		if len(x) > c.bytes {
+			return nil, ErrInvalid
+		}
+		c.bytes -= len(x)
+		return x, nil
+	case nil, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return v, nil
+	case float64:
+		if math.IsNaN(x) || math.IsInf(x, 0) {
+			return nil, ErrInvalid
+		}
+		return x, nil
+	default:
+		return nil, ErrInvalid
+	}
+}
+
+func (c *plainCopy) mapping(x map[string]any, depth int) (any, error) {
+	id := uintptr(reflect.ValueOf(x).UnsafePointer())
+	if c.active[id] || len(x) > c.nodes/2 {
+		return nil, ErrInvalid
+	}
+	c.active[id] = true
+	defer delete(c.active, id)
+	m := make(map[string]any, len(x))
+	for k, item := range x {
+		c.nodes--
+		if c.nodes < 0 || len(k) > c.bytes {
+			return nil, ErrInvalid
+		}
+		c.bytes -= len(k)
+		v, e := c.value(item, depth+1)
+		if e != nil {
+			return nil, e
+		}
+		m[k] = v
+	}
+	return m, nil
+}
+
+func (c *plainCopy) list(x []any, depth int) (any, error) {
+	id := reflect.ValueOf(x).Pointer()
+	if len(x) > c.nodes || (len(x) > 0 && c.active[id]) {
+		return nil, ErrInvalid
+	}
+	if len(x) > 0 {
+		c.active[id] = true
+		defer delete(c.active, id)
+	}
+	a := make([]any, len(x))
+	for i, item := range x {
+		v, e := c.value(item, depth+1)
+		if e != nil {
+			return nil, e
+		}
+		a[i] = v
+	}
+	return a, nil
 }
 
 // cloneValue is only used after inputs and the complete snapshot passed copyPlain.
@@ -518,4 +456,102 @@ func decodeEnv(s string, kind FieldKind) (any, error) {
 	default:
 		return s, nil
 	}
+}
+
+// yamlTree converts a YAML node tree into plain values within the node and
+// depth budgets; anchors, aliases, custom tags and duplicate keys are rejected.
+type yamlTree struct {
+	remaining int // nodes still allowed
+}
+
+func (y *yamlTree) node(n *yaml.Node, depth int) (any, error) {
+	y.remaining--
+	if depth > maxDepth || y.remaining < 0 || n.Kind == yaml.AliasNode || n.Anchor != "" {
+		return nil, ErrInvalid
+	}
+	switch n.Kind {
+	case yaml.DocumentNode:
+		if len(n.Content) != 1 {
+			return nil, ErrInvalid
+		}
+		return y.node(n.Content[0], depth+1)
+	case yaml.MappingNode:
+		return y.mapping(n, depth)
+	case yaml.SequenceNode:
+		return y.sequence(n, depth)
+	case yaml.ScalarNode:
+		return scalar(n)
+	case yaml.AliasNode: // rejected above; aliases could expand without bound
+		return nil, ErrInvalid
+	}
+	return nil, ErrInvalid
+}
+
+func (y *yamlTree) mapping(n *yaml.Node, depth int) (any, error) {
+	if n.Tag != "!!map" {
+		return nil, ErrInvalid
+	}
+	m := map[string]any{}
+	for i := 0; i < len(n.Content); i += 2 {
+		k := n.Content[i]
+		y.remaining--
+		if y.remaining < 0 || k.Kind != yaml.ScalarNode || k.Tag != "!!str" || k.Anchor != "" {
+			return nil, ErrInvalid
+		}
+		if _, ok := m[k.Value]; ok {
+			return nil, ErrInvalid
+		}
+		v, e := y.node(n.Content[i+1], depth+1)
+		if e != nil {
+			return nil, e
+		}
+		m[k.Value] = v
+	}
+	return m, nil
+}
+
+func (y *yamlTree) sequence(n *yaml.Node, depth int) (any, error) {
+	if n.Tag != "!!seq" {
+		return nil, ErrInvalid
+	}
+	a := make([]any, 0, len(n.Content))
+	for _, c := range n.Content {
+		v, e := y.node(c, depth+1)
+		if e != nil {
+			return nil, e
+		}
+		a = append(a, v)
+	}
+	return a, nil
+}
+
+// scalar decodes a string, null, bool, int or finite float scalar.
+//
+//nolint:nilnil // YAML null decodes to a nil value
+func scalar(n *yaml.Node) (any, error) {
+	switch n.Tag {
+	case "!!str":
+		return n.Value, nil
+	case "!!null":
+		return nil, nil
+	case "!!bool":
+		var v bool
+		if n.Decode(&v) != nil {
+			return nil, ErrInvalid
+		}
+		return v, nil
+	case "!!int":
+		var v int64
+		if n.Decode(&v) != nil {
+			return nil, ErrInvalid
+		}
+		return int(v), nil
+	case "!!float":
+		var v float64
+		if n.Decode(&v) != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+			return nil, ErrInvalid
+		}
+		return v, nil
+	}
+	return nil, ErrInvalid
 }

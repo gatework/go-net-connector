@@ -502,9 +502,10 @@ func decodeJSON(s string) (any, error) {
 	}
 	return v, nil
 }
+// validateValues checks every section and field against the schema.
 func validateValues(values map[string]any) error {
 	for section, v := range values {
-		values, ok := v.(map[string]any)
+		fields, ok := v.(map[string]any)
 		if !ok {
 			return ErrInvalid
 		}
@@ -518,44 +519,14 @@ func validateValues(values map[string]any) error {
 		if !known {
 			return ErrInvalid
 		}
-		for key, v := range values {
+		for key, v := range fields {
 			f, ok := schema[section+"."+key]
 			if !ok {
 				return ErrInvalid
 			}
-			valid := false
-			switch f.Kind {
-			case KindString, KindOptionalString:
-				s, ok := v.(string)
-				valid = ok && (f.Kind == KindOptionalString || strings.TrimSpace(s) != "")
-				if section == "backup" && key == "success_policy" && !batchreport.SuccessPolicy(s).Valid() {
-					return &FieldError{Field: "backup.success_policy", Problem: "invalid"}
-				}
-			case KindInteger, KindOptionalInteger:
-				n, ok := integerValue(v)
-				valid = ok && (n > 0 || n == 0 && (section == "backup" && key == "limit_per_vendor" || section == "ssh" && key == "connect_retries")) || v == nil && f.Kind == KindOptionalInteger
-			case KindNumber:
-				n, ok := v.(float64)
-				if i, iok := integerValue(v); iok {
-					n = float64(i)
-					ok = true
-				}
-				valid = ok && n > 0 && !math.IsInf(n, 0) && !math.IsNaN(n)
-			case KindBoolean:
-				_, valid = v.(bool)
-			case KindList:
-				a, ok := v.([]any)
-				valid = ok
-				for _, item := range a {
-					s, ok := item.(string)
-					valid = valid && ok && strings.TrimSpace(s) != "" && !strings.Contains(s, ",")
-				}
-			case KindJSON, KindJSONArray:
-				if f.Kind == KindJSONArray || key == "device_rules" {
-					_, valid = v.([]any)
-				} else {
-					_, valid = v.(map[string]any)
-				}
+			valid, err := validField(section, key, f, v)
+			if err != nil {
+				return err
 			}
 			if !valid {
 				return ErrInvalid
@@ -563,6 +534,48 @@ func validateValues(values map[string]any) error {
 		}
 	}
 	return nil
+}
+
+// validField reports whether v is a valid value of field section.key; an
+// invalid success policy is a FieldError.
+func validField(section, key string, f Field, v any) (bool, error) {
+	switch f.Kind {
+	case KindString, KindOptionalString:
+		s, ok := v.(string)
+		if section == "backup" && key == "success_policy" && !batchreport.SuccessPolicy(s).Valid() {
+			return false, &FieldError{Field: "backup.success_policy", Problem: "invalid"}
+		}
+		return ok && (f.Kind == KindOptionalString || strings.TrimSpace(s) != ""), nil
+	case KindInteger, KindOptionalInteger:
+		n, ok := integerValue(v)
+		zeroAllowed := section == "backup" && key == "limit_per_vendor" || section == "ssh" && key == "connect_retries"
+		return ok && (n > 0 || n == 0 && zeroAllowed) || v == nil && f.Kind == KindOptionalInteger, nil
+	case KindNumber:
+		n, ok := v.(float64)
+		if i, iok := integerValue(v); iok {
+			n = float64(i)
+			ok = true
+		}
+		return ok && n > 0 && !math.IsInf(n, 0) && !math.IsNaN(n), nil
+	case KindBoolean:
+		_, ok := v.(bool)
+		return ok, nil
+	case KindList:
+		a, ok := v.([]any)
+		for _, item := range a {
+			s, isString := item.(string)
+			ok = ok && isString && strings.TrimSpace(s) != "" && !strings.Contains(s, ",")
+		}
+		return ok, nil
+	case KindJSON, KindJSONArray:
+		if f.Kind == KindJSONArray || key == "device_rules" {
+			_, ok := v.([]any)
+			return ok, nil
+		}
+		_, ok := v.(map[string]any)
+		return ok, nil
+	}
+	return false, nil
 }
 func recordFields(fields map[string]string, previous, current map[string]any, source, prefix string) {
 	for key, v := range current {
