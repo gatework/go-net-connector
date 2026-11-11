@@ -13,12 +13,15 @@ import (
 	"time"
 )
 
+// Proof records the worker-reported archive identity and delivery verification.
 type Proof struct {
 	Bytes       int64  `json:"bytes"`
 	SHA256      string `json:"sha256"`
 	ArchivePath string `json:"archive_path"`
 	Verified    bool   `json:"verified"`
 }
+
+// Protocol exchanges bounded archive control frames and payloads.
 type Protocol struct {
 	last   frame
 	input  io.Writer
@@ -34,6 +37,8 @@ var archiveHashPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 func NewProtocol(input io.Writer, output io.Reader) *Protocol {
 	return &Protocol{input: input, output: output, reader: bufio.NewReaderSize(output, ControlLimit+1)}
 }
+
+// Send writes one versioned request within the context deadline.
 func (p *Protocol) Send(ctx context.Context, request Request) error {
 	stop, e := p.bounded(ctx, false)
 	if e != nil {
@@ -50,6 +55,8 @@ func (p *Protocol) Send(ctx context.Context, request Request) error {
 	}
 	return ctx.Err()
 }
+
+// Expect reads the requested protocol phase or returns a classified failure.
 func (p *Protocol) Expect(ctx context.Context, phase string) (Proof, error) {
 	return p.readPhase(ctx, phase)
 }
@@ -167,9 +174,13 @@ type Error struct {
 	cause error
 }
 
-func (e *Error) Error() string        { return "archive: operation failed" }
-func (e *Error) GoString() string     { return e.Error() }
-func (e *Error) Unwrap() error        { return e.cause }
+func (e *Error) Error() string { return "archive: operation failed" }
+
+// GoString formats safe archive error metadata.
+func (e *Error) GoString() string { return e.Error() }
+func (e *Error) Unwrap() error    { return e.cause }
+
+// Is reports whether target is ErrArchive.
 func (e *Error) Is(target error) bool { return target == ErrArchive }
 func protocolFailure(ctx context.Context, cause error) error {
 	var deadline error

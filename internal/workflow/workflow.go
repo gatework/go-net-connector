@@ -16,6 +16,7 @@ import (
 	"github.com/gatework/go-net-connector/vendors"
 )
 
+// ErrInvalidRequest reports an invalid operation or execution budget.
 var ErrInvalidRequest = errors.New("workflow: invalid request")
 
 // Runtime contains the application dependencies shared by operation workflows.
@@ -35,6 +36,7 @@ type SessionObserver func(context.Context, connector.SessionEvent) error
 // DeviceOpener creates one device session with operation-local logging and observation.
 type DeviceOpener func(context.Context, fleet.Record, io.Writer, SessionObserver) (*connector.Device, error)
 
+// TFTPSettings supplies the transfer policy and archive runtime dependencies.
 type TFTPSettings struct {
 	ArchiveTimeouts   archive.Timeouts
 	Policy            *transfer.Policy
@@ -43,6 +45,7 @@ type TFTPSettings struct {
 	ArchivePassword   func() string
 }
 
+// TopologySettings supplies topology collection and description formatting policy.
 type TopologySettings struct {
 	Mode                 string
 	Workers              int

@@ -12,11 +12,14 @@ import (
 	"github.com/gatework/go-net-connector/transfer"
 )
 
+// ClientOptions selects archive storage, a worker launcher and phase timeouts.
 type ClientOptions struct {
 	Root, Directory string
 	Launcher        Launcher
 	Timeouts        Timeouts
 }
+
+// Client coordinates bounded archive transactions and owns worker cleanup.
 type Client struct {
 	cleanupMu              sync.Mutex
 	pending                []func() error
@@ -32,6 +35,7 @@ type Client struct {
 	prepared               bool
 }
 
+// NewClient validates options without starting a worker or accessing storage.
 func NewClient(o ClientOptions) (*Client, error) {
 	if !filepath.IsAbs(o.Root) || filepath.Clean(o.Root) != o.Root || o.Directory == "" || o.Launcher == nil {
 		return nil, ErrArchive
@@ -47,6 +51,8 @@ func NewClient(o ClientOptions) (*Client, error) {
 	batch := time.Now().In(time.FixedZone("UTC+8", 8*3600)).Format("2006-01-02")
 	return &Client{root: o.Root, directory: directory, batch: batch, launch: o.Launcher, timeouts: timeouts, persist: storage.WriteStream, slots: make(chan struct{}, 4), prepareGate: make(chan struct{}, 1)}, nil
 }
+
+// Prepare initializes local storage and verifies the worker protocol capabilities.
 func (c *Client) Prepare(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, c.timeouts.Prepare)
 	defer cancel()
@@ -254,59 +260,64 @@ func (c *Client) upload(ctx, prepare context.Context, filename, archiveName stri
 			return stageFailure("upload", ErrArchive)
 		}
 
-		verifyCtx, cancelVerify := context.WithTimeout(ctx, c.timeouts.Verify)
-		defer cancelVerify()
-		if e := p.Send(verifyCtx, Request{Action: "verify"}); e != nil {
-			return errors.Join(primary, stageFailure("verify", e))
-		}
-		proof, e := p.Expect(verifyCtx, "archived")
-		if e != nil {
-			return errors.Join(primary, stageFailure("verify", e))
-		}
-		if proof.ArchivePath != filepath.Join(c.root, "archive", c.batch, archiveName) {
-			return errors.Join(primary, stageFailure("verify", ErrArchive))
-		}
-		result.Receipt.Server = &proof
-		destination := filepath.Join(c.directory, "tftp", archiveName)
-		called := false
-		received := proof
-		fileReceipt, persistErr := c.persist(verifyCtx, destination, func(w io.Writer) error {
-			called = true
-			var e error
-			received, e = p.Receive(verifyCtx, proof, w)
-			return e
-		})
-		result.Receipt.Local = fileReceipt
-		if !called {
-			var receiveErr error
-			received, receiveErr = p.Receive(verifyCtx, proof, io.Discard)
-			persistErr = errors.Join(persistErr, receiveErr)
-		}
-		result.Receipt.Server = &received
-		persistErr = errors.Join(persistErr, verifyCtx.Err())
-		if primary != nil || persistErr != nil || !result.Receipt.Verified() || !fileReceipt.Durable() {
-			c.abort(ctx, p)
-			if persistErr != nil {
-				return errors.Join(primary, stageFailure("verify", persistErr))
-			}
-			if primary != nil {
-				return primary
-			}
-			return stageFailure("verify", ErrArchive)
-		}
-		cleanupCtx, cancelCleanup := context.WithTimeout(ctx, c.timeouts.Cleanup)
-		defer cancelCleanup()
-		result.Receipt.Cleanup = CleanupUnconfirmed
-		if e = p.Send(cleanupCtx, Request{Action: "cleanup", SHA256: received.SHA256}); e != nil {
-			return stageFailure("cleanup", e)
-		}
-		if _, e = p.Expect(cleanupCtx, "complete"); e != nil {
-			return stageFailure("cleanup", e)
-		}
-		result.Receipt.Cleanup = CleanupComplete
-		return nil
+		return c.verifyUpload(ctx, p, archiveName, primary, &result)
+
 	})
 	return result, err
+}
+
+func (c *Client) verifyUpload(ctx context.Context, p *Protocol, archiveName string, primary error, result *Result) error {
+	verifyCtx, cancelVerify := context.WithTimeout(ctx, c.timeouts.Verify)
+	defer cancelVerify()
+	if e := p.Send(verifyCtx, Request{Action: "verify"}); e != nil {
+		return errors.Join(primary, stageFailure("verify", e))
+	}
+	proof, e := p.Expect(verifyCtx, "archived")
+	if e != nil {
+		return errors.Join(primary, stageFailure("verify", e))
+	}
+	if proof.ArchivePath != filepath.Join(c.root, "archive", c.batch, archiveName) {
+		return errors.Join(primary, stageFailure("verify", ErrArchive))
+	}
+	result.Receipt.Server = &proof
+	destination := filepath.Join(c.directory, "tftp", archiveName)
+	called := false
+	received := proof
+	fileReceipt, persistErr := c.persist(verifyCtx, destination, func(w io.Writer) error {
+		called = true
+		var e error
+		received, e = p.Receive(verifyCtx, proof, w)
+		return e
+	})
+	result.Receipt.Local = fileReceipt
+	if !called {
+		var receiveErr error
+		received, receiveErr = p.Receive(verifyCtx, proof, io.Discard)
+		persistErr = errors.Join(persistErr, receiveErr)
+	}
+	result.Receipt.Server = &received
+	persistErr = errors.Join(persistErr, verifyCtx.Err())
+	if primary != nil || persistErr != nil || !result.Receipt.Verified() || !fileReceipt.Durable() {
+		c.abort(ctx, p)
+		if persistErr != nil {
+			return errors.Join(primary, stageFailure("verify", persistErr))
+		}
+		if primary != nil {
+			return primary
+		}
+		return stageFailure("verify", ErrArchive)
+	}
+	cleanupCtx, cancelCleanup := context.WithTimeout(ctx, c.timeouts.Cleanup)
+	defer cancelCleanup()
+	result.Receipt.Cleanup = CleanupUnconfirmed
+	if e = p.Send(cleanupCtx, Request{Action: "cleanup", SHA256: received.SHA256}); e != nil {
+		return stageFailure("cleanup", e)
+	}
+	if _, e = p.Expect(cleanupCtx, "complete"); e != nil {
+		return stageFailure("cleanup", e)
+	}
+	result.Receipt.Cleanup = CleanupComplete
+	return nil
 }
 
 func (c *Client) abort(ctx context.Context, p *Protocol) {

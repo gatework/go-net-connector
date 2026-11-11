@@ -67,18 +67,25 @@ func (s *configurationStrategy) Finish(ctx context.Context, result connector.Res
 // BaseConfigPolicy keeps a valid prompt and returns visible output as-is.
 type BaseConfigPolicy struct{}
 
+// MatchPrompt matches the current terminal prompt for configuration collection.
 func (BaseConfigPolicy) MatchPrompt(_ string, current string) (expect.Pattern, error) {
 	return expect.Line(strings.Trim(current, " \t\x00\r\n")), nil
 }
+
+// Validate accepts a response without adding platform-specific validation.
 func (BaseConfigPolicy) Validate(context.Context, connector.Command, connector.StepResult, connector.Executor) error {
 	return nil
 }
+
+// SelectStep selects the final configuration response and rejects an empty collection.
 func (BaseConfigPolicy) SelectStep(steps []connector.StepResult) (connector.StepResult, error) {
 	if len(steps) == 0 {
 		return connector.StepResult{}, connector.ErrIncomplete
 	}
 	return steps[len(steps)-1], nil
 }
+
+// Clean returns the visible response without platform-specific rewriting.
 func (BaseConfigPolicy) Clean(_ connector.StepResult, visible, _ string) (string, error) {
 	return visible, nil
 }

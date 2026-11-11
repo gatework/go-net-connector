@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// Channel owns the bidirectional worker stream and its cleanup callbacks.
 type Channel struct {
 	Input  io.Writer
 	Output io.Reader

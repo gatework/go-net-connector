@@ -90,6 +90,7 @@ type Reporter struct {
 	archivePreflight                                      *ArchivePreflight
 }
 
+// New creates a reporter that borrows out for the duration of the run.
 func New(out io.Writer, verbose bool) *Reporter {
 	p := &Reporter{out: out, verbose: verbose, interval: 5 * time.Second, started: time.Now(), active: make(map[string]task)}
 	if f, ok := out.(*os.File); ok {
@@ -153,6 +154,7 @@ func (p *Reporter) Pause() func() {
 	return func() { once.Do(func() { p.mu.Lock(); defer p.mu.Unlock(); p.paused--; p.renderLocked(true) }) }
 }
 
+// Phase displays the current operation phase.
 func (p *Reporter) Phase(text string) error {
 	if p == nil {
 		return nil
@@ -169,6 +171,8 @@ func (p *Reporter) Phase(text string) error {
 	}
 	return p.writeLocked(p.phase)
 }
+
+// Plan displays the inventory selection and worker budget.
 func (p *Reporter) Plan(total, selected, workers int, mode string) error {
 	if p == nil {
 		return nil
@@ -250,6 +254,8 @@ func (p *Reporter) BeginPhase(total, workers int) error {
 	p.renderLocked(true)
 	return p.err
 }
+
+// Start records that a device began execution.
 func (p *Reporter) Start(host, vendor string) error {
 	if p == nil {
 		return nil
@@ -280,6 +286,8 @@ func (p *Reporter) Start(host, vendor string) error {
 	p.renderLocked(false)
 	return p.err
 }
+
+// Event updates the named device stage with a safe status.
 func (p *Reporter) Event(host, name, status string) error {
 	if p == nil {
 		return nil
@@ -290,70 +298,8 @@ func (p *Reporter) Event(host, name, status string) error {
 	if !ok {
 		return nil
 	}
-	var message string
-	switch name {
-	case "connect":
-		item.stage = stageConnect
-		message = "正在连接与登录"
-	case "login_complete":
-		if status == "ok" {
-			switch p.mode {
-			case "tftp":
-				item.stage = stageArchiveChannel
-				message = "登录成功，正在准备归档通道"
-			case "topology":
-				item.stage = stageNeighborCollection
-				message = "登录成功，正在采集邻居"
-			default:
-				item.stage = stageConfig
-				message = "登录成功，正在采集配置"
-			}
-		} else {
-			message = "登录未完成"
-		}
-	case "command_start":
-		switch p.mode {
-		case "tftp":
-			// The workflow stage is more precise than the generic session
-			// event. Keep upload/archive accounting intact while the command
-			// observer reports the device operation.
-			if item.stage != stageTFTPUpload && item.stage != stageArchiveVerification {
-				item.stage = stageTFTPCommand
-			}
-			message = "正在执行 TFTP 设备操作"
-		case "topology":
-			item.stage = stageNeighborCollection
-			message = "正在采集邻居"
-		default:
-			item.stage = stageConfig
-			message = "正在采集，等待设备响应"
-		}
-	case "command_complete":
-		if p.mode == "tftp" && status == "response_received" {
-			message = "TFTP 命令响应已接收"
-		} else if p.mode == "tftp" && status == "failed" {
-			message = "TFTP 命令执行失败"
-		} else if p.mode == "tftp" {
-			message = "TFTP 命令结果未确认"
-		} else if status == "response_received" {
-			message = "命令响应已接收"
-		} else if status == "failed" {
-			message = "命令执行失败"
-		} else {
-			message = "命令结果未确认"
-		}
-	case "operation_complete":
-		switch status {
-		case "completed":
-			message = "设备脚本执行完成"
-		case "failed":
-			message = "设备脚本执行失败"
-		default:
-			message = "设备脚本完成状态未确认"
-		}
-	case "connect_failed":
-		message = "连接失败"
-	default:
+	item, message, known := p.eventStage(item, name, status)
+	if !known {
 		return nil
 	}
 	if name == "command_start" || item.stage != p.active[host].stage {
@@ -440,6 +386,7 @@ func (p *Reporter) Outcome(host, status, outcome, errorCode string, duration tim
 	return p.err
 }
 
+// Finish stops the activity display and returns any output failure.
 func (p *Reporter) Finish() error {
 	if p == nil {
 		return nil
@@ -458,6 +405,8 @@ func (p *Reporter) Finish() error {
 	_ = p.writeLocked(fmt.Sprintf("总耗时 %.1f 秒", time.Since(p.started).Seconds()))
 	return p.err
 }
+
+// Err returns the first progress output failure.
 func (p *Reporter) Err() error {
 	if p == nil {
 		return nil
@@ -553,4 +502,74 @@ func (p *Reporter) cancellingNotice() {
 	} else if p.paused == 0 {
 		_ = p.writeLocked(fmt.Sprintf("%s；%s", p.phase, p.countsLocked()))
 	}
+}
+
+func (p *Reporter) eventStage(item task, name, status string) (task, string, bool) {
+	var message string
+	switch name {
+	case "connect":
+		item.stage = stageConnect
+		message = "正在连接与登录"
+	case "login_complete":
+		if status == "ok" {
+			switch p.mode {
+			case "tftp":
+				item.stage = stageArchiveChannel
+				message = "登录成功，正在准备归档通道"
+			case "topology":
+				item.stage = stageNeighborCollection
+				message = "登录成功，正在采集邻居"
+			default:
+				item.stage = stageConfig
+				message = "登录成功，正在采集配置"
+			}
+		} else {
+			message = "登录未完成"
+		}
+	case "command_start":
+		switch p.mode {
+		case "tftp":
+			// The workflow stage is more precise than the generic session
+			// event. Keep upload/archive accounting intact while the command
+			// observer reports the device operation.
+			if item.stage != stageTFTPUpload && item.stage != stageArchiveVerification {
+				item.stage = stageTFTPCommand
+			}
+			message = "正在执行 TFTP 设备操作"
+		case "topology":
+			item.stage = stageNeighborCollection
+			message = "正在采集邻居"
+		default:
+			item.stage = stageConfig
+			message = "正在采集，等待设备响应"
+		}
+	case "command_complete":
+		if p.mode == "tftp" && status == "response_received" {
+			message = "TFTP 命令响应已接收"
+		} else if p.mode == "tftp" && status == "failed" {
+			message = "TFTP 命令执行失败"
+		} else if p.mode == "tftp" {
+			message = "TFTP 命令结果未确认"
+		} else if status == "response_received" {
+			message = "命令响应已接收"
+		} else if status == "failed" {
+			message = "命令执行失败"
+		} else {
+			message = "命令结果未确认"
+		}
+	case "operation_complete":
+		switch status {
+		case "completed":
+			message = "设备脚本执行完成"
+		case "failed":
+			message = "设备脚本执行失败"
+		default:
+			message = "设备脚本完成状态未确认"
+		}
+	case "connect_failed":
+		message = "连接失败"
+	default:
+		return item, "", false
+	}
+	return item, message, true
 }

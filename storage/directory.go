@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// PrepareDirectory creates private missing directories and synchronizes their parents.
 func PrepareDirectory(path string) error {
 	path, e := filepath.Abs(path)
 	if e != nil {
@@ -40,6 +41,8 @@ func PrepareDirectory(path string) error {
 	}
 	return nil
 }
+
+// SyncDirectory synchronizes a directory after resolving its path.
 func SyncDirectory(path string) error {
 	resolved, e := filepath.EvalSymlinks(path)
 	if e != nil {
@@ -56,6 +59,8 @@ func SyncDirectory(path string) error {
 	}
 	return e
 }
+
+// CreateBatchDirectory creates a unique private batch directory for stamp.
 func CreateBatchDirectory(root string, stamp time.Time) (string, error) {
 	if e := PrepareDirectory(root); e != nil {
 		return "", e

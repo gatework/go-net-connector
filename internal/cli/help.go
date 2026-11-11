@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// renderChineseHelp derives all content from the command tree and flag metadata.
 // renderChineseHelp writes the help of c: description, usage, subcommands,
 // flags by group, inherited flags and examples.
 func renderChineseHelp(c *cobra.Command, w io.Writer) error {

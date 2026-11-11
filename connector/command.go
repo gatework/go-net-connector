@@ -12,9 +12,12 @@ import (
 	expect "github.com/gatework/go-expect"
 )
 
+// ExecuteCommand executes one validated command under the device operation lease.
 func (d *Device) ExecuteCommand(ctx context.Context, c Command, opts ExecuteOptions) (Result, error) {
 	return d.ExecuteScript(ctx, Script{Commands: []Command{c}}, opts)
 }
+
+// ExecuteScript validates the entire script before connecting and retains accepted steps on failure.
 func (d *Device) ExecuteScript(ctx context.Context, script Script, opts ExecuteOptions) (Result, error) {
 	s, e := script.clone()
 	if e != nil {
@@ -276,18 +279,7 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 	if x.limit > 0 && x.bytes >= x.limit {
 		return step, newError("script_output_limit_exceeded", "script", c, ErrScriptLimit)
 	}
-	timeout := d.config.CommandTimeout
-	if c.Timeout != nil {
-		timeout = *c.Timeout
-	}
-	if c.Poll {
-		timeout = 0
-	}
-	cc := ctx
-	cancel := func() {}
-	if timeout > 0 {
-		cc, cancel = context.WithTimeout(ctx, timeout)
-	}
+	cc, cancel := d.commandContext(ctx, c)
 	defer cancel()
 	started := time.Now()
 	prompt, e := x.prompt(c)
@@ -311,6 +303,21 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 		return StepResult{}, err
 	}
 	return x.verify(cc, c, step, response)
+}
+
+// commandContext applies the command timeout, with polling disabling relative timing.
+func (d *Device) commandContext(ctx context.Context, c Command) (context.Context, context.CancelFunc) {
+	timeout := d.config.CommandTimeout
+	if c.Timeout != nil {
+		timeout = *c.Timeout
+	}
+	if c.Poll {
+		timeout = 0
+	}
+	if timeout > 0 {
+		return context.WithTimeout(ctx, timeout)
+	}
+	return ctx, func() {}
 }
 
 // commandPrivacy returns the secrets to mask while c runs, and whether its

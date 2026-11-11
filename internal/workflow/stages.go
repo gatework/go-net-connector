@@ -25,8 +25,10 @@ import (
 // platform's positive save confirmation; a prompt alone is unconfirmed.
 type SaveStage struct{}
 
+// Name returns the stable stage identifier recorded in reports.
 func (SaveStage) Name() string { return "save" }
 
+// Admit checks whether the device and platform support this stage before I/O.
 func (SaveStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	if len(platform.Terminal().SaveCommands) == 0 {
 		return "save_unsupported"
@@ -34,6 +36,7 @@ func (SaveStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	return ""
 }
 
+// Run executes the stage and retains its evidence even on failure.
 func (SaveStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	device, err := s.Device(ctx)
 	if err != nil {
@@ -47,8 +50,10 @@ func (SaveStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 // BackupStage collects the running configuration into "<name>-<IP>.txt".
 type BackupStage struct{ Directory string }
 
+// Name returns the stable stage identifier recorded in reports.
 func (BackupStage) Name() string { return "backup" }
 
+// Admit checks whether the device and platform support this stage before I/O.
 func (BackupStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	if len(platform.Terminal().ConfigCommands) == 0 {
 		return "unsupported_operation"
@@ -56,10 +61,12 @@ func (BackupStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	return ""
 }
 
+// Plan adds the planned stage target without executing device operations.
 func (b BackupStage) Plan(task fleet.Task, _ dialect.Platform, target *batchreport.Target) {
 	target.File, _ = task.Device.BackupFilename("hostname_ip")
 }
 
+// Run executes the stage and retains its evidence even on failure.
 func (b BackupStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	name, err := s.Record.BackupFilename("hostname_ip")
 	if err != nil {
@@ -96,8 +103,10 @@ type TFTPStage struct {
 	Pools    map[string]*archive.Pool
 }
 
+// Name returns the stable stage identifier recorded in reports.
 func (TFTPStage) Name() string { return "tftp" }
 
+// Admit checks whether the device and platform support this stage before I/O.
 func (TFTPStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	if _, ok := platform.(transfer.TFTPPolicy); !ok {
 		return "unsupported_operation"
@@ -105,12 +114,14 @@ func (TFTPStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	return ""
 }
 
+// Plan adds the planned stage target without executing device operations.
 func (TFTPStage) Plan(task fleet.Task, _ dialect.Platform, target *batchreport.Target) {
 	t := task.Target
 	target.File, target.Server, target.VerificationRoot = t.Path, t.Server, t.Root
 	target.SourceFile, target.SourceInterface, target.VRF = t.SourceFile, t.SourceInterface, t.VRF
 }
 
+// Run executes the stage and retains its evidence even on failure.
 func (t TFTPStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	target := s.Target
 	upload := func(ctx context.Context, name string) (transfer.Receipt, error) {
@@ -162,8 +173,10 @@ func (t TFTPStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 // lease. The first rejected command stops the script; nothing is retried.
 type ExecuteStage struct{ Scripts DeployScripts }
 
+// Name returns the stable stage identifier recorded in reports.
 func (ExecuteStage) Name() string { return "execute" }
 
+// Admit checks whether the device and platform support this stage before I/O.
 func (x ExecuteStage) Admit(record fleet.Record, _ dialect.Platform) string {
 	if script, ok := x.Scripts.For(record.Vendor); !ok || len(script.Commands) == 0 {
 		return "missing_script"
@@ -171,11 +184,13 @@ func (x ExecuteStage) Admit(record fleet.Record, _ dialect.Platform) string {
 	return ""
 }
 
+// Plan adds the planned stage target without executing device operations.
 func (x ExecuteStage) Plan(task fleet.Task, _ dialect.Platform, target *batchreport.Target) {
 	script, _ := x.Scripts.For(task.Device.Vendor)
 	target.Script, target.Commands = script.Name, len(script.Commands)
 }
 
+// Run executes the stage and retains its evidence even on failure.
 func (x ExecuteStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	script, _ := x.Scripts.For(s.Record.Vendor)
 	device, err := s.Device(ctx)
@@ -279,6 +294,7 @@ type ExecStage struct {
 	Directory string
 }
 
+// Name returns the stable stage identifier recorded in reports.
 func (ExecStage) Name() string { return "exec" }
 
 // Admit refuses a platform unless every command is read-only for it, so no
@@ -296,11 +312,13 @@ func (x ExecStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	return ""
 }
 
+// Plan adds the planned stage target without executing device operations.
 func (x ExecStage) Plan(task fleet.Task, _ dialect.Platform, target *batchreport.Target) {
 	target.File, _ = task.Device.BackupFilename("hostname_ip")
 	target.Commands = len(x.Commands)
 }
 
+// Run executes the stage and retains its evidence even on failure.
 func (x ExecStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	name, err := s.Record.BackupFilename("hostname_ip")
 	if err != nil {
@@ -354,8 +372,10 @@ type RemoteStage struct {
 	Stamp   string
 }
 
+// Name returns the stable stage identifier recorded in reports.
 func (RemoteStage) Name() string { return "remote" }
 
+// Admit checks whether the device and platform support this stage before I/O.
 func (RemoteStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	if _, ok := platform.(transfer.RemoteBackupPolicy); !ok {
 		return "unsupported_operation"
@@ -363,10 +383,12 @@ func (RemoteStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	return ""
 }
 
+// Plan adds the planned stage target without executing device operations.
 func (x RemoteStage) Plan(task fleet.Task, _ dialect.Platform, target *batchreport.Target) {
 	target.Server, target.File = x.Options.Server, x.path(task.Device.Host)
 }
 
+// Run executes the stage and retains its evidence even on failure.
 func (x RemoteStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	device, err := s.Device(ctx)
 	if err != nil {

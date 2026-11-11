@@ -20,6 +20,7 @@ type Client struct {
 	profile           connector.Terminal
 }
 
+// New binds the device to its declared topology capabilities without I/O.
 func New(device *connector.Device, registry dialect.Registry) (*Client, error) {
 	if device == nil || registry == nil {
 		return nil, ErrInvalid
@@ -47,6 +48,7 @@ func New(device *connector.Device, registry dialect.Registry) (*Client, error) {
 	}, nil
 }
 
+// Discover collects neighbors and descriptions within one device operation.
 func (client *Client) Discover(ctx context.Context) (snapshot Snapshot, err error) {
 	if err = client.supportsNeighbors(); err != nil {
 		return
@@ -61,6 +63,8 @@ func (client *Client) Discover(ctx context.Context) (snapshot Snapshot, err erro
 	})
 	return
 }
+
+// Audit compares collected evidence and preserves completed command receipts.
 func (client *Client) Audit(ctx context.Context, opts FormatOptions) (audit Audit, err error) {
 	if err = client.supportsNeighbors(); err != nil {
 		return

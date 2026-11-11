@@ -29,6 +29,7 @@ type cacheOptions struct {
 	Now         func() time.Time
 }
 
+// Cache result statuses exposed to callers.
 const (
 	CacheStatusRefreshed = "refreshed"
 	CacheStatusFresh     = "fresh_cache"
@@ -121,6 +122,10 @@ func (c *cache) Fetch(ctx context.Context, mode CacheMode) (result CacheResult, 
 			err = newInventoryError("cache_directory_changed", nil)
 		}
 	}()
+	return c.fetchEntries(ctx, mode)
+}
+
+func (c *cache) fetchEntries(ctx context.Context, mode CacheMode) (result CacheResult, err error) {
 	previous, _, e := c.read(ctx)
 	if e != nil {
 		return result, e

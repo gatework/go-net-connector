@@ -365,8 +365,10 @@ type AuditStage struct {
 	Options  topology.FormatOptions
 }
 
+// Name returns the stable stage identifier recorded in reports.
 func (AuditStage) Name() string { return "audit" }
 
+// Admit checks whether the device and platform support this stage before I/O.
 func (a AuditStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	if !supportsTopologyMode(platform, a.Mode) {
 		return "unsupported_operation"
@@ -374,6 +376,7 @@ func (a AuditStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	return ""
 }
 
+// Run executes the stage and retains its evidence even on failure.
 func (a AuditStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	device, err := s.Device(ctx)
 	if err != nil {
@@ -416,10 +419,13 @@ func (a AuditStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 // confirms the readback and the save. It never rolls back or replays.
 type ApplyStage struct{ Registry dialect.Registry }
 
+// Name returns the stable stage identifier recorded in reports.
 func (ApplyStage) Name() string { return "apply" }
 
+// Admit checks whether the device and platform support this stage before I/O.
 func (ApplyStage) Admit(fleet.Record, dialect.Platform) string { return "" }
 
+// Run executes the stage and retains its evidence even on failure.
 func (a ApplyStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	evidence, _ := e.Artifacts.Topology.(*TopologyEvidence)
 	if evidence == nil || evidence.Plan == nil {

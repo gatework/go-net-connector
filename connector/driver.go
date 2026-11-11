@@ -45,8 +45,10 @@ type StaticDriver struct {
 	AfterLogin   func(context.Context, StepResult) (LoginState, error)
 }
 
+// Terminal returns the configured grammar; Device construction clones it.
 func (s StaticDriver) Terminal() Terminal { return s.Grammar }
 
+// NewConfigCollector creates a per-collection strategy, or selects generic collection when unset.
 func (s StaticDriver) NewConfigCollector() ConfigStrategy {
 	if s.Collector == nil {
 		return nil
@@ -54,6 +56,7 @@ func (s StaticDriver) NewConfigCollector() ConfigStrategy {
 	return s.Collector()
 }
 
+// ValidateSave runs the configured confirmation check or returns ErrUnconfirmed.
 func (s StaticDriver) ValidateSave(ctx context.Context, result Result) error {
 	if s.Save == nil {
 		return ErrUnconfirmed

@@ -10,6 +10,7 @@ var errors = map[string]string{ //nolint:gosec // error labels, not credentials
 	"login_timeout": "登录超时，请检查 SSH 握手及登录对话", "authentication_error": "认证失败，请检查现有凭据", "authentication_failed": "认证失败", "connection_closed": "连接已关闭", "connection_timeout": "连接超时", "connection_refused": "连接被拒绝", "connection_reset": "连接被重置", "connection_error": "连接失败", "connection_failed": "连接失败", "no_route": "目标无可用路由", "command_timeout": "命令超时", "write_timeout": "发送超时", "prompt_error": "未匹配到预期提示符", "invalid_output_encoding": "输出编码无效或无法确认", "incomplete_configuration": "配置采集不完整", "uncommitted_configuration": "存在未提交配置", "unsupported_configuration_format": "配置格式不受支持", "device_error": "设备拒绝命令", "configuration_error": "配置采集失败", "transport_error": "传输失败", "output_limit_exceeded": "输出超过上限", "script_output_limit_exceeded": "脚本累计输出超过上限", "host_key_changed": "主机密钥发生变化", "host_key_untrusted": "主机密钥不受信任", "session_busy": "设备会话正忙", "backup_busy": "备份路径正忙", "log_error": "会话日志写入失败", "parsing_error": "解析失败", "parse_failed": "解析失败", "file_write_failed": "文件写入失败", "file_persistence_unconfirmed": "文件持久化未确认", "backup_persistence_unconfirmed": "备份持久化未确认", "backup_finalize_failed": "备份收尾失败", "backup_durability_unsupported": "文件系统不支持持久化确认", "internal_error": "内部操作失败", "persistence_unconfirmed": "持久化未确认", "missing_credentials": "缺少凭据", "cache_namespace_required": "API key 模式启用清单缓存时，请设置非敏感账户标识 ND_USERNAME 或 ND_CACHE_NAMESPACE", "evidence_limit_exceeded": "设备回显过多，无法安全确认上传结果", "transfer_unconfirmed": "上传结果未确认", "transfer_failed": "上传失败", "unsupported_operation": "不支持此操作",
 }
 
+// Status describes a known operation status without exposing raw values.
 func Status(code string) string {
 	if text, ok := statuses[code]; ok {
 		return text
@@ -28,6 +29,7 @@ func Error(code string) string {
 	return "操作未完成"
 }
 
+// SourceState describes raw-source publication and durability evidence.
 func SourceState(committed, verified bool) string {
 	if verified {
 		return "原文已保留"

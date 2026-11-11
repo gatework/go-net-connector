@@ -6,7 +6,7 @@
 
 ## 构建
 
-当前模块固定使用正式发布的 go-expect `v0.5.0`。本地构建和测试通过 Go 模块解析正式依赖，不需要候选源码或本地替换。
+当前模块固定使用正式发布的 go-expect `v0.6.0`。本地构建和测试通过 Go 模块解析正式依赖，不需要候选源码或本地替换。
 
 ```sh
 GOWORK=off go mod download
@@ -14,7 +14,7 @@ GOWORK=off go test ./...
 GOWORK=off go build -o bin/ ./cmd/...
 ```
 
-当前版本为 [v0.7.0](docs/releases/v0.7.0.md)：统一阶段流水线与报告、`deploy`/`exec`/`backup remote`/`backup diff`、跳板机与连接重试，不保留兼容层。公开 Go API 的变更见 [迁移说明](docs/api-migration.md)。配置使用平铺的 `net-connector.yml`，归档协议为 v2。
+当前版本为 [v0.7.1](docs/releases/v0.7.1.md)：接入共享 Go 工程规范，整理内部执行步骤，并升级正式 go-expect 依赖。公开 Go API 的变更见 [迁移说明](docs/api-migration.md)。配置使用平铺的 `net-connector.yml`，归档协议为 v2。
 
 系统需要 `ssh`；Telnet 连接另需系统 `telnet`。SSH 归档服务器需要管理员安装 `tftp-archive`，默认路径 `/usr/local/bin/tftp-archive`。客户端只探测协议版本和能力，不上传或安装 worker。
 
@@ -195,3 +195,7 @@ CLI 文件备份的完整性与文本编码质量分别统计。设备原生配�
 归档准备/排队、设备上传、核验及本地提交、清理分别有 240/180/100/10 秒默认窗口。准备完成后才开始设备上传窗口；它仍受调用方总 context 约束。可选 `tftp.archive_prepare_timeout`、`tftp.upload_timeout`、`tftp.archive_verify_timeout`、`tftp.archive_cleanup_timeout` 按秒调整，环境变量分别为 `NC_TFTP_ARCHIVE_PREPARE_TIMEOUT`、`NC_TFTP_UPLOAD_TIMEOUT`、`NC_TFTP_ARCHIVE_VERIFY_TIMEOUT`、`NC_TFTP_ARCHIVE_CLEANUP_TIMEOUT`。所有默认值由归档定义统一生成，不重复维护。
 
 `netman` 与 `tftp-archive` 必须同步升级到协议 v2，旧 worker 在设备连接前预检失败。清理失败不会撤销已核验和已持久化的文件，但批次仍不完整；可使用指定批次导出已保存文件。
+
+## 开发检查
+
+运行 `make check`，使用固定版本 `go-standards v1.0.2` 的共享配置和工具，并执行本仓库的安装归档、架构、fuzz 和消费者检查。开发工具不进入库模块的运行时依赖。

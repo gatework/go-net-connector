@@ -7,14 +7,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/internal/batchreport"
-	"github.com/gatework/go-net-connector/parallel"
 	"github.com/gatework/go-net-connector/storage"
 	"github.com/gatework/go-net-connector/transfer"
 	"github.com/gatework/go-net-connector/vendors/dialect"
@@ -180,96 +177,14 @@ func (r *Runner) Execute(ctx context.Context, runtime Runtime, plan fleet.Plan, 
 	}
 	defer journal.Close()
 	_ = r.emit(PlanEvent{Total: len(entries), Selected: len(tasks), Workers: runtime.Workers, Mode: op.Name})
-	var journalMu sync.Mutex
-	var journalErr error
-	var failures atomic.Int64
-	evidence := make([]*Evidence, len(tasks))
-	record := func(row batchreport.Device) {
-		journalMu.Lock()
-		if e := json.NewEncoder(journal).Encode(row); e != nil && journalErr == nil {
-			journalErr = e
-		}
-		journalMu.Unlock()
-		event := OutcomeEvent{Host: row.Host, Status: row.Status, Outcome: row.Outcome, ErrorCode: diagnosticCode(row.Diagnostic), Duration: time.Duration(row.DurationMS * float64(time.Millisecond)), TextWarningBytes: textWarningBytes(row)}
-		if b := row.Artifacts.Backup; b != nil {
-			event.SourceCommitted, event.SourceVerified = b.Saved, b.Complete
-		}
-		_ = r.emit(event)
+	p := &pipelineRun{runner: r, runtime: runtime, op: op, options: o, tasks: tasks, report: &report, evidence: make([]*Evidence, len(tasks)), journal: journal}
+	runErr := p.round(ctx, op.Stages, func(int) bool { return true })
+	if runErr == nil {
+		runErr = p.nextRound(ctx)
 	}
-	round := func(stages []Stage, admitted func(i int) bool) error {
-		order := make([]int, 0, len(tasks))
-		for i := range tasks {
-			if admitted(i) {
-				order = append(order, i)
-			}
-		}
-		results, err := parallel.Map(ctx, runtime.Workers, order, func(ctx context.Context, i int) (batchreport.Device, error) {
-			t := tasks[i]
-			row := report.Devices[t.entry]
-			if o.StopAfterFailures > 0 && failures.Load() >= int64(o.StopAfterFailures) {
-				row.Status = batchreport.StatusStopped
-				return row, nil
-			}
-			if evidence[i] == nil {
-				evidence[i] = &Evidence{}
-			}
-			row = r.runDevice(ctx, runtime, op, stages, t.task, row, evidence[i], report.SessionLogs)
-			if row.Status == batchreport.StatusFailed || row.Status == batchreport.StatusInterrupted {
-				failures.Add(1)
-			}
-			record(row)
-			return row, nil
-		})
-		for k, i := range order {
-			switch {
-			case k >= len(results) || !results[k].Started:
-			case results[k].Err == nil:
-				report.Devices[tasks[i].entry] = results[k].Value
-			default:
-				// The worker exited without returning (for example a callback
-				// called runtime.Goexit): the device started, so it failed.
-				row := report.Devices[tasks[i].entry]
-				row.Status, row.FailedStage = batchreport.StatusFailed, "worker"
-				row.Diagnostic = &batchreport.Diagnostic{Code: "internal_error", Phase: "worker"}
-				report.Devices[tasks[i].entry] = row
-			}
-		}
-		if errors.Is(err, parallel.ErrWorkerExit) {
-			report.ReportError = "worker_exited"
-			return nil
-		}
-		return err
-	}
-	runErr := round(op.Stages, func(int) bool { return true })
-	if then := op.Then; then != nil && runErr == nil && ctx.Err() == nil {
-		rows := make([]batchreport.Device, len(tasks))
-		for i, t := range tasks {
-			rows[i] = report.Devices[t.entry]
-			if evidence[i] == nil {
-				evidence[i] = &Evidence{}
-			}
-		}
-		if then.Before != nil {
-			if err := then.Before(context.WithoutCancel(ctx), rows, evidence); err != nil {
-				report.ReportError = "review_write_failed"
-				runErr = err
-			}
-		}
-		if runErr == nil {
-			_ = r.emit(BeginPhaseEvent{Total: len(tasks), Workers: runtime.Workers})
-			runErr = round(then.Stages, func(i int) bool {
-				row := report.Devices[tasks[i].entry]
-				return row.Status != batchreport.StatusFailed && row.Status != batchreport.StatusInterrupted && then.Admit(row, evidence[i])
-			})
-		}
-		for i, t := range tasks {
-			if e := evidence[i]; e != nil && e.Outcome != "" && report.Devices[t.entry].Status == batchreport.StatusSucceeded {
-				report.Devices[t.entry].Outcome = e.Outcome
-			}
-		}
-	}
-	if e := journal.Sync(); e != nil && journalErr == nil {
-		journalErr = e
+
+	if e := journal.Sync(); e != nil && p.journalErr == nil {
+		p.journalErr = e
 	}
 	report.Interrupted = ctx.Err() != nil
 	finished := time.Now().UTC()
@@ -279,7 +194,7 @@ func (r *Runner) Execute(ctx context.Context, runtime Runtime, plan fleet.Plan, 
 	if op.Finish != nil {
 		op.Finish(&report)
 	}
-	if journalErr != nil {
+	if p.journalErr != nil {
 		report.Success, report.ReportError = false, "journal_failed"
 	}
 	if e := writeJSON(context.WithoutCancel(ctx), filepath.Join(o.Directory, "report.json"), report); e != nil {
@@ -368,32 +283,7 @@ func (r *Runner) runDevice(ctx context.Context, runtime Runtime, op Operation, s
 	platform, _ := runtime.Registry.Lookup(record.Vendor)
 	session := &Session{Record: record, Target: task.Target, Platform: platform, runtime: runtime, logs: logs, observer: r.observe(), emit: r.emit}
 	previous := row.DurationMS
-	var failed error
-	failedStage := ""
-	for _, stage := range stages {
-		if failed != nil {
-			row.Stages = append(row.Stages, batchreport.Stage{Name: stage.Name(), Status: "skipped"})
-			continue
-		}
-		stageStart := time.Now()
-		authBefore := session.auth
-		err := stage.Run(ctx, session, evidence)
-		if authBefore == nil && session.auth != nil {
-			row.Stages = append(row.Stages, *session.auth)
-			if session.authErr != nil {
-				failed, failedStage = session.authErr, "authenticate"
-				row.Stages = append(row.Stages, batchreport.Stage{Name: stage.Name(), Status: "skipped"})
-				continue
-			}
-		}
-		result := batchreport.Stage{Name: stage.Name(), Status: "succeeded", DurationMS: milliseconds(time.Since(stageStart))}
-		if err != nil {
-			diagnostic := classify(err, stage.Name())
-			result.Status, result.Diagnostic = "failed", &diagnostic
-			failed, failedStage = err, stage.Name()
-		}
-		row.Stages = append(row.Stages, result)
-	}
+	failedStage, failed := runStages(ctx, session, stages, evidence, &row)
 	if cleanup := session.finish(); cleanup != nil && failed == nil {
 		failed, failedStage = cleanup, "disconnect"
 	}

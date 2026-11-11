@@ -11,12 +11,14 @@ import (
 // ErrWorkerExit reports a callback that terminated its worker without returning.
 var ErrWorkerExit = errors.New("parallel: worker exited without returning")
 
+// Result records a callback result and whether its worker started.
 type Result[T any] struct {
 	Value   T
 	Err     error
 	Started bool
 }
 
+// Map runs bounded callbacks and returns results in input order.
 func Map[T, R any](ctx context.Context, workers int, input []T, run func(context.Context, T) (R, error)) ([]Result[R], error) {
 	if workers == 0 {
 		workers = 4

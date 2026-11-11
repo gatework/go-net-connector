@@ -126,22 +126,7 @@ func Unified(fromName, toName string, ops []Op, context int) string {
 			continue
 		}
 		start := max(0, i-context)
-		end := i
-		for end < len(ops) {
-			if ops[end].Kind != ' ' {
-				end++
-				continue
-			}
-			run := end
-			for run < len(ops) && ops[run].Kind == ' ' {
-				run++
-			}
-			if run == len(ops) || run-end > 2*context {
-				end = min(len(ops), end+context)
-				break
-			}
-			end = run
-		}
+		end := hunkEnd(ops, i, context)
 		aStart, bStart := aLine-(i-start), bLine-(i-start)
 		aCount, bCount := 0, 0
 		for _, op := range ops[start:end] {
@@ -169,4 +154,24 @@ func Unified(fromName, toName string, ops []Op, context int) string {
 		i = end
 	}
 	return b.String()
+}
+
+func hunkEnd(ops []Op, start, context int) int {
+	end := start
+	for end < len(ops) {
+		if ops[end].Kind != ' ' {
+			end++
+			continue
+		}
+		run := end
+		for run < len(ops) && ops[run].Kind == ' ' {
+			run++
+		}
+		if run == len(ops) || run-end > 2*context {
+			end = min(len(ops), end+context)
+			break
+		}
+		end = run
+	}
+	return end
 }

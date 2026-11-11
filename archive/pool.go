@@ -24,6 +24,7 @@ type PoolOptions struct {
 // PrepareStage identifies the safe phase of archive service preparation.
 type PrepareStage string
 
+// Archive preparation stages.
 const (
 	PrepareStageSSH      PrepareStage = "ssh"
 	PrepareStageProtocol PrepareStage = "protocol"
@@ -37,6 +38,7 @@ type PrepareProgress struct {
 	Stage                    PrepareStage
 }
 
+// Pool owns archive clients and their optional SSH masters.
 type Pool struct {
 	timeouts                             Timeouts
 	clients                              []*Client
@@ -53,6 +55,7 @@ type Pool struct {
 	active                               sync.WaitGroup
 }
 
+// NewPool validates and groups archive destinations without connecting.
 func NewPool(o PoolOptions) (*Pool, error) {
 	timeouts, err := o.Timeouts.normalize()
 	if err != nil {
@@ -155,6 +158,7 @@ func (p *Pool) Upload(ctx context.Context, filename, archiveName string, upload 
 	}
 }
 
+// Close cancels and joins admitted work before releasing clients and SSH masters.
 func (p *Pool) Close() error {
 	p.mu.Lock()
 	if p.closed && p.cleaned && p.closeErr != nil {
@@ -326,6 +330,27 @@ func (p *Pool) prepareRemote(ctx context.Context, observe func(PrepareProgress))
 		}
 		errorMu.Unlock()
 	}
+	p.runPreparationWorkers(workerCtx, workers, &next, report, recordError)
+
+	errorMu.Lock()
+	err := firstErr
+	errorMu.Unlock()
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if observe != nil {
+		progressMu.Lock()
+		ready := PrepareProgress{Completed: completed, Total: len(p.clients), Workers: workers, Stage: PrepareStageReady}
+		progressMu.Unlock()
+		observe(ready)
+	}
+	return nil
+}
+
+func (p *Pool) runPreparationWorkers(workerCtx context.Context, workers int, next *atomic.Int64, report func(PrepareStage, int, int), recordError func(error)) {
 	var wg sync.WaitGroup
 	wg.Add(workers)
 	for range workers {
@@ -356,22 +381,6 @@ func (p *Pool) prepareRemote(ctx context.Context, observe func(PrepareProgress))
 		}()
 	}
 	wg.Wait()
-	errorMu.Lock()
-	err := firstErr
-	errorMu.Unlock()
-	if err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if observe != nil {
-		progressMu.Lock()
-		ready := PrepareProgress{Completed: completed, Total: len(p.clients), Workers: workers, Stage: PrepareStageReady}
-		progressMu.Unlock()
-		observe(ready)
-	}
-	return nil
 }
 
 func (p *Pool) preparationWorkers() int {
@@ -388,7 +397,9 @@ func (o PoolOptions) MarshalJSON() ([]byte, error) {
 		Parallel                    int
 	}{safeOptionURL(o.Root), o.Directory, o.WorkerPath, o.Parallel})
 }
-func (o PoolOptions) String() string   { b, _ := o.MarshalJSON(); return "PoolOptions" + string(b) }
+func (o PoolOptions) String() string { b, _ := o.MarshalJSON(); return "PoolOptions" + string(b) }
+
+// GoString formats operational metadata without credentials.
 func (o PoolOptions) GoString() string { return o.String() }
 
 func safeOptionURL(raw string) string {

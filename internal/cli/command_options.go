@@ -79,10 +79,8 @@ func validateCombinations(f *pflag.FlagSet, o *options) error {
 	if e := validateHosts(f); e != nil {
 		return e
 	}
-	askDevice, _ := f.GetBool("ask-password")
-	askInventory, _ := f.GetBool("ask-netdisco-password")
-	if o.stdin && (askDevice || askInventory) || askDevice && f.Changed("password") || askInventory && f.Changed("netdisco-password") || o.nonInteractive && (askDevice || askInventory) {
-		return newUsageError("凭据输入方式互斥或当前模式禁止交互")
+	if e := validateCredentialOptions(f, o); e != nil {
+		return e
 	}
 	if o.refresh && f.Changed("cache-only") {
 		return newUsageError("刷新清单与仅使用缓存不能同时指定")
@@ -191,4 +189,13 @@ func booleanString(value bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func validateCredentialOptions(f *pflag.FlagSet, o *options) error {
+	askDevice, _ := f.GetBool("ask-password")
+	askInventory, _ := f.GetBool("ask-netdisco-password")
+	if o.stdin && (askDevice || askInventory) || askDevice && f.Changed("password") || askInventory && f.Changed("netdisco-password") || o.nonInteractive && (askDevice || askInventory) {
+		return newUsageError("凭据输入方式互斥或当前模式禁止交互")
+	}
+	return nil
 }

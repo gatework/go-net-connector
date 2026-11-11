@@ -34,6 +34,7 @@ func Field(row map[string]any, name string) string {
 	return value
 }
 
+// Neighbor is a vendor-neutral adjacency parsed from device output.
 type Neighbor = dialect.Neighbor
 
 // Count returns the number of matches for a family-owned record expression.
@@ -74,12 +75,7 @@ func DecodeQuoted(value string, split bool) (string, error) {
 	started, escape := false, false
 	for _, r := range value {
 		if escape {
-			if quote == '"' && r != '"' && r != '\\' && r != '$' && r != '`' && r != '\n' {
-				word.WriteRune('\\')
-			}
-			if r != '\n' {
-				word.WriteRune(r)
-			}
+			writeEscapedRune(&word, quote, r)
 			escape = false
 			started = true
 			continue
@@ -120,4 +116,13 @@ func DecodeQuoted(value string, split bool) (string, error) {
 		words = append(words, word.String())
 	}
 	return strings.Join(words, " "), nil
+}
+
+func writeEscapedRune(word *strings.Builder, quote, r rune) {
+	if quote == '"' && r != '"' && r != '\\' && r != '$' && r != '`' && r != '\n' {
+		word.WriteRune('\\')
+	}
+	if r != '\n' {
+		word.WriteRune(r)
+	}
 }

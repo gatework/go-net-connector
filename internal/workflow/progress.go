@@ -13,23 +13,37 @@ import (
 // Observe calls are serialized, and an observer error is retained until the
 // operation's final report. A failed display never causes a device write replay.
 type Event interface{ workflowEvent() }
+
+// Observer receives serialized progress events and may report an output failure.
 type Observer func(Event) error
 
+// PlanEvent describes the selected inventory and worker budget.
 type PlanEvent struct {
 	Total, Selected, Workers int
 	Mode                     string
 }
+
+// StartEvent identifies a device that began execution.
 type StartEvent struct{ Host, Vendor string }
+
+// SessionEvent carries safe connector lifecycle metadata.
 type SessionEvent connector.SessionEvent
+
+// OutcomeEvent records a device result and retained source evidence.
 type OutcomeEvent struct {
 	Host, Status, Outcome, ErrorCode string
 	Duration                         time.Duration
 	TextWarningBytes                 int
 	SourceCommitted, SourceVerified  bool
 }
+
+// TransferStageEvent identifies the current transfer phase for a device.
 type TransferStageEvent struct{ Host, Stage string }
+
+// Phase identifies a workflow preparation or execution phase.
 type Phase string
 
+// Workflow phases reported through PhaseEvent.
 const (
 	PhaseArchivePreflight Phase = "archive_preflight"
 	PhaseTransfer         Phase = "transfer"
@@ -37,16 +51,25 @@ const (
 	PhaseTopologyApply    Phase = "topology_apply"
 )
 
+// PhaseEvent reports a workflow phase and its time budget.
 type PhaseEvent struct {
 	Phase   Phase
 	Timeout time.Duration
 }
+
+// ArchivePreflightEvent reports archive preparation progress for one target group.
 type ArchivePreflightEvent struct {
 	Progress      archive.PrepareProgress
 	Group, Groups int
 }
+
+// ArchiveReadyEvent identifies an archive destination that passed preparation.
 type ArchiveReadyEvent struct{ Server, Directory string }
+
+// BeginPhaseEvent reports the start of a new bounded device round.
 type BeginPhaseEvent struct{ Total, Workers int }
+
+// FinishedEvent marks completion of workflow progress reporting.
 type FinishedEvent struct{}
 
 func (PlanEvent) workflowEvent()             {}

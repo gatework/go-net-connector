@@ -14,11 +14,15 @@ type NeighborPolicy struct {
 	SelectNeighborCommand func(status, prompt string) (string, error)
 }
 
+// NewNeighborPolicy binds one fixed neighbor command to its parser.
 func NewNeighborPolicy(command string, parser topology.Parser) NeighborPolicy {
 	return NeighborPolicy{CommandText: command, Parser: parser}
 }
 
+// NeighborStatusCommand returns the optional preliminary status command.
 func (p NeighborPolicy) NeighborStatusCommand() string { return p.StatusCommand }
+
+// NeighborCommand selects the neighbor command using optional platform status.
 func (p NeighborPolicy) NeighborCommand(status, prompt string) (string, error) {
 	if p.SelectNeighborCommand != nil {
 		return p.SelectNeighborCommand(status, prompt)
@@ -28,6 +32,8 @@ func (p NeighborPolicy) NeighborCommand(status, prompt string) (string, error) {
 	}
 	return p.CommandText, nil
 }
+
+// ParseNeighbors decodes the selected platform neighbor response.
 func (p NeighborPolicy) ParseNeighbors(output string) ([]dialect.Neighbor, error) {
 	return p.Parser.ParseNeighbors(output)
 }
@@ -53,6 +59,7 @@ func NewTopologyReader(neighborCommand string, parser topology.Parser) TopologyR
 // DescriptionReader parses a platform's running configuration.
 type DescriptionReader struct{ Parser topology.Parser }
 
+// ParseDescriptions decodes interface descriptions from the running configuration.
 func (p DescriptionReader) ParseDescriptions(config string) (map[string]string, error) {
 	return p.Parser.ParseDescriptions(config)
 }
@@ -61,12 +68,15 @@ func (p DescriptionReader) ParseDescriptions(config string) (map[string]string, 
 // parsers and device configuration commands.
 type InterfaceIdentityPolicy struct{ Parser topology.Parser }
 
+// InterfaceKey normalizes a discovered interface to its configuration identity.
 func (p InterfaceIdentityPolicy) InterfaceKey(name string) string {
 	if p.Parser.CanonicalInterface == nil {
 		return ifname.Key(name)
 	}
 	return p.Parser.CanonicalInterface(name)
 }
+
+// ConfigName normalizes an interface name for rendered configuration commands.
 func (InterfaceIdentityPolicy) ConfigName(name string) string {
 	return ifname.ConfigName(name)
 }
@@ -75,10 +85,15 @@ func (InterfaceIdentityPolicy) ConfigName(name string) string {
 // currently writable families while retaining each family's mode transitions.
 type DescriptionWriter struct{ Mode dialect.WriteMode }
 
+// NewDescriptionWriter binds interface description commands to the platform mode transitions.
 func NewDescriptionWriter(mode dialect.WriteMode) DescriptionWriter {
 	return DescriptionWriter{Mode: mode}
 }
+
+// WriteMode returns the mode transitions required around description commands.
 func (p DescriptionWriter) WriteMode() dialect.WriteMode { return p.Mode }
+
+// ChangeCommands renders commands that enter the interface and set its description.
 func (DescriptionWriter) ChangeCommands(interfaceName, description string) ([]string, error) {
 	return []string{"interface " + interfaceName, "description " + description}, nil
 }
@@ -87,4 +102,5 @@ func (DescriptionWriter) ChangeCommands(interfaceName, description string) ([]st
 // without making it implement a write capability.
 type WriteRestriction struct{ Code string }
 
+// UnavailableCode returns the stable reason this platform cannot change descriptions.
 func (p WriteRestriction) UnavailableCode() string { return p.Code }

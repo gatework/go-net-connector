@@ -13,6 +13,7 @@ import (
 	"github.com/gatework/go-net-connector/archive"
 )
 
+// Defaults returns a fresh configuration with the requested operation defaults.
 func Defaults(mode string) map[string]any {
 	m := map[string]any{
 		"netdisco": map[string]any{
@@ -44,6 +45,7 @@ func Defaults(mode string) map[string]any {
 	return m
 }
 
+// EnvironmentTemplate is the credential file template used for initialization.
 const EnvironmentTemplate = `# CLI > 进程环境 > YAML > .env > 默认值。
 # 凭据不会写入 YAML，仅填写实际使用的变量。
 # ND_URL=
@@ -114,6 +116,8 @@ func InitializeSelected(s Snapshot, name string, createConfig, createEnv bool) (
 	}
 	return created, nil
 }
+
+// FromEnvironment decodes supported public settings from explicitly supplied variables.
 func FromEnvironment(values map[string]string) (map[string]any, error) {
 	return environmentValues(values, nil, nil)
 }

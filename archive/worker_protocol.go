@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// Request describes one archive protocol action and its bounded phase budgets.
 type Request struct {
 	Version     int            `json:"version"`
 	Timeouts    *TimeoutBudget `json:"timeouts,omitempty"`

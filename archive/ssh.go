@@ -110,6 +110,10 @@ func (m *sshMaster) prepare(ctx context.Context) (err error) {
 	m.done = make(chan error, 1)
 	done := m.done
 	go func() { done <- cmd.Wait(); close(done) }()
+	return m.awaitReady(ctx)
+}
+
+func (m *sshMaster) awaitReady(ctx context.Context) error {
 	deadline := time.NewTimer(15 * time.Second)
 	defer deadline.Stop()
 	tick := time.NewTicker(100 * time.Millisecond)

@@ -97,24 +97,34 @@ func New(d Driver, cfg ConnectionConfig, opts ...Option) (*Device, error) {
 	device.log = &logWriter{target: cfg.Logger, level: cfg.LogLevel, host: cfg.Host, encoding: "auto", paused: true}
 	return device, nil
 }
+
+// PlatformName returns the terminal declaration name.
 func (d *Device) PlatformName() string { return d.terminal.Name }
-func (d *Device) Host() string         { return d.config.Host }
-func (d *Device) Connected() bool      { return d.connected.Load() }
+
+// Host returns the configured device host.
+func (d *Device) Host() string { return d.config.Host }
+
+// Connected reports whether authentication completed on the current session.
+func (d *Device) Connected() bool { return d.connected.Load() }
 
 type promptState struct {
 	raw, text string
 	err       error
 }
 
+// RawPrompt returns the last accepted prompt without decoding or redaction.
 func (d *Device) RawPrompt() string {
 	s, _ := d.prompt.Load().(promptState)
 	return s.raw
 }
 
+// Prompt returns the last prompt as verified text or its conversion error.
 func (d *Device) Prompt() (string, error) {
 	s, _ := d.prompt.Load().(promptState)
 	return s.text, s.err
 }
+
+// Connect explicitly establishes a session and retires it on failure.
 func (d *Device) Connect(ctx context.Context) (err error) {
 	if err = d.acquire(); err != nil {
 		return err
@@ -163,6 +173,8 @@ func (d *Device) Close() error {
 	}
 	return nil
 }
+
+// HAState returns the inspected HA state while the device is connected.
 func (d *Device) HAState() string {
 	if !d.connected.Load() {
 		return ""
@@ -318,31 +330,9 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 			err = joinFailures(err, d.sessionEvent(ctx, "connect_failed", "error", Command{}, "failed"))
 		}
 	}()
-	cfg.Challenges = cloneInteractions(cfg.Challenges)
-	cfg.LegacyCryptoArguments = append([]string(nil), cfg.LegacyCryptoArguments...)
-	t, e := d.factory(ctx, cfg)
-	// A partial factory return still transfers cleanup responsibility.
-	if !isNilValue(t) {
-		d.transport = t
-		d.owner = &closeOwner{ReadWriteCloser: t}
-	}
+	t, session, e := d.openSession(ctx, cfg)
 	if e != nil {
-		return joinCleanup(newError("connection_failed", "connect", Command{}, e), d.closeResources())
-	}
-	if isNilValue(t) {
-		return ErrConnection
-	}
-	var owned io.ReadWriteCloser = d.owner
-	if conn, ok := t.(syscall.Conn); ok {
-		owned = &osCloseOwner{closeOwner: d.owner, Conn: conn}
-	}
-	opts := []expect.SessionOption{expect.WithBufferLimit(int(d.config.MaxOutputBytes)), expect.WithDefaultTimeout(0), expect.WithWriteTimeout(0), expect.WithOutput(d.log)}
-	if _, ok := t.(syscall.Conn); ok {
-		opts = append(opts, expect.WithOSPolling())
-	}
-	session, e := expect.NewSession(owned, opts...)
-	if e != nil {
-		return joinCleanup(e, d.closeResources())
+		return e
 	}
 	d.lifeMu.Lock()
 	if d.closed {
@@ -381,6 +371,43 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 	d.lifeMu.Unlock()
 	d.retired.Store(false)
 	d.privileged.Store(strings.Contains(response.Response().RawPrompt(), "]"))
+	return d.finishLogin(ctx, t, response)
+}
+
+// openSession transfers every partial factory result into owned cleanup before
+// constructing the matching session.
+func (d *Device) openSession(ctx context.Context, cfg ConnectionConfig) (io.ReadWriteCloser, *expect.Session, error) {
+	cfg.Challenges = cloneInteractions(cfg.Challenges)
+	cfg.LegacyCryptoArguments = append([]string(nil), cfg.LegacyCryptoArguments...)
+	t, e := d.factory(ctx, cfg)
+	// A partial factory return still transfers cleanup responsibility.
+	if !isNilValue(t) {
+		d.transport = t
+		d.owner = &closeOwner{ReadWriteCloser: t}
+	}
+	if e != nil {
+		return nil, nil, joinCleanup(newError("connection_failed", "connect", Command{}, e), d.closeResources())
+	}
+	if isNilValue(t) {
+		return nil, nil, ErrConnection
+	}
+	var owned io.ReadWriteCloser = d.owner
+	if conn, ok := t.(syscall.Conn); ok {
+		owned = &osCloseOwner{closeOwner: d.owner, Conn: conn}
+	}
+	opts := []expect.SessionOption{expect.WithBufferLimit(int(d.config.MaxOutputBytes)), expect.WithDefaultTimeout(0), expect.WithWriteTimeout(0), expect.WithOutput(d.log)}
+	if _, ok := t.(syscall.Conn); ok {
+		opts = append(opts, expect.WithOSPolling())
+	}
+	session, e := expect.NewSession(owned, opts...)
+	if e != nil {
+		return nil, nil, joinCleanup(e, d.closeResources())
+	}
+	return t, session, nil
+}
+
+// finishLogin runs post-authentication checks after publishing the accepted prompt.
+func (d *Device) finishLogin(ctx context.Context, t io.ReadWriteCloser, response StepResult) error {
 	if d.inspector != nil {
 		// Freeze verified text before publishing the login response. A callback
 		// may inspect conversion errors or choose to consume only the raw banner.
@@ -397,7 +424,7 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 	if c, ok := t.(interface {
 		Authenticated(ctx context.Context) error
 	}); ok {
-		if e = c.Authenticated(ctx); e != nil {
+		if e := c.Authenticated(ctx); e != nil {
 			return newError("host_key_commit_failed", "login", Command{}, e)
 		}
 	}

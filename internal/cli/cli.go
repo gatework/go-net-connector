@@ -22,6 +22,7 @@ import (
 	"github.com/gatework/go-net-connector/netdisco"
 )
 
+// Runtime supplies the CLI input, output and environment boundaries.
 type Runtime struct {
 	reporter           *progress.Reporter
 	Args               []string
@@ -35,6 +36,8 @@ type Runtime struct {
 }
 
 func integerString(n int) string { return strconv.Itoa(n) }
+
+// Run executes the CLI and returns its process exit code.
 func (r Runtime) Run(ctx context.Context) int {
 	if r.Input == nil {
 		r.Input = os.Stdin
@@ -140,7 +143,7 @@ func (x *selectedRun) setup(ctx context.Context) (code int, done bool) {
 	if o.mode == "topology" {
 		name = "topology"
 	}
-	createConfig, createEnv := true, true
+	var createConfig, createEnv bool
 	reader := bufio.NewReader(contextInput(ctx, r.Input))
 	var e error
 	if request.kind == requestInitialize {
@@ -202,6 +205,8 @@ func (x *selectedRun) checkOrShow() (code int, done bool) {
 		data := policy.Public()
 		data["sources"] = policy.Sources()
 		return r.renderConfiguration(data, o.mode, false, o.json), true
+	default:
+		// Other requests proceed to operation-specific validation.
 	}
 	if o.mode == "topology" {
 		if e := bootstrap.ValidateTopology(policy, request.topologyMode()); e != nil {

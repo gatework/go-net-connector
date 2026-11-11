@@ -14,13 +14,16 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+// ErrInvalid identifies a malformed or unsafe configuration.
 var ErrInvalid = errors.New("config: invalid configuration")
 
+// MaxBytes bounds configuration documents and expanded environment snapshots.
 const MaxBytes = 16 << 20
 
 const maxDepth = 128
 const maxNodes = 100000
 
+// ParseYAML decodes one bounded YAML mapping and rejects aliases and duplicate keys.
 func ParseYAML(data []byte) (map[string]any, error) {
 	return parseYAML(data, false)
 }
@@ -185,27 +188,8 @@ func (p *envParser) value(quote byte, base int) (string, error) {
 			}
 			break
 		}
-		if c == '\\' && quote != '\'' && len(p.text) > 0 && strings.IndexByte("$\"\\# ", p.text[0]) >= 0 {
-			if v.writeByte(p.text[0]) != nil {
-				return "", ErrInvalid
-			}
-			p.text = p.text[1:]
-			continue
-		}
-		if c == '$' && quote != '\'' {
-			name, err := p.variable()
-			if err != nil {
-				return "", err
-			}
-			if name != "" {
-				if v.write(p.lookup(name)) != nil {
-					return "", ErrInvalid
-				}
-				continue
-			}
-		}
-		if v.writeByte(c) != nil {
-			return "", ErrInvalid
+		if err := p.valueByte(&v, quote, c); err != nil {
+			return "", err
 		}
 	}
 	if !closed {
@@ -225,6 +209,26 @@ func (p *envParser) value(quote byte, base int) (string, error) {
 		return "", ErrInvalid
 	}
 	return value, nil
+}
+
+func (p *envParser) valueByte(v *boundedValue, quote, c byte) error {
+	if c == '\\' && quote != '\'' && len(p.text) > 0 && strings.IndexByte("$\"\\# ", p.text[0]) >= 0 {
+		if err := v.writeByte(p.text[0]); err != nil {
+			return err
+		}
+		p.text = p.text[1:]
+		return nil
+	}
+	if c == '$' && quote != '\'' {
+		name, err := p.variable()
+		if err != nil {
+			return err
+		}
+		if name != "" {
+			return v.write(p.lookup(name))
+		}
+	}
+	return v.writeByte(c)
 }
 
 // variable reads the name after a $: ${NAME} or a bare identifier. A bare
@@ -261,6 +265,8 @@ type boundedValue struct {
 	base int
 }
 
+func (v *boundedValue) String() string { return v.b.String() }
+
 func (v *boundedValue) write(s string) error {
 	if len(s) > MaxBytes-v.b.Len() || len(s) > MaxBytes-v.base-v.b.Len() {
 		return ErrInvalid
@@ -276,8 +282,6 @@ func (v *boundedValue) writeByte(c byte) error {
 	v.b.WriteByte(c)
 	return nil
 }
-
-func (v *boundedValue) String() string { return v.b.String() }
 
 // environmentSize bounds an effective environment snapshot, including key bytes.
 func environmentSize(values map[string]string) (int, error) {

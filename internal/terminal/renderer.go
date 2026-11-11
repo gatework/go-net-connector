@@ -13,9 +13,13 @@ import (
 	"github.com/gatework/go-net-connector/internal/textcodec"
 )
 
+// ErrLimit reports an oversized terminal line or escape sequence.
 var ErrLimit = errors.New("terminal: line or escape sequence exceeds limit")
+
+// ErrEncoding reports invalid text when strict decoding is required.
 var ErrEncoding = errors.New("terminal: invalid UTF-8")
 
+// Renderer applies bounded terminal edits before emitting complete lines.
 type Renderer struct {
 	// Encoding selects decoding after a complete terminal line is assembled.
 	// Empty preserves the original UTF-8 behavior.
@@ -28,9 +32,12 @@ type Renderer struct {
 	strict        bool
 }
 
+// New creates a renderer that borrows w and bounds each line by limit.
 func New(w io.Writer, limit int, strict bool) *Renderer {
 	return &Renderer{target: w, limit: limit, strict: strict}
 }
+
+// Render applies terminal edits and returns the visible UTF-8 text.
 func Render(input []byte, strict bool) (string, error) {
 	return RenderEncoded(input, strict, "")
 }
@@ -87,6 +94,8 @@ func (r *Renderer) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
+
+// Finish emits any pending line without adding a newline.
 func (r *Renderer) Finish() error {
 	if len(r.line) > 0 {
 		return r.emit(false)
@@ -119,61 +128,7 @@ func (r *Renderer) escape(b byte) error {
 			r.state = 'o'
 		}
 	case 'c':
-		if b >= 0x40 && b <= 0x7e {
-			n := 1
-			var digits strings.Builder
-			for _, x := range r.params {
-				if x >= '0' && x <= '9' {
-					digits.WriteString(string(x))
-				} else if digits.String() != "" {
-					break
-				}
-			}
-			if digits.String() != "" {
-				v, e := strconv.Atoi(digits.String())
-				if e != nil {
-					return ErrLimit
-				}
-				n = v
-			}
-			switch b {
-			case 'C':
-				if n > r.limit-r.cursor {
-					return ErrLimit
-				}
-				r.cursor += n
-			case 'D':
-				r.cursor = max(0, r.cursor-n)
-			case 'G':
-				if n > r.limit {
-					return ErrLimit
-				}
-				r.cursor = max(0, n-1)
-			case 'K':
-				if digits.String() == "" {
-					n = 0
-				}
-				switch n {
-				case 0:
-					r.line = r.line[:min(r.cursor, len(r.line))]
-				case 1:
-					for i := range min(r.cursor+1, len(r.line)) {
-						r.line[i] = ' '
-					}
-				case 2:
-					r.line = r.line[:0]
-					r.cursor = 0
-				}
-			}
-			r.state = 0
-		} else if b >= 0x20 && b <= 0x3f {
-			if len(r.params) >= 64 {
-				return ErrLimit
-			}
-			r.params = append(r.params, b)
-		} else {
-			r.state = 0
-		}
+		return r.control(b)
 	}
 	return nil
 }
@@ -276,4 +231,70 @@ func RenderString(input string, strict bool) (string, error) {
 		return input, nil
 	}
 	return out.String(), nil
+}
+
+func (r *Renderer) control(b byte) error {
+	if b >= 0x40 && b <= 0x7e {
+		n := 1
+		var digits strings.Builder
+		for _, x := range r.params {
+			if x >= '0' && x <= '9' {
+				digits.WriteString(string(x))
+			} else if digits.String() != "" {
+				break
+			}
+		}
+		if digits.String() != "" {
+			v, e := strconv.Atoi(digits.String())
+			if e != nil {
+				return ErrLimit
+			}
+			n = v
+		}
+		if err := r.applyControl(b, n, digits.String() == ""); err != nil {
+			return err
+		}
+		r.state = 0
+	} else if b >= 0x20 && b <= 0x3f {
+		if len(r.params) >= 64 {
+			return ErrLimit
+		}
+		r.params = append(r.params, b)
+	} else {
+		r.state = 0
+	}
+	return nil
+}
+
+func (r *Renderer) applyControl(b byte, n int, empty bool) error {
+	switch b {
+	case 'C':
+		if n > r.limit-r.cursor {
+			return ErrLimit
+		}
+		r.cursor += n
+	case 'D':
+		r.cursor = max(0, r.cursor-n)
+	case 'G':
+		if n > r.limit {
+			return ErrLimit
+		}
+		r.cursor = max(0, n-1)
+	case 'K':
+		if empty {
+			n = 0
+		}
+		switch n {
+		case 0:
+			r.line = r.line[:min(r.cursor, len(r.line))]
+		case 1:
+			for i := range min(r.cursor+1, len(r.line)) {
+				r.line[i] = ' '
+			}
+		case 2:
+			r.line = r.line[:0]
+			r.cursor = 0
+		}
+	}
+	return nil
 }

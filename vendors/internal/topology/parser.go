@@ -30,6 +30,7 @@ type Parser struct {
 	DecodeDescription, StrictDescription  bool
 }
 
+// ParseNeighbors requires parsed rows to match the independently counted records.
 func (p Parser) ParseNeighbors(output string) ([]dialect.Neighbor, error) {
 	if p.NeighborTemplate == "" || p.CountNeighbors == nil {
 		return nil, dialect.ErrUnsupported
@@ -63,6 +64,7 @@ func (p Parser) ParseNeighbors(output string) ([]dialect.Neighbor, error) {
 	return neighbors, nil
 }
 
+// ParseDescriptions validates and normalizes interface description records.
 func (p Parser) ParseDescriptions(config string) (map[string]string, error) {
 	if p.DescriptionTemplate == "" {
 		return nil, dialect.ErrUnsupported

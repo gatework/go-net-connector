@@ -1,0 +1,44 @@
+# Import ownership remains transitive, including internal helper packages.
+declared:
+  - ./archive
+  - ./cmd/netman
+  - ./cmd/tftp-archive
+  - ./config
+  - ./connector
+  - ./fleet
+  - ./inventory
+  - ./netdisco
+  - ./parallel
+  - ./storage
+  - ./textfsm
+  - ./topology
+  - ./transfer
+  - ./vendors/...
+  - ./internal/batchreport
+  - ./internal/bootstrap
+  - ./internal/buildinfo
+  - ./internal/cli
+  - ./internal/display
+  - ./internal/ifname
+  - ./internal/progress
+  - ./internal/terminal
+  - ./internal/textcodec
+  - ./internal/textdiff
+  - ./internal/workflow
+rules:
+  - name: libraries do not depend on application orchestration
+    packages: [./archive, ./config, ./connector, ./fleet, ./inventory, ./netdisco, ./parallel, ./storage, ./textfsm, ./topology, ./transfer, ./vendors/...]
+    deny: [./cmd/..., ./internal/bootstrap, ./internal/cli, ./internal/workflow]
+    transitive: true
+  - name: generic device execution does not select vendors
+    packages: [./connector]
+    deny: [./vendors/...]
+    transitive: true
+  - name: bootstrap does not depend on CLI composition
+    packages: [./internal/bootstrap]
+    deny: [./cmd/..., ./internal/cli]
+    transitive: true
+  - name: workflows do not own application composition or progress reporting
+    packages: [./internal/workflow]
+    deny: [./cmd/..., ./internal/bootstrap, ./internal/cli, ./internal/progress]
+    transitive: true
