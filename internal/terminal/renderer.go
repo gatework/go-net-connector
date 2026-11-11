@@ -119,64 +119,92 @@ func (r *Renderer) escape(b byte) error {
 			r.state = 'o'
 		}
 	case 'c':
-		if b >= 0x40 && b <= 0x7e {
-			n := 1
-			var digits strings.Builder
-			for _, x := range r.params {
-				if x >= '0' && x <= '9' {
-					digits.WriteString(string(x))
-				} else if digits.String() != "" {
-					break
-				}
-			}
-			if digits.String() != "" {
-				v, e := strconv.Atoi(digits.String())
-				if e != nil {
-					return ErrLimit
-				}
-				n = v
-			}
-			switch b {
-			case 'C':
-				if n > r.limit-r.cursor {
-					return ErrLimit
-				}
-				r.cursor += n
-			case 'D':
-				r.cursor = max(0, r.cursor-n)
-			case 'G':
-				if n > r.limit {
-					return ErrLimit
-				}
-				r.cursor = max(0, n-1)
-			case 'K':
-				if digits.String() == "" {
-					n = 0
-				}
-				switch n {
-				case 0:
-					r.line = r.line[:min(r.cursor, len(r.line))]
-				case 1:
-					for i := range min(r.cursor+1, len(r.line)) {
-						r.line[i] = ' '
-					}
-				case 2:
-					r.line = r.line[:0]
-					r.cursor = 0
-				}
-			}
-			r.state = 0
-		} else if b >= 0x20 && b <= 0x3f {
-			if len(r.params) >= 64 {
-				return ErrLimit
-			}
-			r.params = append(r.params, b)
-		} else {
-			r.state = 0
-		}
+		return r.csi(b)
 	}
 	return nil
 }
+// csi consumes one byte of a control sequence: parameter bytes are
+// collected and a final byte applies the sequence.
+func (r *Renderer) csi(b byte) error {
+	switch {
+	case b >= 0x40 && b <= 0x7e:
+		digits := firstNumber(r.params)
+		n := 1
+		if digits != "" {
+			v, e := strconv.Atoi(digits)
+			if e != nil {
+				return ErrLimit
+			}
+			n = v
+		}
+		if e := r.control(b, n, digits != ""); e != nil {
+			return e
+		}
+		r.state = 0
+	case b >= 0x20 && b <= 0x3f:
+		if len(r.params) >= 64 {
+			return ErrLimit
+		}
+		r.params = append(r.params, b)
+	default:
+		r.state = 0
+	}
+	return nil
+}
+
+// firstNumber returns the first run of decimal digits in params.
+func firstNumber(params []byte) string {
+	var digits strings.Builder
+	for _, x := range params {
+		if x >= '0' && x <= '9' {
+			digits.WriteByte(x)
+		} else if digits.Len() > 0 {
+			break
+		}
+	}
+	return digits.String()
+}
+
+// control applies the cursor movement and erase sequences with parameter n;
+// explicit reports whether n was given.
+func (r *Renderer) control(final byte, n int, explicit bool) error {
+	switch final {
+	case 'C':
+		if n > r.limit-r.cursor {
+			return ErrLimit
+		}
+		r.cursor += n
+	case 'D':
+		r.cursor = max(0, r.cursor-n)
+	case 'G':
+		if n > r.limit {
+			return ErrLimit
+		}
+		r.cursor = max(0, n-1)
+	case 'K':
+		if !explicit {
+			n = 0
+		}
+		r.erase(n)
+	}
+	return nil
+}
+
+// erase applies "erase in line": 0 to the end, 1 to the start, 2 all.
+func (r *Renderer) erase(mode int) {
+	switch mode {
+	case 0:
+		r.line = r.line[:min(r.cursor, len(r.line))]
+	case 1:
+		for i := range min(r.cursor+1, len(r.line)) {
+			r.line[i] = ' '
+		}
+	case 2:
+		r.line = r.line[:0]
+		r.cursor = 0
+	}
+}
+
 func (r *Renderer) emit(newline bool) error {
 	line := r.line
 	if r.Encoding != "bytes" {
