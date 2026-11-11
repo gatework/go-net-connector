@@ -447,7 +447,7 @@ func (d *Device) readResponse(ctx context.Context, c Command, prompt expect.Patt
 		r.completed = true
 		return expect.Return, nil
 	})
-	options := []expect.ExpectOption{expect.WithTimeout(0), expect.WithMatchOrder(expect.Declaration), expect.WithStreamingFallback(func(_ context.Context, _ *expect.Session, m expect.Result) (expect.Action, error) {
+	options := []expect.MatchOption{expect.WithTimeout(0), expect.WithMatchOrder(expect.Declaration), expect.WithStreamingFallback(func(_ context.Context, _ *expect.Session, m expect.Result) (expect.Action, error) {
 		return expect.ContinueKeepTimer, r.appendSegment(m, true)
 	})}
 	var final expect.Result
