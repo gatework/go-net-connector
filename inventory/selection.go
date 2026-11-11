@@ -29,6 +29,9 @@ type AddressSet struct {
 	intervals []interval
 }
 
+// NewAddressSet parses exact addresses, CIDR prefixes and first-last
+// ranges (an IPv4 range may abbreviate the last address to its final
+// octet). Overlapping and adjacent ranges are merged.
 func NewAddressSet(values []string) (AddressSet, error) {
 	s := AddressSet{exact: make(map[netip.Addr]struct{})}
 	for _, value := range values {
@@ -36,44 +39,19 @@ func NewAddressSet(values []string) (AddressSet, error) {
 			return s, ErrInvalid
 		}
 		if strings.Contains(value, "/") {
-			prefix, e := netip.ParsePrefix(value)
+			r, e := prefixInterval(value)
 			if e != nil {
-				return s, ErrInvalid
+				return s, e
 			}
-			prefix = prefix.Masked()
-			first := prefix.Addr()
-			var last netip.Addr
-			if first.Is4() {
-				b := first.As4()
-				for i := prefix.Bits(); i < 32; i++ {
-					b[i/8] |= 1 << uint(7-i%8)
-				}
-				last = netip.AddrFrom4(b)
-			} else {
-				b := first.As16()
-				for i := prefix.Bits(); i < 128; i++ {
-					b[i/8] |= 1 << uint(7-i%8)
-				}
-				last = netip.AddrFrom16(b)
-			}
-			s.intervals = append(s.intervals, interval{first, last})
+			s.intervals = append(s.intervals, r)
 			continue
 		}
 		if strings.Contains(strings.SplitN(value, "%", 2)[0], "-") {
-			parts := strings.SplitN(value, "-", 2)
-			first, e := netip.ParseAddr(parts[0])
+			r, e := rangeInterval(value)
 			if e != nil {
-				return s, ErrInvalid
+				return s, e
 			}
-			if first.Is4() && !strings.Contains(parts[1], ".") {
-				octets := strings.Split(first.String(), ".")
-				parts[1] = strings.Join(octets[:3], ".") + "." + parts[1]
-			}
-			last, e := netip.ParseAddr(parts[1])
-			if e != nil || first.BitLen() != last.BitLen() || first.Zone() != "" || last.Zone() != "" || first.Compare(last) > 0 {
-				return s, ErrInvalid
-			}
-			s.intervals = append(s.intervals, interval{first, last})
+			s.intervals = append(s.intervals, r)
 			continue
 		}
 		address, e := netip.ParseAddr(value)
@@ -82,9 +60,57 @@ func NewAddressSet(values []string) (AddressSet, error) {
 		}
 		s.exact[address] = struct{}{}
 	}
-	sort.Slice(s.intervals, func(i, j int) bool { return s.intervals[i].first.Compare(s.intervals[j].first) < 0 })
-	merged := make([]interval, 0, len(s.intervals))
-	for _, v := range s.intervals {
+	s.intervals = mergeIntervals(s.intervals)
+	return s, nil
+}
+
+// prefixInterval returns the addresses a CIDR prefix covers.
+func prefixInterval(value string) (interval, error) {
+	prefix, e := netip.ParsePrefix(value)
+	if e != nil {
+		return interval{}, ErrInvalid
+	}
+	prefix = prefix.Masked()
+	first := prefix.Addr()
+	if first.Is4() {
+		b := first.As4()
+		for i := prefix.Bits(); i < 32; i++ {
+			b[i/8] |= 1 << uint(7-i%8)
+		}
+		return interval{first, netip.AddrFrom4(b)}, nil
+	}
+	b := first.As16()
+	for i := prefix.Bits(); i < 128; i++ {
+		b[i/8] |= 1 << uint(7-i%8)
+	}
+	return interval{first, netip.AddrFrom16(b)}, nil
+}
+
+// rangeInterval parses "first-last", completing an IPv4 last address given
+// as a final octet.
+func rangeInterval(value string) (interval, error) {
+	parts := strings.SplitN(value, "-", 2)
+	first, e := netip.ParseAddr(parts[0])
+	if e != nil {
+		return interval{}, ErrInvalid
+	}
+	if first.Is4() && !strings.Contains(parts[1], ".") {
+		octets := strings.Split(first.String(), ".")
+		parts[1] = strings.Join(octets[:3], ".") + "." + parts[1]
+	}
+	last, e := netip.ParseAddr(parts[1])
+	if e != nil || first.BitLen() != last.BitLen() || first.Zone() != "" || last.Zone() != "" || first.Compare(last) > 0 {
+		return interval{}, ErrInvalid
+	}
+	return interval{first, last}, nil
+}
+
+// mergeIntervals sorts intervals and merges those of one address family
+// that overlap or touch.
+func mergeIntervals(intervals []interval) []interval {
+	sort.Slice(intervals, func(i, j int) bool { return intervals[i].first.Compare(intervals[j].first) < 0 })
+	merged := make([]interval, 0, len(intervals))
+	for _, v := range intervals {
 		if len(merged) > 0 {
 			last := &merged[len(merged)-1]
 			adj := last.last.Next()
@@ -97,9 +123,9 @@ func NewAddressSet(values []string) (AddressSet, error) {
 		}
 		merged = append(merged, v)
 	}
-	s.intervals = merged
-	return s, nil
+	return merged
 }
+
 func (s AddressSet) Empty() bool { return len(s.exact) == 0 && len(s.intervals) == 0 }
 func (s AddressSet) Contains(host string) bool {
 	a, e := netip.ParseAddr(host)
@@ -181,6 +207,7 @@ func NewSelection(o SelectionOptions) (Selection, error) {
 	s.vendors, e = makeRules(o.IncludeVendors, o.ExcludeVendors, MatchExact)
 	return s, e
 }
+// Evaluate returns the reasons d is not selected; none means selected.
 func (s Selection) Evaluate(d Device) Decision {
 	reasons := make([]string, 0, 4)
 	if s.excludeHosts.Contains(d.IP) {
@@ -192,45 +219,60 @@ func (s Selection) Evaluate(d Device) Decision {
 		name, value string
 		rules       textRules
 	}{{"vendor", d.Vendor, s.vendors}, {"name", d.Name, s.names}, {"model", d.Model, s.models}} {
-		value := strings.ToLower(strings.ToValidUTF8(field.value, ""))
-		globValue := value
-		if field.rules.mode == MatchGlob {
-			globValue = strings.ReplaceAll(value, "/", "\x00")
-		}
-		matches := func(list []string) bool {
-			for _, p := range list {
-				switch field.rules.mode {
-				case MatchExact:
-					if value == p {
-						return true
-					}
-				case MatchContains:
-					if strings.Contains(value, p) {
-						return true
-					}
-				case MatchPrefix:
-					if strings.HasPrefix(value, p) {
-						return true
-					}
-				case MatchGlob:
-					if !strings.HasPrefix(value, ".") || strings.HasPrefix(p, ".") {
-						ok, e := path.Match(field.rules.globs[p], globValue)
-						if e == nil && ok {
-							return true
-						}
-					}
-				}
-			}
-			return false
-		}
-		if matches(field.rules.exclude) {
-			reasons = append(reasons, field.name+"_excluded")
-		} else if len(field.rules.include) > 0 && !matches(field.rules.include) {
-			reasons = append(reasons, field.name+"_not_included")
+		if reason := field.rules.reason(field.name, field.value); reason != "" {
+			reasons = append(reasons, reason)
 		}
 	}
 	return Decision{reasons}
 }
+
+// reason returns why value fails the rules for the named field, or "".
+func (r textRules) reason(name, value string) string {
+	value = strings.ToLower(strings.ToValidUTF8(value, ""))
+	if r.matches(value, r.exclude) {
+		return name + "_excluded"
+	}
+	if len(r.include) > 0 && !r.matches(value, r.include) {
+		return name + "_not_included"
+	}
+	return ""
+}
+
+// matches reports whether the lower-case value matches any pattern.
+func (r textRules) matches(value string, patterns []string) bool {
+	globValue := value
+	if r.mode == MatchGlob {
+		globValue = strings.ReplaceAll(value, "/", "\x00")
+	}
+	for _, p := range patterns {
+		if r.match(value, globValue, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// match reports whether value matches pattern p under the rules' mode. A
+// glob does not match a leading dot unless the pattern starts with one.
+func (r textRules) match(value, globValue, p string) bool {
+	switch r.mode {
+	case MatchExact:
+		return value == p
+	case MatchContains:
+		return strings.Contains(value, p)
+	case MatchPrefix:
+		return strings.HasPrefix(value, p)
+	case MatchGlob:
+		if strings.HasPrefix(value, ".") && !strings.HasPrefix(p, ".") {
+			return false
+		}
+		ok, e := path.Match(r.globs[p], globValue)
+		return e == nil && ok
+	default:
+		return false
+	}
+}
+
 func translateGlob(pattern string) string {
 	// Glob semantics: '*' may cross '/', and both [!...] and [^...] negate a
 	// class. Escapes are respected.
