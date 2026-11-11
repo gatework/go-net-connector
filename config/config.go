@@ -170,161 +170,210 @@ func Load(ctx context.Context, o Options) (snapshot Snapshot, err error) {
 	if o.Name != "backup" && o.Name != "topology" {
 		return s, ErrInvalid
 	}
-	// Validate and own caller data before walking or merging any containers.
-	for _, layer := range []*map[string]any{&o.Defaults, &o.Overrides} {
-		if err := ctx.Err(); err != nil {
+	l := &loader{ctx: ctx, o: o, s: &s, envOrigins: map[string]string{}}
+	for _, step := range []func() error{l.ownLayers, l.resolveLocations, l.readEnvironmentFiles, l.readConfigurationFiles, l.mergeLayers, l.finish} {
+		if err := step(); err != nil {
 			return s, err
+		}
+	}
+	return s, ctx.Err()
+}
+
+// loader is the state of one Load call.
+type loader struct {
+	ctx        context.Context //nolint:containedctx // scoped to one Load call
+	o          Options
+	s          *Snapshot
+	process    map[string]string
+	user       string   // the user configuration directory
+	dirs       []string // the configuration search directories
+	envFile    string   // the selected .env file, if any
+	envOrigins map[string]string
+	selected   string // the selected configuration file, if any
+	yamlData   map[string]any
+}
+
+// ownLayers validates and copies the caller's default and override layers
+// before any container is walked or merged.
+func (l *loader) ownLayers() error {
+	for _, layer := range []*map[string]any{&l.o.Defaults, &l.o.Overrides} {
+		if err := l.ctx.Err(); err != nil {
+			return err
 		}
 		owned, e := copyPlain(*layer)
 		if e != nil {
-			return s, e
+			return e
 		}
 		*layer, _ = owned.(map[string]any)
 		if e := rejectRemovedFields(*layer); e != nil {
-			return s, e
+			return e
 		}
 	}
-	if err := ctx.Err(); err != nil {
-		return s, err
-	}
+	return l.ctx.Err()
+}
+
+// resolveLocations makes the home and working directories absolute, copies
+// the process environment and settles the search directories.
+func (l *loader) resolveLocations() error {
+	o := &l.o
 	actualCWD, e := os.Getwd()
 	if e != nil {
-		return s, e
+		return e
 	}
 	if o.Home == "" {
-		o.Home, e = os.UserHomeDir()
-		if e != nil {
-			return s, e
+		if o.Home, e = os.UserHomeDir(); e != nil {
+			return e
 		}
 	}
 	o.Home = absolutePath(o.Home, actualCWD, o.Home)
 	if !filepath.IsAbs(o.Home) {
-		return s, ErrInvalid
+		return ErrInvalid
 	}
 	if o.CWD == "" {
 		o.CWD = actualCWD
 	}
 	o.CWD = absolutePath(o.CWD, actualCWD, o.Home)
-	process := map[string]string{}
-	maps.Copy(process, o.Environment)
-	if e := resolveEnvironmentPaths(process, o.CWD, o.Home); e != nil {
-		return s, e
+	l.process = map[string]string{}
+	maps.Copy(l.process, o.Environment)
+	if e := resolveEnvironmentPaths(l.process, o.CWD, o.Home); e != nil {
+		return e
 	}
-	user := process["XDG_CONFIG_HOME"]
+	user := l.process["XDG_CONFIG_HOME"]
 	if user == "" {
 		user = filepath.Join(o.Home, ".config")
 	}
-	user = filepath.Join(absolutePath(user, o.CWD, o.Home), "net-connector")
+	l.user = filepath.Join(absolutePath(user, o.CWD, o.Home), "net-connector")
 	dirs := append([]string{}, o.Directories...)
 	if o.Directories == nil {
 		program := o.Program
 		if program == "" {
 			program = os.Args[0]
 		}
-		dirs = []string{"/etc/net-connector", "/usr/local/etc/net-connector", user, filepath.Dir(absolutePath(program, o.CWD, o.Home)), o.CWD}
+		dirs = []string{"/etc/net-connector", "/usr/local/etc/net-connector", l.user, filepath.Dir(absolutePath(program, o.CWD, o.Home)), o.CWD}
 	}
 	for i, d := range dirs {
-		if err := ctx.Err(); err != nil {
-			return s, err
+		if err := l.ctx.Err(); err != nil {
+			return err
 		}
 		dirs[i] = absolutePath(d, o.CWD, o.Home)
 	}
-	dirs = uniquePaths(dirs, "")
-	envFile := ""
+	l.dirs = uniquePaths(dirs, "")
 	if o.EnvFile != "" {
-		envFile = absolutePath(o.EnvFile, o.CWD, o.Home)
+		l.envFile = absolutePath(o.EnvFile, o.CWD, o.Home)
 	}
-	envPathsList := []string{}
-	envOrigins := map[string]string{}
-	for _, dir := range dirs {
-		envPathsList = append(envPathsList, filepath.Join(dir, ".env"))
+	return nil
+}
+
+// readEnvironmentFiles reads the .env file of every search directory, the
+// selected one last, recording where each variable came from.
+func (l *loader) readEnvironmentFiles() error {
+	candidates := []string{}
+	for _, dir := range l.dirs {
+		candidates = append(candidates, filepath.Join(dir, ".env"))
 	}
-	for _, path := range uniquePaths(envPathsList, envFile) {
-		missingOK := path != envFile || o.AllowMissing
-		b, ok, e := ReadFile(ctx, path, missingOK)
+	for _, path := range uniquePaths(candidates, l.envFile) {
+		b, ok, e := ReadFile(l.ctx, path, path != l.envFile || l.o.AllowMissing)
 		if e != nil {
-			return s, e
+			return e
 		}
 		if !ok {
 			continue
 		}
-		m, e := ParseEnvironment(string(b), s.environment, process)
-		if err := ctx.Err(); err != nil {
-			return s, err
+		m, e := ParseEnvironment(string(b), l.s.environment, l.process)
+		if err := l.ctx.Err(); err != nil {
+			return err
 		}
 		if e != nil {
-			return s, e
+			return e
 		}
-		if e = resolveEnvironmentPaths(m, filepath.Dir(path), o.Home); e != nil {
-			return s, e
+		if e = resolveEnvironmentPaths(m, filepath.Dir(path), l.o.Home); e != nil {
+			return e
 		}
 		for k, v := range m {
-			s.environment[k] = v
-			envOrigins[k] = path
+			l.s.environment[k] = v
+			l.envOrigins[k] = path
 		}
-		s.envFiles = append(s.envFiles, path)
+		l.s.envFiles = append(l.s.envFiles, path)
 	}
-	selected := o.ConfigFile
+	return nil
+}
+
+// readConfigurationFiles selects the configuration file (explicit, then
+// NC_CONFIG from the process, then from .env) and merges every
+// net-connector.yml of the search directories, the selected one last.
+func (l *loader) readConfigurationFiles() error {
+	selected := l.o.ConfigFile
 	if selected == "" {
-		selected = process["NC_CONFIG"]
+		selected = l.process["NC_CONFIG"]
 		if strings.TrimSpace(selected) == "" {
-			selected = s.environment["NC_CONFIG"]
+			selected = l.s.environment["NC_CONFIG"]
 		}
 	}
 	if selected != "" {
-		selected = absolutePath(selected, o.CWD, o.Home)
+		selected = absolutePath(selected, l.o.CWD, l.o.Home)
 	}
+	l.selected = selected
 	paths := []string{}
-	for _, dir := range dirs {
+	for _, dir := range l.dirs {
 		paths = append(paths, filepath.Join(dir, "net-connector.yml"))
 	}
-	apply := func(m map[string]any, source string) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if e := rejectRemovedFields(m); e != nil {
-			return e
-		}
-		if e := resolvePaths(m, filepath.Dir(source), o.Home, ""); e != nil {
-			return e
-		}
-		recordFields(s.fields, s.data, m, source, "")
-		mergeValues(s.data, m)
-		return ctx.Err()
-	}
 	for _, path := range uniquePaths(paths, selected) {
-		missingOK := path != selected || o.AllowMissing
-		b, ok, e := ReadFile(ctx, path, missingOK)
+		b, ok, e := ReadFile(l.ctx, path, path != selected || l.o.AllowMissing)
 		if e != nil {
-			return s, e
+			return e
 		}
 		if !ok {
 			continue
 		}
 		m, e := ParseYAML(b)
-		if err := ctx.Err(); err != nil {
-			return s, err
+		if err := l.ctx.Err(); err != nil {
+			return err
 		}
 		if e != nil {
-			return s, e
+			return e
 		}
-		if e = apply(m, path); e != nil {
-			return s, e
+		if e = l.applyFile(m, path); e != nil {
+			return e
 		}
-		s.applicable = true
-		s.files = append(s.files, path)
+		l.s.applicable = true
+		l.s.files = append(l.s.files, path)
 	}
-	yamlData := s.data
+	return nil
+}
+
+// applyFile merges one configuration file, resolving its paths against its
+// directory and recording each field's source.
+func (l *loader) applyFile(m map[string]any, source string) error {
+	if err := l.ctx.Err(); err != nil {
+		return err
+	}
+	if e := rejectRemovedFields(m); e != nil {
+		return e
+	}
+	if e := resolvePaths(m, filepath.Dir(source), l.o.Home, ""); e != nil {
+		return e
+	}
+	recordFields(l.s.fields, l.s.data, m, source, "")
+	mergeValues(l.s.data, m)
+	return l.ctx.Err()
+}
+
+// mergeLayers rebuilds the data by precedence: defaults, then .env values,
+// then the configuration files, then the process environment. Higher layers
+// mask invalid lower values before environment decoding.
+func (l *loader) mergeLayers() error {
+	s := l.s
+	l.yamlData = s.data
 	processPresence := map[string]any{}
 	for path, f := range schema {
-		if _, ok := process[f.Env]; ok {
+		if _, ok := l.process[f.Env]; ok {
 			setPath(processPresence, path, true)
 		}
 	}
 	s.data = map[string]any{}
-	mergeValues(s.data, o.Defaults)
-	if e := resolvePaths(s.data, o.CWD, o.Home, ""); e != nil {
-		return s, e
+	mergeValues(s.data, l.o.Defaults)
+	if e := resolvePaths(s.data, l.o.CWD, l.o.Home, ""); e != nil {
+		return e
 	}
 	defaultFields := map[string]string{}
 	recordFields(defaultFields, map[string]any{}, s.data, "default", "")
@@ -333,69 +382,78 @@ func Load(ctx context.Context, o Options) (snapshot Snapshot, err error) {
 			s.fields[key] = source
 		}
 	}
-	// Higher layers mask invalid lower values before environment decoding.
 	for _, layer := range []struct {
 		env    map[string]string
 		higher map[string]any
 		source string
-	}{{s.environment, mergeMaps(mergeMaps(yamlData, processPresence), o.Overrides), ".env"}, {process, o.Overrides, "environment"}} {
-		if err := ctx.Err(); err != nil {
-			return s, err
+	}{{s.environment, mergeMaps(mergeMaps(l.yamlData, processPresence), l.o.Overrides), ".env"}, {l.process, l.o.Overrides, "environment"}} {
+		if err := l.ctx.Err(); err != nil {
+			return err
 		}
 		m, e := environmentValues(layer.env, layer.higher, nil)
-		if err := ctx.Err(); err != nil {
-			return s, err
+		if err := l.ctx.Err(); err != nil {
+			return err
 		}
 		if e != nil {
-			return s, e
+			return e
 		}
 		if layer.source == ".env" {
-			for path, f := range schema {
-				if origin := envOrigins[f.Env]; origin != "" && hasPath(m, path) {
-					part := map[string]any{}
-					setPath(part, path, valueAtPath(m, path))
-					recordFields(s.fields, s.data, part, origin, "")
-				}
-			}
-			mergeValues(s.data, m)
-			mergeValues(s.data, yamlData)
+			l.mergeDotEnv(m)
 		} else {
 			recordFields(s.fields, s.data, m, layer.source, "")
 			mergeValues(s.data, m)
 		}
 	}
-	if err := ctx.Err(); err != nil {
-		return s, err
+	return l.ctx.Err()
+}
+
+// mergeDotEnv merges the .env layer below the configuration files, recording
+// the .env file each decoded field came from.
+func (l *loader) mergeDotEnv(m map[string]any) {
+	s := l.s
+	for path, f := range schema {
+		if origin := l.envOrigins[f.Env]; origin != "" && hasPath(m, path) {
+			part := map[string]any{}
+			setPath(part, path, valueAtPath(m, path))
+			recordFields(s.fields, s.data, part, origin, "")
+		}
 	}
-	overrides := cloneValue(o.Overrides)
-	if overrides != nil {
+	mergeValues(s.data, m)
+	mergeValues(s.data, l.yamlData)
+}
+
+// finish applies the command-line overrides, validates the merged data and
+// environment against their budgets and records the selected paths.
+func (l *loader) finish() error {
+	s := l.s
+	if overrides := cloneValue(l.o.Overrides); overrides != nil {
 		m, _ := overrides.(map[string]any)
-		if e := resolvePaths(m, o.CWD, o.Home, ""); e != nil {
-			return s, e
+		if e := resolvePaths(m, l.o.CWD, l.o.Home, ""); e != nil {
+			return e
 		}
 		recordFields(s.fields, s.data, m, "cli", "")
 		mergeValues(s.data, m)
 	}
 	// Layer merging can exceed a budget even when each layer fits independently.
 	if _, e := copyPlain(s.data); e != nil {
-		return s, e
+		return e
 	}
 	if e := validateValues(s.data); e != nil {
-		return s, e
+		return e
 	}
-	maps.Copy(s.environment, process)
+	maps.Copy(s.environment, l.process)
 	if _, e := environmentSize(s.environment); e != nil {
-		return s, e
+		return e
 	}
-	s.configPath = selected
+	s.configPath = l.selected
 	if s.configPath == "" {
-		s.configPath = filepath.Join(user, "net-connector.yml")
+		s.configPath = filepath.Join(l.user, "net-connector.yml")
 	}
-	s.envPath = envFile
+	s.envPath = l.envFile
 	if s.envPath == "" {
-		s.envPath = filepath.Join(user, ".env")
+		s.envPath = filepath.Join(l.user, ".env")
 	}
-	return s, ctx.Err()
+	return nil
 }
 
 func hasPath(values map[string]any, path string) bool {

@@ -152,156 +152,209 @@ func validEnvironmentKey(key string) bool {
 }
 
 // ParseEnvironment never executes shell syntax or consults the process environment.
+// ParseEnvironment parses a .env document. Values may be quoted, and
+// unquoted or double-quoted values expand $NAME and ${NAME} from process,
+// then earlier entries, then inherited. The expanded environment stays
+// within MaxBytes; command substitution is rejected.
 func ParseEnvironment(text string, inherited, process map[string]string) (map[string]string, error) {
 	if len(text) > MaxBytes {
 		return nil, ErrInvalid
 	}
-	local := map[string]string{}
 	total, err := environmentSize(inherited)
 	if err != nil {
 		return nil, err
 	}
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	lookup := func(k string) string {
-		if v, ok := process[k]; ok {
-			return v
+	p := &envParser{text: strings.ReplaceAll(text, "\r\n", "\n"), inherited: inherited, process: process, local: map[string]string{}, total: total}
+	for {
+		more, err := p.entry()
+		if err != nil {
+			return nil, err
 		}
-		if v, ok := local[k]; ok {
-			return v
+		if !more {
+			return p.local, nil
 		}
-		return inherited[k]
 	}
-	for len(text) > 0 {
-		text = strings.TrimLeft(text, " \t\r\n")
-		if text == "" {
+}
+
+// envParser is the state of one ParseEnvironment call.
+type envParser struct {
+	text                      string // the unparsed rest of the document
+	inherited, process, local map[string]string
+	total                     int // bytes of the effective environment so far
+}
+
+// lookup resolves a variable: the process first, then earlier entries,
+// then the inherited environment.
+func (p *envParser) lookup(k string) string {
+	if v, ok := p.process[k]; ok {
+		return v
+	}
+	if v, ok := p.local[k]; ok {
+		return v
+	}
+	return p.inherited[k]
+}
+
+// entry parses one assignment; more is false at the end of the document.
+func (p *envParser) entry() (more bool, err error) {
+	for {
+		p.text = strings.TrimLeft(p.text, " \t\r\n")
+		if p.text == "" {
+			return false, nil
+		}
+		if p.text[0] != '#' {
 			break
 		}
-		if text[0] == '#' {
-			_, text, _ = strings.Cut(text, "\n")
+		_, p.text, _ = strings.Cut(p.text, "\n")
+	}
+	if strings.HasPrefix(p.text, "export ") {
+		p.text = strings.TrimLeft(p.text[7:], " \t")
+	}
+	equal := strings.IndexByte(p.text, '=')
+	if equal < 0 || strings.Contains(p.text[:equal], "\n") {
+		return false, ErrInvalid
+	}
+	key := strings.TrimSpace(p.text[:equal])
+	if !validEnvironmentKey(key) {
+		return false, ErrInvalid
+	}
+	p.text = strings.TrimLeft(p.text[equal+1:], " \t")
+	quote := byte(0)
+	if len(p.text) > 0 && (p.text[0] == '\'' || p.text[0] == '"') {
+		quote = p.text[0]
+		p.text = p.text[1:]
+	}
+	// Reserve the effective snapshot's other entries before expanding this value.
+	base := p.total
+	if old, ok := p.local[key]; ok {
+		base -= len(key) + len(old)
+	} else if old, ok := p.inherited[key]; ok {
+		base -= len(key) + len(old)
+	}
+	if len(key) > MaxBytes-base {
+		return false, ErrInvalid
+	}
+	base += len(key)
+	value, err := p.value(quote, base)
+	if err != nil {
+		return false, err
+	}
+	p.local[key] = value
+	p.total = base + len(value)
+	return true, nil
+}
+
+// value reads one value up to its closing quote or the end of the line and
+// expands variables outside single quotes.
+func (p *envParser) value(quote byte, base int) (string, error) {
+	v := boundedValue{base: base}
+	closed := quote == 0
+	for len(p.text) > 0 {
+		c := p.text[0]
+		p.text = p.text[1:]
+		if quote != 0 && c == quote {
+			closed = true
+			break
+		}
+		if quote == 0 && (c == '\n' || c == '#') {
+			if c == '#' {
+				_, p.text, _ = strings.Cut(p.text, "\n")
+			}
+			break
+		}
+		if c == '\\' && quote != '\'' && len(p.text) > 0 && strings.IndexByte("$\"\\# ", p.text[0]) >= 0 {
+			if v.writeByte(p.text[0]) != nil {
+				return "", ErrInvalid
+			}
+			p.text = p.text[1:]
 			continue
 		}
-		if strings.HasPrefix(text, "export ") {
-			text = strings.TrimLeft(text[7:], " \t")
-		}
-		equal := strings.IndexByte(text, '=')
-		if equal < 0 || strings.Contains(text[:equal], "\n") {
-			return nil, ErrInvalid
-		}
-		key := strings.TrimSpace(text[:equal])
-		if !validEnvironmentKey(key) {
-			return nil, ErrInvalid
-		}
-		text = strings.TrimLeft(text[equal+1:], " \t")
-		quote := byte(0)
-		if len(text) > 0 && (text[0] == '\'' || text[0] == '"') {
-			quote = text[0]
-			text = text[1:]
-		}
-		// Reserve the effective snapshot's other entries before expanding this value.
-		base := total
-		if old, ok := local[key]; ok {
-			base -= len(key) + len(old)
-		} else if old, ok := inherited[key]; ok {
-			base -= len(key) + len(old)
-		}
-		if len(key) > MaxBytes-base {
-			return nil, ErrInvalid
-		}
-		base += len(key)
-		var b strings.Builder
-		write := func(value string) error {
-			if len(value) > MaxBytes-b.Len() || len(value) > MaxBytes-base-b.Len() {
-				return ErrInvalid
+		if c == '$' && quote != '\'' {
+			name, err := p.variable()
+			if err != nil {
+				return "", err
 			}
-			b.WriteString(value)
-			return nil
-		}
-		writeByte := func(value byte) error {
-			if b.Len() >= MaxBytes || b.Len() >= MaxBytes-base {
-				return ErrInvalid
-			}
-			b.WriteByte(value)
-			return nil
-		}
-		closed := quote == 0
-		for len(text) > 0 {
-			c := text[0]
-			text = text[1:]
-			if quote != 0 && c == quote {
-				closed = true
-				break
-			}
-			if quote == 0 && (c == '\n' || c == '#') {
-				if c == '#' {
-					_, text, _ = strings.Cut(text, "\n")
+			if name != "" {
+				if v.write(p.lookup(name)) != nil {
+					return "", ErrInvalid
 				}
-				break
-			}
-			if c == '\\' && quote != '\'' && len(text) > 0 {
-				next := text[0]
-				if next == '$' || next == '"' || next == '\\' || next == '#' || next == ' ' {
-					if writeByte(next) != nil {
-						return nil, ErrInvalid
-					}
-					text = text[1:]
-					continue
-				}
-			}
-			if c == '$' && quote != '\'' {
-				if strings.HasPrefix(text, "(") {
-					return nil, ErrInvalid
-				}
-				var name string
-				if strings.HasPrefix(text, "{") {
-					end := strings.IndexByte(text, '}')
-					if end < 0 {
-						return nil, ErrInvalid
-					}
-					name = text[1:end]
-					text = text[end+1:]
-					if !validEnvironmentKey(name) {
-						return nil, ErrInvalid
-					}
-				} else {
-					n := 0
-					for n < len(text) && (text[n] == '_' || text[n] >= 'A' && text[n] <= 'Z' || text[n] >= 'a' && text[n] <= 'z' || n > 0 && text[n] >= '0' && text[n] <= '9') {
-						n++
-					}
-					name = text[:n]
-					text = text[n:]
-				}
-				if name != "" {
-					if write(lookup(name)) != nil {
-						return nil, ErrInvalid
-					}
-					continue
-				}
-			}
-			if writeByte(c) != nil {
-				return nil, ErrInvalid
+				continue
 			}
 		}
-		if !closed {
-			return nil, ErrInvalid
+		if v.writeByte(c) != nil {
+			return "", ErrInvalid
 		}
-		value := b.String()
-		if quote == 0 {
-			value = strings.TrimRightFunc(value, unicode.IsSpace)
-		} else {
-			line, rest, _ := strings.Cut(text, "\n")
-			if tail := strings.TrimSpace(line); tail != "" && !strings.HasPrefix(tail, "#") {
-				return nil, ErrInvalid
-			}
-			text = rest
-		}
-		if strings.IndexByte(value, 0) >= 0 {
-			return nil, ErrInvalid
-		}
-		local[key] = value
-		total = base + len(value)
 	}
-	return local, nil
+	if !closed {
+		return "", ErrInvalid
+	}
+	value := v.String()
+	if quote == 0 {
+		value = strings.TrimRightFunc(value, unicode.IsSpace)
+	} else {
+		line, rest, _ := strings.Cut(p.text, "\n")
+		if tail := strings.TrimSpace(line); tail != "" && !strings.HasPrefix(tail, "#") {
+			return "", ErrInvalid
+		}
+		p.text = rest
+	}
+	if strings.IndexByte(value, 0) >= 0 {
+		return "", ErrInvalid
+	}
+	return value, nil
 }
+
+// variable reads the name after a $: ${NAME} or a bare identifier. A bare
+// $ yields "", and command substitution $( is rejected.
+func (p *envParser) variable() (string, error) {
+	if strings.HasPrefix(p.text, "(") {
+		return "", ErrInvalid
+	}
+	if strings.HasPrefix(p.text, "{") {
+		end := strings.IndexByte(p.text, '}')
+		if end < 0 {
+			return "", ErrInvalid
+		}
+		name := p.text[1:end]
+		p.text = p.text[end+1:]
+		if !validEnvironmentKey(name) {
+			return "", ErrInvalid
+		}
+		return name, nil
+	}
+	n := 0
+	for n < len(p.text) && (p.text[n] == '_' || p.text[n] >= 'A' && p.text[n] <= 'Z' || p.text[n] >= 'a' && p.text[n] <= 'z' || n > 0 && p.text[n] >= '0' && p.text[n] <= '9') {
+		n++
+	}
+	name := p.text[:n]
+	p.text = p.text[n:]
+	return name, nil
+}
+
+// boundedValue builds one value within MaxBytes, counting base bytes the
+// rest of the environment already uses.
+type boundedValue struct {
+	b    strings.Builder
+	base int
+}
+
+func (v *boundedValue) write(s string) error {
+	if len(s) > MaxBytes-v.b.Len() || len(s) > MaxBytes-v.base-v.b.Len() {
+		return ErrInvalid
+	}
+	v.b.WriteString(s)
+	return nil
+}
+
+func (v *boundedValue) writeByte(c byte) error {
+	if v.b.Len() >= MaxBytes || v.b.Len() >= MaxBytes-v.base {
+		return ErrInvalid
+	}
+	v.b.WriteByte(c)
+	return nil
+}
+
+func (v *boundedValue) String() string { return v.b.String() }
 
 // environmentSize bounds an effective environment snapshot, including key bytes.
 func environmentSize(values map[string]string) (int, error) {
