@@ -126,47 +126,52 @@ func Unified(fromName, toName string, ops []Op, context int) string {
 			continue
 		}
 		start := max(0, i-context)
-		end := i
-		for end < len(ops) {
-			if ops[end].Kind != ' ' {
-				end++
-				continue
-			}
-			run := end
-			for run < len(ops) && ops[run].Kind == ' ' {
-				run++
-			}
-			if run == len(ops) || run-end > 2*context {
-				end = min(len(ops), end+context)
-				break
-			}
-			end = run
-		}
-		aStart, bStart := aLine-(i-start), bLine-(i-start)
-		aCount, bCount := 0, 0
-		for _, op := range ops[start:end] {
-			if op.Kind != '+' {
-				aCount++
-			}
-			if op.Kind != '-' {
-				bCount++
-			}
-		}
-		fmt.Fprintf(&b, "@@ -%d,%d +%d,%d @@\n", aStart, aCount, bStart, bCount)
+		end := hunkEnd(ops, i, context)
+		aCount, bCount := sides(ops[start:end])
+		fmt.Fprintf(&b, "@@ -%d,%d +%d,%d @@\n", aLine-(i-start), aCount, bLine-(i-start), bCount)
 		for _, op := range ops[start:end] {
 			b.WriteByte(op.Kind)
 			b.WriteString(op.Line)
 			b.WriteByte('\n')
 		}
-		for _, op := range ops[i:end] {
-			if op.Kind != '+' {
-				aLine++
-			}
-			if op.Kind != '-' {
-				bLine++
-			}
-		}
+		aAdvance, bAdvance := sides(ops[i:end])
+		aLine, bLine = aLine+aAdvance, bLine+bAdvance
 		i = end
 	}
 	return b.String()
+}
+
+// hunkEnd returns the end of the hunk whose first change is ops[i]: changes
+// separated by at most 2*context unchanged lines join one hunk, which ends
+// context lines after its last change.
+func hunkEnd(ops []Op, i, context int) int {
+	end := i
+	for end < len(ops) {
+		if ops[end].Kind != ' ' {
+			end++
+			continue
+		}
+		run := end
+		for run < len(ops) && ops[run].Kind == ' ' {
+			run++
+		}
+		if run == len(ops) || run-end > 2*context {
+			return min(len(ops), end+context)
+		}
+		end = run
+	}
+	return end
+}
+
+// sides counts the lines ops spans on the old and new side.
+func sides(ops []Op) (from, to int) {
+	for _, op := range ops {
+		if op.Kind != '+' {
+			from++
+		}
+		if op.Kind != '-' {
+			to++
+		}
+	}
+	return from, to
 }
