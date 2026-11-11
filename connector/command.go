@@ -374,175 +374,215 @@ func (d *Device) readResponse(ctx context.Context, c Command, prompt expect.Patt
 	if prompt.IsZero() {
 		return step, ErrInvalid
 	}
-	var raw, body responseCollector
-	var rawPrompt string
-	separate := false
+	r := &responseRead{device: d, command: c, login: login, poll: poll}
 	defer func() {
 		step.command = c.clone()
-		wire := raw.String()
+		wire := r.raw.String()
 		output := wire
-		if separate {
-			output = body.String()
+		if r.separate {
+			output = r.body.String()
 		}
-		step.response = Response{data: &responseData{raw: wire, rawPrompt: rawPrompt, output: output,
+		step.response = Response{data: &responseData{raw: wire, rawPrompt: r.rawPrompt, output: output,
 			outputErr: ErrIncomplete, renderErr: ErrIncomplete, promptErr: ErrIncomplete}}
 	}()
-	completed := false
-	appendSegment := func(r expect.Result, capture bool) error {
-		if !capture && !separate {
-			// Most responses never remove a pager marker: share raw until then.
-			body = raw.clone()
-			separate = true
-		}
-		raw.WriteString(r.Before)
-		raw.WriteString(r.Match)
-		if separate {
-			body.WriteString(r.Before)
-		}
-		if capture {
-			if separate {
-				body.WriteString(r.Match)
-			}
-		} else {
-			// Regex boundaries consume line delimiters that belong to the response; restore them.
-			for _, b := range r.Match {
-				if b == '\r' || b == '\n' {
-					body.WriteRune(b)
-				}
-			}
-		}
-		if int64(raw.Len()) > d.config.MaxOutputBytes {
-			return ErrOutputLimit
-		}
-		return nil
-	}
-	var cases []expect.Case
-	add := func(p expect.Pattern, h expect.Handler) {
-		pattern := p
-		cases = append(cases, expect.Case{Pattern: pattern, Handler: h})
-	}
 	if login {
-		for _, failure := range loginFailures {
-			add(failure.pattern, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
-				return expect.Return, failure.cause
-			})
-		}
-		add(loginAuthError, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
-			return expect.Return, ErrAuthentication
-		})
-		for _, r := range d.terminal.AuthenticationErrors {
-			p, _ := expect.FromRegexp(r)
-			add(p, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
-				return expect.Return, ErrAuthentication
-			})
-		}
+		r.addLoginFailures()
 	}
 	counts := make([]int, len(replies))
 	for i, reply := range replies {
 		if reply.Pattern.IsZero() {
 			return step, ErrInvalid
 		}
-		add(reply.Pattern, func(hctx context.Context, _ *expect.Session, r expect.Result) (expect.Action, error) {
-			if e := appendSegment(r, reply.Capture); e != nil {
-				return expect.Return, e
-			}
-			counts[i]++
-			if !reply.Unlimited && counts[i] > max(1, reply.Limit) {
-				if login {
-					return expect.Return, ErrAuthentication
-				}
-				return expect.Return, ErrResponseLimit
-			}
-			answer := reply.Reply
-			if reply.Respond != nil {
-				var e error
-				answer, e = reply.Respond(hctx, r.Match)
-				if e != nil {
-					return expect.Return, e
-				}
-			}
-			if reply.Sensitive {
-				if e := d.log.protectReply(strings.TrimSuffix(answer, "\n")); e != nil {
-					return expect.Return, e
-				}
-			}
-			if e := hctx.Err(); e != nil {
-				return expect.Return, e
-			}
-			if e := d.sendLine(hctx, answer, poll); e != nil {
-				return expect.Return, writeFailure(map[bool]string{true: "login", false: "command"}[login], c, e)
-			}
-			return expect.ContinueKeepTimer, nil
-		})
+		r.add(reply.Pattern, r.replyHandler(reply, &counts[i]))
 	}
-	add(prompt, func(_ context.Context, _ *expect.Session, r expect.Result) (expect.Action, error) {
-		if e := appendSegment(r, true); e != nil {
+	r.add(prompt, func(_ context.Context, _ *expect.Session, m expect.Result) (expect.Action, error) {
+		if e := r.appendSegment(m, true); e != nil {
 			return expect.Return, e
 		}
-		rawPrompt = r.Match
-		completed = true
+		r.rawPrompt = m.Match
+		r.completed = true
 		return expect.Return, nil
 	})
-	options := []expect.ExpectOption{expect.WithTimeout(0), expect.WithMatchOrder(expect.Declaration), expect.WithStreamingFallback(func(_ context.Context, _ *expect.Session, r expect.Result) (expect.Action, error) {
-		return expect.ContinueKeepTimer, appendSegment(r, true)
+	options := []expect.ExpectOption{expect.WithTimeout(0), expect.WithMatchOrder(expect.Declaration), expect.WithStreamingFallback(func(_ context.Context, _ *expect.Session, m expect.Result) (expect.Action, error) {
+		return expect.ContinueKeepTimer, r.appendSegment(m, true)
 	})}
 	var final expect.Result
 	if poll {
-		final, err = d.session.Poll(ctx, cases, options...)
+		final, err = d.session.Poll(ctx, r.cases, options...)
 	} else {
-		final, err = d.session.Expect(ctx, cases, options...)
+		final, err = d.session.Expect(ctx, r.cases, options...)
 	}
-	if err != nil && !completed && final.CaseIndex < 0 && final.Before != "" {
-		// The unmatched prefix has not passed a handler or streaming fallback.
-		remaining := max(0, int(d.config.MaxOutputBytes)-raw.Len())
-		prefix := final.Before[:min(len(final.Before), remaining)]
-		if len(prefix) < len(final.Before) {
-			prefix = strings.Clone(prefix)
-		}
-		raw.WriteString(prefix)
-		if separate {
-			body.WriteString(prefix)
-		}
+	if err != nil && !r.completed && final.CaseIndex < 0 && final.Before != "" {
+		r.keepUnmatched(final.Before)
 	}
-	if err != nil && !completed {
-		phase := map[bool]string{true: "login", false: "command"}[login]
-		if _, ok := errors.AsType[*Error](err); ok {
-			return StepResult{}, err
-		}
-		code := "transport_error"
-		switch {
-		case errors.Is(err, errConnectionRefused):
-			code = "connection_refused"
-		case errors.Is(err, errNoRoute):
-			code = "no_route"
-		case errors.Is(err, errConnectTimeout):
-			code = "connection_timeout"
-		case errors.Is(err, ErrResponseLimit):
-			code = "response_limit_exceeded"
-		case errors.Is(err, ErrAuthentication):
-			code = "authentication_error"
-		case errors.Is(err, ErrOutputLimit), errors.Is(err, expect.ErrBufferLimit):
-			code = "output_limit_exceeded"
-		case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
-			code = "connection_closed"
-		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, expect.ErrTimeout):
-			switch {
-			case !c.Prompt.IsZero():
-				code = "prompt_error"
-			case login:
-				code = "login_timeout"
-			default:
-				code = "command_timeout"
-			}
-		case errors.Is(err, context.Canceled):
-			return StepResult{}, err
-		}
-		return StepResult{}, newError(code, phase, c, err)
+	if err != nil && !r.completed {
+		return StepResult{}, r.failure(err)
 	}
-	if completed {
+	if r.completed {
 		return step, nil
 	}
 	return step, err
+}
+
+// responseRead is the state of one readResponse call: the raw wire output,
+// the response body (separate once a pager marker is removed) and the cases.
+type responseRead struct {
+	device      *Device
+	command     Command
+	login, poll bool
+	raw, body   responseCollector
+	rawPrompt   string
+	separate    bool // body diverged from raw
+	completed   bool // the prompt matched
+	cases       []expect.Case
+}
+
+func (r *responseRead) add(p expect.Pattern, h expect.Handler) {
+	r.cases = append(r.cases, expect.Case{Pattern: p, Handler: h})
+}
+
+// appendSegment records one matched segment. capture keeps the match in the
+// body; otherwise (a removed pager marker) only its line delimiters are kept.
+func (r *responseRead) appendSegment(m expect.Result, capture bool) error {
+	if !capture && !r.separate {
+		// Most responses never remove a pager marker: share raw until then.
+		r.body = r.raw.clone()
+		r.separate = true
+	}
+	r.raw.WriteString(m.Before)
+	r.raw.WriteString(m.Match)
+	if r.separate {
+		r.body.WriteString(m.Before)
+	}
+	if capture {
+		if r.separate {
+			r.body.WriteString(m.Match)
+		}
+	} else {
+		// Regex boundaries consume line delimiters that belong to the response; restore them.
+		for _, b := range m.Match {
+			if b == '\r' || b == '\n' {
+				r.body.WriteRune(b)
+			}
+		}
+	}
+	if int64(r.raw.Len()) > r.device.config.MaxOutputBytes {
+		return ErrOutputLimit
+	}
+	return nil
+}
+
+// addLoginFailures adds the cases that end a login with its failure cause.
+func (r *responseRead) addLoginFailures() {
+	for _, failure := range loginFailures {
+		r.add(failure.pattern, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
+			return expect.Return, failure.cause
+		})
+	}
+	r.add(loginAuthError, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
+		return expect.Return, ErrAuthentication
+	})
+	for _, re := range r.device.terminal.AuthenticationErrors {
+		p, _ := expect.FromRegexp(re)
+		r.add(p, func(context.Context, *expect.Session, expect.Result) (expect.Action, error) {
+			return expect.Return, ErrAuthentication
+		})
+	}
+}
+
+// replyHandler answers one interaction prompt, at most its limit times (a
+// login that loops is an authentication failure). Sensitive answers are
+// masked in the log before they are sent.
+func (r *responseRead) replyHandler(reply Interaction, count *int) expect.Handler {
+	return func(hctx context.Context, _ *expect.Session, m expect.Result) (expect.Action, error) {
+		if e := r.appendSegment(m, reply.Capture); e != nil {
+			return expect.Return, e
+		}
+		*count++
+		if !reply.Unlimited && *count > max(1, reply.Limit) {
+			if r.login {
+				return expect.Return, ErrAuthentication
+			}
+			return expect.Return, ErrResponseLimit
+		}
+		answer := reply.Reply
+		if reply.Respond != nil {
+			var e error
+			if answer, e = reply.Respond(hctx, m.Match); e != nil {
+				return expect.Return, e
+			}
+		}
+		if reply.Sensitive {
+			if e := r.device.log.protectReply(strings.TrimSuffix(answer, "\n")); e != nil {
+				return expect.Return, e
+			}
+		}
+		if e := hctx.Err(); e != nil {
+			return expect.Return, e
+		}
+		if e := r.device.sendLine(hctx, answer, r.poll); e != nil {
+			return expect.Return, writeFailure(r.phase(), r.command, e)
+		}
+		return expect.ContinueKeepTimer, nil
+	}
+}
+
+func (r *responseRead) phase() string {
+	if r.login {
+		return "login"
+	}
+	return "command"
+}
+
+// keepUnmatched records the unmatched prefix that no handler or streaming
+// fallback has seen, within the output limit.
+func (r *responseRead) keepUnmatched(before string) {
+	remaining := max(0, int(r.device.config.MaxOutputBytes)-r.raw.Len())
+	prefix := before[:min(len(before), remaining)]
+	if len(prefix) < len(before) {
+		prefix = strings.Clone(prefix)
+	}
+	r.raw.WriteString(prefix)
+	if r.separate {
+		r.body.WriteString(prefix)
+	}
+}
+
+// failure classifies a read that ended before the prompt. A classified
+// *Error and cancellation pass through unchanged.
+func (r *responseRead) failure(err error) error {
+	if _, ok := errors.AsType[*Error](err); ok {
+		return err
+	}
+	code := "transport_error"
+	switch {
+	case errors.Is(err, errConnectionRefused):
+		code = "connection_refused"
+	case errors.Is(err, errNoRoute):
+		code = "no_route"
+	case errors.Is(err, errConnectTimeout):
+		code = "connection_timeout"
+	case errors.Is(err, ErrResponseLimit):
+		code = "response_limit_exceeded"
+	case errors.Is(err, ErrAuthentication):
+		code = "authentication_error"
+	case errors.Is(err, ErrOutputLimit), errors.Is(err, expect.ErrBufferLimit):
+		code = "output_limit_exceeded"
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		code = "connection_closed"
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, expect.ErrTimeout):
+		switch {
+		case !r.command.Prompt.IsZero():
+			code = "prompt_error"
+		case r.login:
+			code = "login_timeout"
+		default:
+			code = "command_timeout"
+		}
+	case errors.Is(err, context.Canceled):
+		return err
+	}
+	return newError(code, r.phase(), r.command, err)
 }
 
 func writeFailure(phase string, c Command, err error) error {
