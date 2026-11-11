@@ -276,18 +276,7 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 	if x.limit > 0 && x.bytes >= x.limit {
 		return step, newError("script_output_limit_exceeded", "script", c, ErrScriptLimit)
 	}
-	timeout := d.config.CommandTimeout
-	if c.Timeout != nil {
-		timeout = *c.Timeout
-	}
-	if c.Poll {
-		timeout = 0
-	}
-	cc := ctx
-	cancel := func() {}
-	if timeout > 0 {
-		cc, cancel = context.WithTimeout(ctx, timeout)
-	}
+	cc, cancel := withTimeout(ctx, d.commandTimeout(c))
 	defer cancel()
 	started := time.Now()
 	prompt, e := x.prompt(c)
@@ -302,15 +291,41 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 		return step, writeFailure("command", c, err)
 	}
 	written = len(c.Text) + len(d.config.LineEnding)
-	replies := append(cloneInteractions(c.Interactions), d.terminal.Interactions...)
-	replies = append(replies, Interaction{Pattern: d.terminal.Pager, Reply: d.terminal.PagerResponse, Unlimited: true})
-	step, err = d.readResponse(cc, c, prompt, replies, false, c.Poll)
+	step, err = d.readResponse(cc, c, prompt, d.commandReplies(c), false, c.Poll)
 	response = step.Response()
 	step.duration = time.Since(started)
 	if err != nil {
 		return StepResult{}, err
 	}
 	return x.verify(cc, c, step, response)
+}
+
+// commandTimeout returns the response deadline for c: its own timeout or
+// the session default, and none for polled commands.
+func (d *Device) commandTimeout(c Command) time.Duration {
+	switch {
+	case c.Poll:
+		return 0
+	case c.Timeout != nil:
+		return *c.Timeout
+	default:
+		return d.config.CommandTimeout
+	}
+}
+
+// commandReplies returns the interactions answered while c runs: its own,
+// then the terminal's, then the pager.
+func (d *Device) commandReplies(c Command) []Interaction {
+	replies := append(cloneInteractions(c.Interactions), d.terminal.Interactions...)
+	return append(replies, Interaction{Pattern: d.terminal.Pager, Reply: d.terminal.PagerResponse, Unlimited: true})
+}
+
+// withTimeout bounds ctx by timeout when it is positive.
+func withTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, timeout)
 }
 
 // commandPrivacy returns the secrets to mask while c runs, and whether its
