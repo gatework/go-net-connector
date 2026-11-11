@@ -83,6 +83,8 @@ func VerificationRoot(root string) (string, error) {
 	}
 	return p, nil
 }
+// NewPolicy validates o against the TFTP-capable platforms in registry and
+// returns the policy that resolves per-device transfer targets.
 func NewPolicy(o PolicyOptions, registry dialect.Registry) (*Policy, error) {
 	if registry == nil {
 		return nil, ErrInvalid
@@ -97,54 +99,73 @@ func NewPolicy(o PolicyOptions, registry dialect.Registry) (*Policy, error) {
 		if err != nil {
 			return nil, ErrInvalid
 		}
-		platform, ok := declaration.(TFTPPolicy)
-		if ok {
+		if platform, ok := declaration.(TFTPPolicy); ok {
 			p.platforms[name] = platform
 		}
 	}
-	var e error
+	if e := p.setServers(o); e != nil {
+		return nil, e
+	}
+	if e := p.setRoots(o); e != nil {
+		return nil, e
+	}
+	if e := p.setVendorValues(o); e != nil {
+		return nil, e
+	}
+	return p, nil
+}
+
+// setServers records the default server and the per-host servers.
+func (p *Policy) setServers(o PolicyOptions) error {
 	if o.Server != "" {
-		p.server, e = serverName(o.Server)
-		if e != nil {
-			return nil, e
+		var e error
+		if p.server, e = serverName(o.Server); e != nil {
+			return e
 		}
 	}
 	for host, server := range o.Servers {
 		h, e := exactAddress(host)
 		if e != nil {
-			return nil, e
+			return e
 		}
 		s, e := serverName(server)
 		if e != nil {
-			return nil, e
+			return e
 		}
 		if _, ok := p.servers[h]; ok {
-			return nil, ErrInvalid
+			return ErrInvalid
 		}
 		p.servers[h] = s
 	}
+	return nil
+}
+
+// setRoots records the verification root of each server, including the
+// default root for the default server, and rejects roots shared by two
+// servers.
+func (p *Policy) setRoots(o PolicyOptions) error {
 	for server, root := range o.Roots {
 		s, e := serverName(server)
 		if e != nil {
-			return nil, e
+			return e
 		}
 		r, e := VerificationRoot(root)
 		if e != nil {
-			return nil, e
+			return e
 		}
 		if _, ok := p.roots[s]; ok {
-			return nil, ErrInvalid
+			return ErrInvalid
 		}
 		p.roots[s] = r
 	}
 	if o.Root != "" {
 		root, e := VerificationRoot(o.Root)
 		if e != nil {
-			return nil, e
+			return e
 		}
 		if p.server != "" {
 			if r, ok := p.roots[p.server]; ok && r != root {
-				return nil, ErrInvalid
+				return ErrInvalid
 			}
 			p.roots[p.server] = root
 		}
@@ -152,10 +173,21 @@ func NewPolicy(o PolicyOptions, registry dialect.Registry) (*Policy, error) {
 	seen := map[string]bool{}
 	for _, root := range p.roots {
 		if seen[root] {
-			return nil, ErrInvalid
+			return ErrInvalid
 		}
 		seen[root] = true
 	}
+	return nil
+}
+
+// setVendorValues records the per-vendor source files, source interfaces
+// and VRFs, each validated by its platform.
+func (p *Policy) setVendorValues(o PolicyOptions) error {
+	preflight := func(platform TFTPPolicy, options TFTPOptions) error {
+		options.Server = "preflight.invalid"
+		return platform.ValidateOptions("192.0.2.1", options)
+	}
+	var e error
 	p.files, e = vendorValues(o.SourceFiles, p.platforms, func(platform TFTPPolicy, v string) error {
 		if v == "" {
 			return nil
@@ -163,25 +195,25 @@ func NewPolicy(o PolicyOptions, registry dialect.Registry) (*Policy, error) {
 		if ValidateSource(v) != nil {
 			return ErrInvalid
 		}
-		return platform.ValidateOptions("192.0.2.1", TFTPOptions{Server: "preflight.invalid", SourceFile: v})
+		return preflight(platform, TFTPOptions{SourceFile: v})
 	})
 	if e != nil {
-		return nil, e
+		return e
 	}
-	p.interfaces, e = vendorValues(o.SourceInterfaces, p.platforms, func(platform TFTPPolicy, value string) error {
-		return platform.ValidateOptions("192.0.2.1", TFTPOptions{Server: "preflight.invalid", SourceInterface: value})
+	p.interfaces, e = vendorValues(o.SourceInterfaces, p.platforms, func(platform TFTPPolicy, v string) error {
+		return preflight(platform, TFTPOptions{SourceInterface: v})
 	})
 	if e != nil {
-		return nil, e
+		return e
 	}
 	p.vrfs, e = vendorValues(o.VRFs, p.platforms, func(platform TFTPPolicy, v string) error {
-		return platform.ValidateOptions("192.0.2.1", TFTPOptions{Server: "preflight.invalid", VRF: v})
+		return preflight(platform, TFTPOptions{VRF: v})
 	})
-	if e != nil {
-		return nil, e
-	}
-	return p, nil
+	return e
 }
+
+// vendorValues decodes per-vendor settings: each value is a string, or a
+// map with an optional "default" and "hosts" keyed by exact address.
 func vendorValues(values map[string]any, platforms map[string]TFTPPolicy, validate func(TFTPPolicy, string) error) (map[string]vendorValue, error) {
 	out := map[string]vendorValue{}
 	for vendor, raw := range values {
@@ -189,7 +221,6 @@ func vendorValues(values map[string]any, platforms map[string]TFTPPolicy, valida
 		if !ok {
 			return nil, ErrInvalid
 		}
-		value := vendorValue{hosts: map[string]string{}}
 		normalize := func(raw any) (string, error) {
 			if raw == nil {
 				return "", nil
@@ -200,48 +231,56 @@ func vendorValues(values map[string]any, platforms map[string]TFTPPolicy, valida
 			}
 			return s, validate(platform, s)
 		}
-		if m, ok := raw.(map[string]any); ok {
-			for k := range m {
-				if k != "default" && k != "hosts" {
-					return nil, ErrInvalid
-				}
-			}
-			var e error
-			value.fallback, e = normalize(m["default"])
-			if e != nil {
-				return nil, e
-			}
-			if raw, ok := m["hosts"]; ok {
-				hosts, ok := raw.(map[string]any)
-				if !ok {
-					return nil, ErrInvalid
-				}
-				for host, raw := range hosts {
-					h, e := exactAddress(host)
-					if e != nil {
-						return nil, e
-					}
-					if _, ok := value.hosts[h]; ok {
-						return nil, ErrInvalid
-					}
-					s, e := normalize(raw)
-					if e != nil {
-						return nil, e
-					}
-					value.hosts[h] = s
-				}
-			}
-		} else {
-			var e error
-			value.fallback, e = normalize(raw)
-			if e != nil {
-				return nil, e
-			}
+		value, e := decodeVendorValue(raw, normalize)
+		if e != nil {
+			return nil, e
 		}
 		out[vendor] = value
 	}
 	return out, nil
 }
+
+// decodeVendorValue decodes one vendor's setting with normalize.
+func decodeVendorValue(raw any, normalize func(any) (string, error)) (vendorValue, error) {
+	value := vendorValue{hosts: map[string]string{}}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		var e error
+		value.fallback, e = normalize(raw)
+		return value, e
+	}
+	for k := range m {
+		if k != "default" && k != "hosts" {
+			return vendorValue{}, ErrInvalid
+		}
+	}
+	var e error
+	if value.fallback, e = normalize(m["default"]); e != nil {
+		return vendorValue{}, e
+	}
+	rawHosts, ok := m["hosts"]
+	if !ok {
+		return value, nil
+	}
+	hosts, ok := rawHosts.(map[string]any)
+	if !ok {
+		return vendorValue{}, ErrInvalid
+	}
+	for host, raw := range hosts {
+		h, e := exactAddress(host)
+		if e != nil {
+			return vendorValue{}, e
+		}
+		if _, ok := value.hosts[h]; ok {
+			return vendorValue{}, ErrInvalid
+		}
+		if value.hosts[h], e = normalize(raw); e != nil {
+			return vendorValue{}, e
+		}
+	}
+	return value, nil
+}
+
 func (p *Policy) For(host, vendor string) (Target, error) {
 	h, e := exactAddress(host)
 	if e != nil {
