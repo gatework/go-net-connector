@@ -68,56 +68,63 @@ func DecodeQuoted(value string, split bool) (string, error) {
 	if !split && !strings.HasPrefix(value, `"`) {
 		return value, nil
 	}
-	words := []string{}
-	var word strings.Builder
-	var quote rune
-	started, escape := false, false
+	var w quotedWords
 	for _, r := range value {
-		if escape {
-			if quote == '"' && r != '"' && r != '\\' && r != '$' && r != '`' && r != '\n' {
-				word.WriteRune('\\')
-			}
-			if r != '\n' {
-				word.WriteRune(r)
-			}
-			escape = false
-			started = true
-			continue
-		}
-		if r == '\\' && quote != '\'' {
-			escape = true
-			started = true
-			continue
-		}
-		if quote != 0 {
-			if r == quote {
-				quote = 0
-			} else {
-				word.WriteRune(r)
-			}
-			continue
-		}
-		if r == '"' || r == '\'' {
-			quote = r
-			started = true
-			continue
-		}
-		if unicode.IsSpace(r) {
-			if started {
-				words = append(words, word.String())
-				word.Reset()
-				started = false
-			}
-			continue
-		}
-		word.WriteRune(r)
-		started = true
+		w.next(r)
 	}
-	if quote != 0 || escape {
+	if w.quote != 0 || w.escape {
 		return "", dialect.ErrParse
 	}
-	if started {
-		words = append(words, word.String())
+	if w.started {
+		w.words = append(w.words, w.word.String())
 	}
-	return strings.Join(words, " "), nil
+	return strings.Join(w.words, " "), nil
+}
+
+// quotedWords splits shell-style words: single quotes are literal, double
+// quotes keep backslash escapes for \, ", $, ` and newline only.
+type quotedWords struct {
+	words   []string
+	word    strings.Builder
+	quote   rune
+	started bool
+	escape  bool
+}
+
+// next consumes one rune.
+func (w *quotedWords) next(r rune) {
+	switch {
+	case w.escape:
+		w.escaped(r)
+	case r == '\\' && w.quote != '\'':
+		w.escape, w.started = true, true
+	case w.quote != 0:
+		if r == w.quote {
+			w.quote = 0
+		} else {
+			w.word.WriteRune(r)
+		}
+	case r == '"' || r == '\'':
+		w.quote, w.started = r, true
+	case unicode.IsSpace(r):
+		if w.started {
+			w.words = append(w.words, w.word.String())
+			w.word.Reset()
+			w.started = false
+		}
+	default:
+		w.word.WriteRune(r)
+		w.started = true
+	}
+}
+
+// escaped consumes the rune after a backslash.
+func (w *quotedWords) escaped(r rune) {
+	if w.quote == '"' && r != '"' && r != '\\' && r != '$' && r != '`' && r != '\n' {
+		w.word.WriteRune('\\')
+	}
+	if r != '\n' {
+		w.word.WriteRune(r)
+	}
+	w.escape, w.started = false, true
 }
