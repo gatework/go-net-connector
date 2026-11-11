@@ -318,39 +318,10 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 			err = joinFailures(err, d.sessionEvent(ctx, "connect_failed", "error", Command{}, "failed"))
 		}
 	}()
-	cfg.Challenges = cloneInteractions(cfg.Challenges)
-	cfg.LegacyCryptoArguments = append([]string(nil), cfg.LegacyCryptoArguments...)
-	t, e := d.factory(ctx, cfg)
-	// A partial factory return still transfers cleanup responsibility.
-	if !isNilValue(t) {
-		d.transport = t
-		d.owner = &closeOwner{ReadWriteCloser: t}
+	t, err := d.openSession(ctx, cfg)
+	if err != nil {
+		return err
 	}
-	if e != nil {
-		return joinCleanup(newError("connection_failed", "connect", Command{}, e), d.closeResources())
-	}
-	if isNilValue(t) {
-		return ErrConnection
-	}
-	var owned io.ReadWriteCloser = d.owner
-	if conn, ok := t.(syscall.Conn); ok {
-		owned = &osCloseOwner{closeOwner: d.owner, Conn: conn}
-	}
-	opts := []expect.SessionOption{expect.WithBufferLimit(int(d.config.MaxOutputBytes)), expect.WithDefaultTimeout(0), expect.WithWriteTimeout(0), expect.WithOutput(d.log)}
-	if _, ok := t.(syscall.Conn); ok {
-		opts = append(opts, expect.WithOSPolling())
-	}
-	session, e := expect.NewSession(owned, opts...)
-	if e != nil {
-		return joinCleanup(e, d.closeResources())
-	}
-	d.lifeMu.Lock()
-	if d.closed {
-		d.lifeMu.Unlock()
-		return errors.Join(ErrClosed, session.Close())
-	}
-	d.session = session
-	d.lifeMu.Unlock()
 	defer func() {
 		if err != nil {
 			if cleanup := d.closeResources(); cleanup != nil {
@@ -358,13 +329,53 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 			}
 		}
 	}()
-	if e = d.log.scope(d.baseSecrets(), true); e != nil {
+	return d.login(ctx, t)
+}
+
+// openSession creates the transport and the expect session over it. A
+// partial factory return still transfers cleanup responsibility.
+func (d *Device) openSession(ctx context.Context, cfg ConnectionConfig) (io.ReadWriteCloser, error) {
+	cfg.Challenges = cloneInteractions(cfg.Challenges)
+	cfg.LegacyCryptoArguments = append([]string(nil), cfg.LegacyCryptoArguments...)
+	t, e := d.factory(ctx, cfg)
+	if !isNilValue(t) {
+		d.transport = t
+		d.owner = &closeOwner{ReadWriteCloser: t}
+	}
+	if e != nil {
+		return nil, joinCleanup(newError("connection_failed", "connect", Command{}, e), d.closeResources())
+	}
+	if isNilValue(t) {
+		return nil, ErrConnection
+	}
+	var owned io.ReadWriteCloser = d.owner
+	opts := []expect.SessionOption{expect.WithBufferLimit(int(d.config.MaxOutputBytes)), expect.WithDefaultTimeout(0), expect.WithWriteTimeout(0), expect.WithOutput(d.log)}
+	if conn, ok := t.(syscall.Conn); ok {
+		owned = &osCloseOwner{closeOwner: d.owner, Conn: conn}
+		opts = append(opts, expect.WithOSPolling())
+	}
+	session, e := expect.NewSession(owned, opts...)
+	if e != nil {
+		return nil, joinCleanup(e, d.closeResources())
+	}
+	d.lifeMu.Lock()
+	defer d.lifeMu.Unlock()
+	if d.closed {
+		return nil, errors.Join(ErrClosed, session.Close())
+	}
+	d.session = session
+	return t, nil
+}
+
+// login authenticates on the new session, publishes the prompt, runs the
+// login inspector and commits a learned host key.
+func (d *Device) login(ctx context.Context, t io.ReadWriteCloser) error {
+	if e := d.log.scope(d.baseSecrets(), true); e != nil {
 		return newError("log_error", "logging", Command{}, e)
 	}
 	authctx, cancel := context.WithTimeout(ctx, d.config.LoginTimeout)
 	defer cancel()
-	interactions := d.loginInteractions(d.config.Password)
-	response, e := d.readResponse(authctx, Command{}, d.terminal.LoginPrompt, interactions, true, false)
+	response, e := d.readResponse(authctx, Command{}, d.terminal.LoginPrompt, d.loginInteractions(d.config.Password), true, false)
 	if e != nil {
 		return e
 	}
