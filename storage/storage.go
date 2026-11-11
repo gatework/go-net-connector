@@ -65,84 +65,108 @@ func WriteStream(ctx context.Context, path string, produce func(io.Writer) error
 		err = ErrUnsafe
 		return
 	}
-	var abs, dir string
-	abs, err = filepath.Abs(path)
-	if err != nil {
+	var dir string
+	if r.Path, dir, err = resolveParent(path); err != nil {
 		return
 	}
-	r.Path = abs
-	dir, err = filepath.EvalSymlinks(filepath.Dir(abs))
-	if err != nil {
-		return
-	}
-	destination := filepath.Join(dir, filepath.Base(abs))
+	destination := filepath.Join(dir, filepath.Base(r.Path))
 	r.Phase = "temporary_file"
-	var f *os.File
-	f, err = os.CreateTemp(dir, ".net-connector-*.tmp")
+	f, cleanup, err := createTemporary(dir)
 	if err != nil {
 		return
 	}
-	temporary := f.Name()
-	identity, e := f.Stat()
-	if e != nil {
-		f.Close()
-		os.Remove(temporary)
-		err = e
-		return
-	}
-	defer func() {
-		if e := f.Close(); err == nil && e != nil {
-			err = e
-		}
-		if s, e := os.Lstat(temporary); e == nil && os.SameFile(s, identity) {
-			if e = os.Remove(temporary); err == nil && e != nil {
-				err = e
-			}
-		}
-	}()
-	if err = f.Chmod(0600); err != nil {
-		return
-	}
-	r.Phase = "write"
-	if err = produce(&contextWriter{ctx: ctx, w: f}); err != nil {
-		return
-	}
-	if err = ctx.Err(); err != nil {
-		return
-	}
-	r.Phase = "file_sync"
-	if err = f.Sync(); err != nil {
-		return
-	}
-	if err = ctx.Err(); err != nil {
+	defer cleanup(&err)
+	if err = fill(ctx, &r, f, produce); err != nil {
 		return
 	}
 	r.Phase = "rename"
-	if err = os.Rename(temporary, destination); err != nil {
+	if err = os.Rename(f.Name(), destination); err != nil {
 		return
 	}
 	r.State = "committed"
-	r.Phase = "directory_open"
-	var fd int
-	fd, err = unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	err = syncParent(&r, dir)
+	return
+}
+
+// resolveParent returns the absolute path and the symlink-free directory
+// that will hold it.
+func resolveParent(path string) (abs, dir string, err error) {
+	if abs, err = filepath.Abs(path); err != nil {
+		return path, "", err
+	}
+	dir, err = filepath.EvalSymlinks(filepath.Dir(abs))
+	return abs, dir, err
+}
+
+// createTemporary creates a private temporary file in dir. cleanup closes
+// it and removes it unless it was renamed or replaced, recording the first
+// error in *err.
+func createTemporary(dir string) (f *os.File, cleanup func(err *error), err error) {
+	f, err = os.CreateTemp(dir, ".net-connector-*.tmp")
 	if err != nil {
-		return
+		return nil, nil, err
+	}
+	temporary := f.Name()
+	identity, err := f.Stat()
+	if err != nil {
+		f.Close()
+		os.Remove(temporary)
+		return nil, nil, err
+	}
+	cleanup = func(err *error) {
+		if e := f.Close(); *err == nil && e != nil {
+			*err = e
+		}
+		if s, e := os.Lstat(temporary); e == nil && os.SameFile(s, identity) {
+			if e = os.Remove(temporary); *err == nil && e != nil {
+				*err = e
+			}
+		}
+	}
+	return f, cleanup, nil
+}
+
+// fill restricts f, streams produce into it and syncs it, advancing
+// r.Phase as it goes.
+func fill(ctx context.Context, r *Receipt, f *os.File, produce func(io.Writer) error) error {
+	if err := f.Chmod(0600); err != nil {
+		return err
+	}
+	r.Phase = "write"
+	if err := produce(&contextWriter{ctx: ctx, w: f}); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.Phase = "file_sync"
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	return ctx.Err()
+}
+
+// syncParent makes the rename in dir durable, advancing r.
+func syncParent(r *Receipt, dir string) error {
+	r.Phase = "directory_open"
+	fd, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return err
 	}
 	parent := os.NewFile(uintptr(fd), dir)
 	r.Phase = "directory_sync"
 	err = parent.Sync()
 	closeErr := parent.Close()
 	if err != nil {
-		return
+		return err
 	}
 	r.State = "durable"
 	r.Phase = "cleanup"
 	if closeErr != nil {
-		err = closeErr
-		return
+		return closeErr
 	}
 	r.Phase = "complete"
-	return
+	return nil
 }
 
 // contextWriter makes one streamed copy observe cancellation.
