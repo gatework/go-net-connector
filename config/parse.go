@@ -173,39 +173,13 @@ func (p *envParser) value(quote byte, base int) (string, error) {
 	v := boundedValue{base: base}
 	closed := quote == 0
 	for len(p.text) > 0 {
-		c := p.text[0]
-		p.text = p.text[1:]
-		if quote != 0 && c == quote {
-			closed = true
+		end, err := p.valueByte(quote, &v)
+		if err != nil {
+			return "", err
+		}
+		if end {
+			closed = closed || quote != 0
 			break
-		}
-		if quote == 0 && (c == '\n' || c == '#') {
-			if c == '#' {
-				_, p.text, _ = strings.Cut(p.text, "\n")
-			}
-			break
-		}
-		if c == '\\' && quote != '\'' && len(p.text) > 0 && strings.IndexByte("$\"\\# ", p.text[0]) >= 0 {
-			if v.writeByte(p.text[0]) != nil {
-				return "", ErrInvalid
-			}
-			p.text = p.text[1:]
-			continue
-		}
-		if c == '$' && quote != '\'' {
-			name, err := p.variable()
-			if err != nil {
-				return "", err
-			}
-			if name != "" {
-				if v.write(p.lookup(name)) != nil {
-					return "", ErrInvalid
-				}
-				continue
-			}
-		}
-		if v.writeByte(c) != nil {
-			return "", ErrInvalid
 		}
 	}
 	if !closed {
@@ -225,6 +199,46 @@ func (p *envParser) value(quote byte, base int) (string, error) {
 		return "", ErrInvalid
 	}
 	return value, nil
+}
+
+// valueByte consumes one byte of a value: an escape, a variable reference
+// or a literal byte. end reports the closing quote, or for an unquoted value
+// the end of line or a comment.
+func (p *envParser) valueByte(quote byte, v *boundedValue) (end bool, err error) {
+	c := p.text[0]
+	p.text = p.text[1:]
+	if quote != 0 && c == quote {
+		return true, nil
+	}
+	if quote == 0 && (c == '\n' || c == '#') {
+		if c == '#' {
+			_, p.text, _ = strings.Cut(p.text, "\n")
+		}
+		return true, nil
+	}
+	if c == '\\' && quote != '\'' && len(p.text) > 0 && strings.IndexByte("$\"\\# ", p.text[0]) >= 0 {
+		if v.writeByte(p.text[0]) != nil {
+			return false, ErrInvalid
+		}
+		p.text = p.text[1:]
+		return false, nil
+	}
+	if c == '$' && quote != '\'' {
+		name, err := p.variable()
+		if err != nil {
+			return false, err
+		}
+		if name != "" {
+			if v.write(p.lookup(name)) != nil {
+				return false, ErrInvalid
+			}
+			return false, nil
+		}
+	}
+	if v.writeByte(c) != nil {
+		return false, ErrInvalid
+	}
+	return false, nil
 }
 
 // variable reads the name after a $: ${NAME} or a bare identifier. A bare
