@@ -75,6 +75,8 @@ func postgresProtocolBodyLimit(limits Limits) int {
 
 func (p *Postgres) String() string   { return "netdisco.Postgres" }
 func (p *Postgres) GoString() string { return p.String() }
+// Devices reads the configured query through a read-only cursor, one page
+// at a time, within the configured timeout and limits.
 func (p *Postgres) Devices(parent context.Context) (result []inventory.Device, err error) {
 	ctx, cancel := context.WithTimeout(parent, p.limits.Timeout)
 	defer cancel()
@@ -107,40 +109,10 @@ func (p *Postgres) Devices(parent context.Context) (result []inventory.Device, e
 	output := make([]inventory.Device, 0)
 	var total int64
 	for range p.limits.MaxPages {
-		rows, e := tx.Query(ctx, fmt.Sprintf("FETCH FORWARD %d FROM net_connector_inventory", p.limits.PageSize), pgx.QueryExecModeExec)
+		var count int
+		output, count, e = p.fetchPage(ctx, tx, output, &total)
 		if e != nil {
-			return nil, newInventoryError("query_failed", e)
-		}
-		columns, e := postgresColumns(ctx, rows.FieldDescriptions())
-		if e != nil {
-			rows.Close()
 			return nil, e
-		}
-
-		count := 0
-		var response int64
-		for rows.Next() {
-			if e := ctx.Err(); e != nil {
-				rows.Close()
-				return nil, newInventoryError("query_failed", e)
-			}
-			count++
-			if len(output) >= p.limits.MaxDevices {
-				rows.Close()
-				return nil, newInventoryError("max_devices", nil)
-			}
-			device, e := decodePostgresRow(ctx, columns, rows.RawValues(), p.limits, &response, &total)
-			if e != nil {
-				rows.Close()
-				return nil, e
-			}
-
-			output = append(output, device)
-		}
-		e = rows.Err()
-		rows.Close()
-		if e != nil {
-			return nil, newInventoryError("query_failed", e)
 		}
 		if count < p.limits.PageSize {
 			if e = tx.Commit(ctx); e != nil {
@@ -153,6 +125,42 @@ func (p *Postgres) Devices(parent context.Context) (result []inventory.Device, e
 		}
 	}
 	return nil, newInventoryError("max_pages", nil)
+}
+
+// fetchPage fetches one page from the inventory cursor, appending the
+// decoded devices to output within the device and byte limits, and returns
+// the number of rows the page held.
+func (p *Postgres) fetchPage(ctx context.Context, tx pgx.Tx, output []inventory.Device, total *int64) ([]inventory.Device, int, error) {
+	rows, e := tx.Query(ctx, fmt.Sprintf("FETCH FORWARD %d FROM net_connector_inventory", p.limits.PageSize), pgx.QueryExecModeExec)
+	if e != nil {
+		return nil, 0, newInventoryError("query_failed", e)
+	}
+	defer rows.Close()
+	columns, e := postgresColumns(ctx, rows.FieldDescriptions())
+	if e != nil {
+		return nil, 0, e
+	}
+	count := 0
+	var response int64
+	for rows.Next() {
+		if e := ctx.Err(); e != nil {
+			return nil, 0, newInventoryError("query_failed", e)
+		}
+		count++
+		if len(output) >= p.limits.MaxDevices {
+			return nil, 0, newInventoryError("max_devices", nil)
+		}
+		device, e := decodePostgresRow(ctx, columns, rows.RawValues(), p.limits, &response, total)
+		if e != nil {
+			return nil, 0, e
+		}
+		output = append(output, device)
+	}
+	rows.Close()
+	if e = rows.Err(); e != nil {
+		return nil, 0, newInventoryError("query_failed", e)
+	}
+	return output, count, nil
 }
 
 // Column selection is fixed for one fetched page; raw buffers belong to pgx.
