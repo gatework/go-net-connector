@@ -23,6 +23,9 @@ type InteractOptions struct {
 	Escape  []byte
 	SkipRaw bool
 }
+
+// InteractResult reports why an interactive session ended and any input read
+// after the escape sequence that was not forwarded.
 type InteractResult struct {
 	Reason       string
 	PendingInput []byte
@@ -33,6 +36,10 @@ type inputResult struct {
 	err     error
 }
 
+// Interact relays o.Input to the device and device output to o.Output until
+// the peer closes, input ends or the escape sequence is typed. The terminal
+// is put in raw mode unless o.SkipRaw is set, and the session is closed on
+// return.
 func (d *Device) Interact(parent context.Context, o InteractOptions) (result InteractResult, err error) {
 	if o.Input == nil || isNilValue(o.Output) {
 		return result, ErrInvalid
@@ -73,15 +80,7 @@ func (d *Device) Interact(parent context.Context, o InteractOptions) (result Int
 			<-done
 		}
 	}()
-	pattern, _ := expect.Compile(`(?s).+`)
-	_, readErr := d.session.Expect(ctx, []expect.Case{{Pattern: pattern, Handler: func(_ context.Context, _ *expect.Session, r expect.Result) (expect.Action, error) {
-		p := []byte(r.Before + r.Match)
-		n, e := o.Output.Write(p)
-		if e == nil && n != len(p) {
-			e = io.ErrShortWrite
-		}
-		return expect.ContinueKeepTimer, e
-	}}, {Pattern: expect.EOF()}}, expect.WithTimeout(0))
+	readErr := d.copyOutput(ctx, o.Output)
 	cancel()
 	cleanupErr := d.closeResources()
 	defer func() { err = joinCleanup(err, cleanupErr) }()
@@ -91,16 +90,40 @@ func (d *Device) Interact(parent context.Context, o InteractOptions) (result Int
 	if e := parent.Err(); e != nil {
 		return result, e
 	}
-	if readErr != nil && !errors.Is(readErr, context.Canceled) && !errors.Is(readErr, io.EOF) {
-		return result, newError("interaction_failed", "interact", Command{}, readErr)
-	}
-	if input.err != nil && !errors.Is(input.err, context.Canceled) && !errors.Is(input.err, expect.ErrClosed) {
-		return result, newError("interaction_failed", "interact", Command{}, input.err)
+	if e := interactionFailure(readErr, input.err); e != nil {
+		return result, e
 	}
 	if result.Reason == "" {
 		result.Reason = "peer_eof"
 	}
 	return result, nil
+}
+
+// copyOutput writes everything the device sends to w until EOF or ctx ends.
+func (d *Device) copyOutput(ctx context.Context, w io.Writer) error {
+	pattern, _ := expect.Compile(`(?s).+`)
+	write := func(_ context.Context, _ *expect.Session, r expect.Result) (expect.Action, error) {
+		p := []byte(r.Before + r.Match)
+		n, e := w.Write(p)
+		if e == nil && n != len(p) {
+			e = io.ErrShortWrite
+		}
+		return expect.ContinueKeepTimer, e
+	}
+	_, err := d.session.Expect(ctx, []expect.Case{{Pattern: pattern, Handler: write}, {Pattern: expect.EOF()}}, expect.WithTimeout(0))
+	return err
+}
+
+// interactionFailure classifies the output and input relay errors, ignoring
+// the cancellation and closure that end every interaction.
+func interactionFailure(readErr, inputErr error) error {
+	if readErr != nil && !errors.Is(readErr, context.Canceled) && !errors.Is(readErr, io.EOF) {
+		return newError("interaction_failed", "interact", Command{}, readErr)
+	}
+	if inputErr != nil && !errors.Is(inputErr, context.Canceled) && !errors.Is(inputErr, expect.ErrClosed) {
+		return newError("interaction_failed", "interact", Command{}, inputErr)
+	}
+	return nil
 }
 
 // relayInput forwards terminal input from fd to session until input EOF or
