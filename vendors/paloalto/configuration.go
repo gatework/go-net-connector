@@ -61,7 +61,7 @@ func (p *configPolicy) Clean(step connector.StepResult, _, prompt string) (strin
 	if err != nil {
 		return "", err
 	}
-	return cleanOutput(string(output), prompt)
+	return cleanOutput(output, prompt)
 }
 
 func cleanOutput(output, prompt string) (string, error) {
@@ -114,7 +114,7 @@ func setCommands(text string) bool {
 			}
 		}
 		escaped := false
-		for i := 0; i < len(line); i++ {
+		for i := range len(line) {
 			b := line[i]
 			if escaped {
 				escaped = false

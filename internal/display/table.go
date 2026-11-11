@@ -13,8 +13,8 @@ func Table(w io.Writer, rows [][5]string, width int) error {
 	width = max(32, width)
 	available := width - 17
 	widths := []int{max(7, available*25/100), max(3, available*25/100), max(3, available*13/100), max(3, available*17/100), max(4, available*20/100)}
-	for sum := 0; ; {
-		sum = 0
+	for {
+		sum := 0
 		for _, n := range widths {
 			sum += n
 		}

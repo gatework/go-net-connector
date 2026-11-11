@@ -16,7 +16,7 @@ import (
 // 0 identical, 1 different, 2 error.
 func (r Runtime) diffBatches(ctx context.Context, host, from, to string, jsonOutput bool) int {
 	if from == "" || to == "" {
-		return r.fail("netman", usageError("必须通过 --from 与 --to 指定两个批次目录"))
+		return r.fail("netman", newUsageError("必须通过 --from 与 --to 指定两个批次目录"))
 	}
 	before, beforeArtifact, err := storage.ReadBatchSaved(ctx, from, host)
 	if err != nil {

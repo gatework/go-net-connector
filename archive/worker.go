@@ -34,10 +34,10 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer) (err error) {
 
 func serve(parent context.Context, input io.Reader, output io.Writer, control time.Duration) (err error) {
 	var setters []func(time.Time) error
-	if d, ok := input.(interface{ SetReadDeadline(time.Time) error }); ok {
+	if d, ok := input.(interface{ SetReadDeadline(t time.Time) error }); ok {
 		setters = append(setters, d.SetReadDeadline)
 	}
-	if d, ok := output.(interface{ SetWriteDeadline(time.Time) error }); ok {
+	if d, ok := output.(interface{ SetWriteDeadline(t time.Time) error }); ok {
 		setters = append(setters, d.SetWriteDeadline)
 	}
 	ctx := parent
@@ -48,7 +48,7 @@ func serve(parent context.Context, input io.Reader, output io.Writer, control ti
 		// Never retain an already-stopped callback whose done channel cannot close.
 		finish = func() {}
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithDeadline(parent, deadline)
+		ctx, cancel = context.WithDeadline(parent, deadline) //nolint:fatcontext // each deadline replaces the previous one; parent never nests
 		deadline, _ = ctx.Deadline()
 		for _, set := range setters {
 			if e := set(deadline); e != nil {

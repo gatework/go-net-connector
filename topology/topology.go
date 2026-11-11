@@ -47,30 +47,6 @@ func New(device *connector.Device, registry dialect.Registry) (*Client, error) {
 	}, nil
 }
 
-func (client *Client) supportsNeighbors() error {
-	if client.neighborDiscovery == nil {
-		return newError("neighbor_discovery_unsupported", "discover", ErrUnsupported)
-	}
-	return nil
-}
-func (client *Client) supportsDescriptions() error {
-	if client.descriptionReader == nil {
-		return newError("description_unsupported", "discover", ErrUnsupported)
-	}
-	return nil
-}
-func (client *Client) supportsIdentity() error {
-	if client.identity == nil {
-		return newError("description_unsupported", "plan", ErrUnsupported)
-	}
-	return nil
-}
-func (client *Client) supportsWrite() error {
-	if err := client.supportsIdentity(); err != nil {
-		return err
-	}
-	return requireWriter(client.writer, client.writeDenial)
-}
 func (client *Client) Discover(ctx context.Context) (snapshot Snapshot, err error) {
 	if err = client.supportsNeighbors(); err != nil {
 		return
@@ -85,68 +61,6 @@ func (client *Client) Discover(ctx context.Context) (snapshot Snapshot, err erro
 	})
 	return
 }
-func (client *Client) discover(ctx context.Context, op *connector.Operation) (s Snapshot, err error) {
-	r := Result{}
-	defer func() { s.Receipts = r.Receipts }()
-	s.Neighbors, err = client.neighbors(ctx, op, &r)
-	if err != nil {
-		return
-	}
-	s.Descriptions, err = client.descriptions(ctx, op, &r)
-	return
-}
-func (client *Client) neighbors(ctx context.Context, op *connector.Operation, result *Result) ([]Neighbor, error) {
-	if e := client.supportsNeighbors(); e != nil {
-		return nil, e
-	}
-	status := ""
-	prompt := ""
-	if statusCommand := client.neighborDiscovery.NeighborStatusCommand(); statusCommand != "" {
-		r, e := op.ExecuteCommand(ctx, connector.Command{Text: statusCommand}, connector.ExecuteOptions{})
-		result.Receipts = append(result.Receipts, r.Steps()...)
-		if e != nil {
-			return nil, e
-		}
-		status, e = r.JoinedOutput()
-		if e != nil {
-			return nil, e
-		}
-		prompt, e = op.Prompt()
-		if e != nil {
-			return nil, e
-		}
-	}
-	command, e := client.neighborDiscovery.NeighborCommand(status, prompt)
-	if e != nil {
-		return nil, structuredParseError(e, "discover")
-	}
-	r, e := op.ExecuteCommand(ctx, connector.Command{Text: command}, connector.ExecuteOptions{})
-	result.Receipts = append(result.Receipts, r.Steps()...)
-	if e != nil {
-		return nil, e
-	}
-	output, e := r.JoinedOutput()
-	if e != nil {
-		return nil, e
-	}
-	return ParseNeighbors(client.neighborDiscovery, output)
-}
-func (client *Client) descriptions(ctx context.Context, op *connector.Operation, result *Result) (map[string]string, error) {
-	if e := client.supportsDescriptions(); e != nil {
-		return nil, e
-	}
-	r, e := op.RunningConfig(ctx)
-	result.Receipts = append(result.Receipts, r.Steps()...)
-	if e != nil {
-		return nil, e
-	}
-	output, ok := r.Config()
-	if !ok {
-		return nil, connector.ErrIncomplete
-	}
-	return ParseDescriptions(client.descriptionReader, output)
-}
-
 func (client *Client) Audit(ctx context.Context, opts FormatOptions) (audit Audit, err error) {
 	if err = client.supportsNeighbors(); err != nil {
 		return
@@ -194,6 +108,93 @@ func (client *Client) Apply(ctx context.Context, plan Plan, opts ApplyOptions) (
 		return client.apply(ctx, op, plan, opts, &result)
 	})
 	return
+}
+func (client *Client) supportsNeighbors() error {
+	if client.neighborDiscovery == nil {
+		return newError("neighbor_discovery_unsupported", "discover", ErrUnsupported)
+	}
+	return nil
+}
+func (client *Client) supportsDescriptions() error {
+	if client.descriptionReader == nil {
+		return newError("description_unsupported", "discover", ErrUnsupported)
+	}
+	return nil
+}
+func (client *Client) supportsIdentity() error {
+	if client.identity == nil {
+		return newError("description_unsupported", "plan", ErrUnsupported)
+	}
+	return nil
+}
+func (client *Client) supportsWrite() error {
+	if err := client.supportsIdentity(); err != nil {
+		return err
+	}
+	return requireWriter(client.writer, client.writeDenial)
+}
+func (client *Client) discover(ctx context.Context, op *connector.Operation) (s Snapshot, err error) {
+	r := Result{}
+	defer func() { s.Receipts = r.Receipts }()
+	s.Neighbors, err = client.neighbors(ctx, op, &r)
+	if err != nil {
+		return
+	}
+	s.Descriptions, err = client.descriptions(ctx, op, &r)
+	return
+}
+
+func (client *Client) neighbors(ctx context.Context, op *connector.Operation, result *Result) ([]Neighbor, error) {
+	if e := client.supportsNeighbors(); e != nil {
+		return nil, e
+	}
+	status := ""
+	prompt := ""
+	if statusCommand := client.neighborDiscovery.NeighborStatusCommand(); statusCommand != "" {
+		r, e := op.ExecuteCommand(ctx, connector.Command{Text: statusCommand}, connector.ExecuteOptions{})
+		result.Receipts = append(result.Receipts, r.Steps()...)
+		if e != nil {
+			return nil, e
+		}
+		status, e = r.JoinedOutput()
+		if e != nil {
+			return nil, e
+		}
+		prompt, e = op.Prompt()
+		if e != nil {
+			return nil, e
+		}
+	}
+	command, e := client.neighborDiscovery.NeighborCommand(status, prompt)
+	if e != nil {
+		return nil, structuredParseError(e, "discover")
+	}
+	r, e := op.ExecuteCommand(ctx, connector.Command{Text: command}, connector.ExecuteOptions{})
+	result.Receipts = append(result.Receipts, r.Steps()...)
+	if e != nil {
+		return nil, e
+	}
+	output, e := r.JoinedOutput()
+	if e != nil {
+		return nil, e
+	}
+	return ParseNeighbors(client.neighborDiscovery, output)
+}
+
+func (client *Client) descriptions(ctx context.Context, op *connector.Operation, result *Result) (map[string]string, error) {
+	if e := client.supportsDescriptions(); e != nil {
+		return nil, e
+	}
+	r, e := op.RunningConfig(ctx)
+	result.Receipts = append(result.Receipts, r.Steps()...)
+	if e != nil {
+		return nil, e
+	}
+	output, ok := r.Config()
+	if !ok {
+		return nil, connector.ErrIncomplete
+	}
+	return ParseDescriptions(client.descriptionReader, output)
 }
 
 func commandScript(texts []string) connector.Script {

@@ -13,24 +13,24 @@ type Driver interface {
 	// ValidateSave requires affirmative device evidence that the save
 	// completed; a prompt alone is not proof. It returns ErrUnconfirmed
 	// (or a wrapped cause) when the evidence is missing.
-	ValidateSave(context.Context, Result) error
+	ValidateSave(ctx context.Context, result Result) error
 }
 
 // CommandPreparer is an optional Driver hook that may rewrite or skip a
 // command before it is sent, for example to substitute a device-assigned id.
 type CommandPreparer interface {
-	PrepareCommand(context.Context, Command, Executor) (cmd Command, skip bool, err error)
+	PrepareCommand(ctx context.Context, command Command, executor Executor) (cmd Command, skip bool, err error)
 }
 
 // CommandObserver is an optional Driver hook run after a command is accepted.
 type CommandObserver interface {
-	AfterCommand(context.Context, Command, StepResult, Executor) error
+	AfterCommand(ctx context.Context, command Command, step StepResult, executor Executor) error
 }
 
 // LoginInspector is an optional Driver hook that reads device state from the
 // login banner, such as a high-availability role.
 type LoginInspector interface {
-	AfterLogin(context.Context, StepResult) (LoginState, error)
+	AfterLogin(ctx context.Context, step StepResult) (LoginState, error)
 }
 
 // StaticDriver adapts a Terminal and optional functions into a Driver. Nil
@@ -99,6 +99,8 @@ func (f inspectorFunc) AfterLogin(ctx context.Context, s StepResult) (LoginState
 
 // WithTerminal returns a driver that keeps d's behavior but uses grammar t,
 // for callers that customize a platform's prompts or commands.
+//
+//nolint:iface // a decorator returns the interface it decorates
 func WithTerminal(d Driver, t Terminal) Driver { return terminalOverride{Driver: d, grammar: t} }
 
 type terminalOverride struct {

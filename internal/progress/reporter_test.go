@@ -26,7 +26,7 @@ func (b *lockedBuffer) WriteString(s string) (int, error) {
 	defer b.Unlock()
 	return b.Buffer.WriteString(s)
 }
-func (b *lockedBuffer) text() string { b.Lock(); defer b.Unlock(); return b.Buffer.String() }
+func (b *lockedBuffer) text() string { b.Lock(); defer b.Unlock(); return b.String() }
 
 type broken struct {
 	err   error

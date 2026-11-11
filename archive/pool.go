@@ -113,6 +113,86 @@ func (p *Pool) Prepare(ctx context.Context, observe func(PrepareProgress)) error
 	return p.prepare(ctx, observe)
 }
 
+// Upload borrows one of at most Parallel slots and returns it after the transaction.
+func (p *Pool) Upload(ctx context.Context, filename, archiveName string, upload func(context.Context, string) (transfer.Receipt, error)) (Result, error) {
+	prepare, cancelPrepare := context.WithTimeout(ctx, p.timeouts.Prepare)
+	defer cancelPrepare()
+	p.mu.Lock()
+	if !p.prepared || p.closed {
+		p.mu.Unlock()
+		return Result{}, ErrArchive
+	}
+	p.active.Add(1)
+	p.mu.Unlock()
+	defer p.active.Done()
+	select {
+	case <-prepare.Done():
+		return Result{}, stageFailure("prepare", prepare.Err())
+	case <-p.stop:
+		return Result{}, ErrArchive
+	case client := <-p.available:
+		defer func() { p.available <- client }()
+		select {
+		case <-p.stop:
+			return Result{}, ErrArchive
+		default:
+		}
+		callCtx, cancel := context.WithCancel(ctx)
+		stop := context.AfterFunc(&poolDoneContext{done: p.stop}, cancel)
+		defer func() { stop(); cancel() }()
+		// Prepare admission must also observe Pool.Close, while keeping its
+		// original deadline across the local queue and the server's target lock.
+		admission, cancelAdmission := context.WithCancel(prepare)
+		stopAdmission := context.AfterFunc(callCtx, cancelAdmission)
+		defer func() { stopAdmission(); cancelAdmission() }()
+		receipt, err := client.upload(callCtx, admission, filename, archiveName, upload)
+		if p.endpoint != nil && receipt.Receipt.Server != nil && receipt.Receipt.Server.ArchivePath != "" {
+			u := *p.endpoint
+			u.Path, u.RawPath = receipt.Receipt.Server.ArchivePath, ""
+			receipt.Receipt.Server.ArchivePath = u.String()
+		}
+		return receipt, err
+	}
+}
+
+func (p *Pool) Close() error {
+	p.mu.Lock()
+	if p.closed && p.cleaned && p.closeErr != nil {
+		// A completed failed attempt retains owners; a later Close retries them.
+		p.cleaned = false
+		p.closeDone = make(chan struct{})
+		defer p.mu.Unlock()
+		return p.closeLocked()
+	}
+	if p.closed {
+		done := p.closeDone
+		p.mu.Unlock()
+		<-done
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.closeErr
+	}
+	p.closed = true
+	close(p.stop)
+	if p.prepareCancel != nil {
+		p.prepareCancel()
+	}
+	prepDone := p.prepareDone
+	p.mu.Unlock()
+	if prepDone != nil {
+		<-prepDone
+	}
+	p.active.Wait()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.closeLocked()
+}
+
+// ArchiveDirectory returns the server directory after successful preparation.
+func (p *Pool) ArchiveDirectory() string {
+	return filepath.Join(p.clients[0].root, "archive", p.clients[0].batch)
+}
+
 func (p *Pool) prepare(ctx context.Context, observe func(PrepareProgress)) error {
 	for {
 		p.mu.Lock()
@@ -203,6 +283,20 @@ func (p *Pool) prepareAll(ctx context.Context, observe func(PrepareProgress)) er
 	return p.prepareRemote(ctx, observe)
 }
 
+type poolDoneContext struct{ done <-chan struct{} }
+
+func (c *poolDoneContext) Deadline() (deadline time.Time, ok bool) { return }
+func (c *poolDoneContext) Done() <-chan struct{}                   { return c.done }
+func (c *poolDoneContext) Err() error {
+	select {
+	case <-c.done:
+		return context.Canceled
+	default:
+		return nil
+	}
+}
+func (c *poolDoneContext) Value(any) any { return nil }
+
 func (p *Pool) prepareRemote(ctx context.Context, observe func(PrepareProgress)) error {
 	workerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -287,116 +381,6 @@ func (p *Pool) preparationWorkers() int {
 	return min(4, len(p.clients))
 }
 
-// Upload borrows one of at most Parallel slots and returns it after the transaction.
-func (p *Pool) Upload(ctx context.Context, filename, archiveName string, upload func(context.Context, string) (transfer.Receipt, error)) (Result, error) {
-	prepare, cancelPrepare := context.WithTimeout(ctx, p.timeouts.Prepare)
-	defer cancelPrepare()
-	p.mu.Lock()
-	if !p.prepared || p.closed {
-		p.mu.Unlock()
-		return Result{}, ErrArchive
-	}
-	p.active.Add(1)
-	p.mu.Unlock()
-	defer p.active.Done()
-	select {
-	case <-prepare.Done():
-		return Result{}, stageFailure("prepare", prepare.Err())
-	case <-p.stop:
-		return Result{}, ErrArchive
-	case client := <-p.available:
-		defer func() { p.available <- client }()
-		select {
-		case <-p.stop:
-			return Result{}, ErrArchive
-		default:
-		}
-		callCtx, cancel := context.WithCancel(ctx)
-		stop := context.AfterFunc(&poolDoneContext{done: p.stop}, cancel)
-		defer func() { stop(); cancel() }()
-		// Prepare admission must also observe Pool.Close, while keeping its
-		// original deadline across the local queue and the server's target lock.
-		admission, cancelAdmission := context.WithCancel(prepare)
-		stopAdmission := context.AfterFunc(callCtx, cancelAdmission)
-		defer func() { stopAdmission(); cancelAdmission() }()
-		receipt, err := client.upload(callCtx, admission, filename, archiveName, upload)
-		if p.endpoint != nil && receipt.Receipt.Server != nil && receipt.Receipt.Server.ArchivePath != "" {
-			u := *p.endpoint
-			u.Path, u.RawPath = receipt.Receipt.Server.ArchivePath, ""
-			receipt.Receipt.Server.ArchivePath = u.String()
-		}
-		return receipt, err
-	}
-}
-
-type poolDoneContext struct{ done <-chan struct{} }
-
-func (c *poolDoneContext) Deadline() (deadline time.Time, ok bool) { return }
-func (c *poolDoneContext) Done() <-chan struct{}                   { return c.done }
-func (c *poolDoneContext) Err() error {
-	select {
-	case <-c.done:
-		return context.Canceled
-	default:
-		return nil
-	}
-}
-func (c *poolDoneContext) Value(any) any { return nil }
-
-func (p *Pool) Close() error {
-	p.mu.Lock()
-	if p.closed && p.cleaned && p.closeErr != nil {
-		// A completed failed attempt retains owners; a later Close retries them.
-		p.cleaned = false
-		p.closeDone = make(chan struct{})
-		defer p.mu.Unlock()
-		return p.closeLocked()
-	}
-	if p.closed {
-		done := p.closeDone
-		p.mu.Unlock()
-		<-done
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		return p.closeErr
-	}
-	p.closed = true
-	close(p.stop)
-	if p.prepareCancel != nil {
-		p.prepareCancel()
-	}
-	prepDone := p.prepareDone
-	p.mu.Unlock()
-	if prepDone != nil {
-		<-prepDone
-	}
-	p.active.Wait()
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.closeLocked()
-}
-
-func (p *Pool) closeLocked() error {
-	if p.cleaned {
-		return p.closeErr
-	}
-	if !p.closed {
-		p.closed = true
-		close(p.stop)
-	}
-	var err error
-	for _, client := range p.clients {
-		err = errors.Join(err, client.Close())
-	}
-	for _, master := range p.masters {
-		err = errors.Join(err, master.close())
-	}
-	p.closeErr = err
-	p.cleaned = true
-	close(p.closeDone)
-	return err
-}
-
 // MarshalJSON exposes operational metadata only; credentials remain available explicitly on the options.
 func (o PoolOptions) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
@@ -418,7 +402,23 @@ func safeOptionURL(raw string) string {
 	return u.Scheme + "://" + u.Host
 }
 
-// ArchiveDirectory returns the server directory after successful preparation.
-func (p *Pool) ArchiveDirectory() string {
-	return filepath.Join(p.clients[0].root, "archive", p.clients[0].batch)
+func (p *Pool) closeLocked() error {
+	if p.cleaned {
+		return p.closeErr
+	}
+	if !p.closed {
+		p.closed = true
+		close(p.stop)
+	}
+	var err error
+	for _, client := range p.clients {
+		err = errors.Join(err, client.Close())
+	}
+	for _, master := range p.masters {
+		err = errors.Join(err, master.close())
+	}
+	p.closeErr = err
+	p.cleaned = true
+	close(p.closeDone)
+	return err
 }

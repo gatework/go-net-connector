@@ -10,10 +10,11 @@ import (
 	"os"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/internal/bootstrap"
 	"github.com/gatework/go-net-connector/transfer"
-	"golang.org/x/term"
 )
 
 var errSetupDeclined = errors.New("未创建必需的配置文件")
@@ -105,10 +106,10 @@ func (r Runtime) passwords(ctx context.Context, o *options) error {
 		if e != nil {
 			return e
 		}
-		if len(password) == 0 || strings.ContainsAny(string(password), "\r\n\x00") {
+		if len(password) == 0 || strings.ContainsAny(password, "\r\n\x00") {
 			return config.ErrInvalid
 		}
-		o.secrets[p.key] = string(password)
+		o.secrets[p.key] = password
 	}
 	return nil
 }

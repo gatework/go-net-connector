@@ -50,6 +50,8 @@ func (e *DiagnosticError) DiagnosticPhase() string {
 
 // DiagnosticMetadata lets consumers preserve structured errors while keeping
 // the shared dialect package independent of business workflows.
+//
+//nolint:iface // shared contract: topology and workflow classify errors through it
 type DiagnosticMetadata interface {
 	error
 	DiagnosticCode() string
@@ -67,10 +69,12 @@ type Platform interface {
 	connector.Driver
 	Name() string
 	// MatchInventory classifies a normalized inventory identity.
-	MatchInventory(InventoryIdentity) bool
+	MatchInventory(identity InventoryIdentity) bool
 }
 
 // Registry resolves immutable dialect objects by their canonical platform key.
+//
+//nolint:iface // shared contract consumed by fleet, topology, transfer and workflow
 type Registry interface {
 	Names() []string
 	Lookup(name string) (Platform, error)

@@ -13,9 +13,9 @@ import (
 // validation, output selection and normalization.
 type ConfigPolicy interface {
 	MatchPrompt(command, current string) (expect.Pattern, error)
-	Validate(context.Context, connector.Command, connector.StepResult, connector.Executor) error
-	SelectStep([]connector.StepResult) (connector.StepResult, error)
-	Clean(connector.StepResult, string, string) (string, error)
+	Validate(ctx context.Context, command connector.Command, step connector.StepResult, executor connector.Executor) error
+	SelectStep(steps []connector.StepResult) (connector.StepResult, error)
+	Clean(step connector.StepResult, visible, prompt string) (string, error)
 }
 
 type configurationStrategy struct{ policy ConfigPolicy }

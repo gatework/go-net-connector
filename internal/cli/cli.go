@@ -211,7 +211,8 @@ func (r Runtime) executeSelected(ctx context.Context, o options, request command
 		if json.Unmarshal([]byte(line), &creds) != nil {
 			return r.fail(program, config.ErrInvalid)
 		}
-		for key, target := range map[string]string{"netdisco_username": "ND_USERNAME", "netdisco_password": "ND_PASSWORD", "device_username": "NC_DEVICE_USERNAME", "device_password": "NC_DEVICE_PASSWORD"} {
+		for key, target := range map[string]string{ //nolint:gosec // maps setting names to environment variable names, not secrets
+			"netdisco_username": "ND_USERNAME", "netdisco_password": "ND_PASSWORD", "device_username": "NC_DEVICE_USERNAME", "device_password": "NC_DEVICE_PASSWORD"} {
 			if strings.TrimSpace(creds[key]) == "" {
 				return r.fail(program, config.ErrInvalid)
 			}
@@ -246,10 +247,10 @@ func (r Runtime) executeSelected(ctx context.Context, o options, request command
 		result, e = services.Inventory(ctx, bootstrap.InventoryMode(policy, o.mode, o.refresh, o.flags.Changed("cache-only") || o.flags.Changed("cache-mode")))
 		rows = result.Rows
 		if result.RefreshErrorCode != "" {
-			reporter.Warning("设备清单刷新失败，已使用校验通过的缓存")
+			_ = reporter.Warning("设备清单刷新失败，已使用校验通过的缓存") // progress output failures are reported by the reporter itself
 		}
 		if result.WriteErrorType != "" {
-			reporter.Warning("清单缓存写入失败，继续使用本次获取的清单")
+			_ = reporter.Warning("清单缓存写入失败，继续使用本次获取的清单")
 		}
 	}
 	if e != nil {
@@ -330,7 +331,7 @@ func (r Runtime) fail(program string, e error) int {
 		return 130
 	}
 	message := "操作失败（输入无效、数据源不可用或 I/O 错误）"
-	if usage, ok := errors.AsType[*commandUsage](e); ok {
+	if usage, ok := errors.AsType[*usageError](e); ok {
 		message = usage.message
 	}
 	if classified, ok := errors.AsType[*connector.Error](e); ok {

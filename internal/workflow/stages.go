@@ -363,14 +363,6 @@ func (RemoteStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	return ""
 }
 
-func (x RemoteStage) path(host string) string {
-	name := strings.ReplaceAll(host, ":", "_") + "-" + x.Stamp + ".conf"
-	if x.Options.Path == "" {
-		return name
-	}
-	return strings.TrimSuffix(x.Options.Path, "/") + "/" + name
-}
-
 func (x RemoteStage) Plan(task fleet.Task, _ dialect.Platform, target *batchreport.Target) {
 	target.Server, target.File = x.Options.Server, x.path(task.Device.Host)
 }
@@ -388,4 +380,12 @@ func (x RemoteStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 		e.MarkPartial()
 	}
 	return err
+}
+
+func (x RemoteStage) path(host string) string {
+	name := strings.ReplaceAll(host, ":", "_") + "-" + x.Stamp + ".conf"
+	if x.Options.Path == "" {
+		return name
+	}
+	return strings.TrimSuffix(x.Options.Path, "/") + "/" + name
 }

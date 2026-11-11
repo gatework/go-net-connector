@@ -344,7 +344,7 @@ func TestRemotePoolPreparesClientsWithBoundedConcurrency(t *testing.T) {
 			progressEvents <- event
 		})
 	}()
-	for i := 0; i < min(4, len(p.clients)); i++ {
+	for i := range min(4, len(p.clients)) {
 		select {
 		case <-started:
 		case <-time.After(time.Second):

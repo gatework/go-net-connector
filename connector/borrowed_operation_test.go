@@ -236,13 +236,13 @@ func TestBorrowedRejectionRetiresOnIncompleteOrLateFailure(t *testing.T) {
 			case "command_observer", "operation_observer", "command_cancel", "operation_cancel":
 				name, _, _ := strings.Cut(kind, "_")
 				cfg.OnSessionEvent = func(_ context.Context, event SessionEvent) error {
-					if event.Name == name+"_complete" {
-						if strings.HasSuffix(kind, "_cancel") {
-							cancel()
-						} else {
-							return lateErr
-						}
+					if event.Name != name+"_complete" {
+						return nil
 					}
+					if !strings.HasSuffix(kind, "_cancel") {
+						return lateErr
+					}
+					cancel()
 					return nil
 				}
 			case "command_log", "operation_log":
@@ -312,9 +312,10 @@ func TestBorrowedRetireGuardsAndCleanupOwnership(t *testing.T) {
 				return nil // Neither a swallowed cleanup error nor cancellation may lose it.
 			})
 			var wantErr error
-			if kind == "canceled" {
+			switch kind {
+			case "canceled":
 				wantErr = context.Canceled
-			} else if kind == "callback_error" {
+			case "callback_error":
 				wantErr = ErrDevice
 			}
 			if !errors.Is(operationErr, wantErr) || !errors.Is(cleanupErr, closeErr) || errors.Is(operationErr, closeErr) {
@@ -449,7 +450,7 @@ func TestBorrowedRecoveredFinalObserverPanicStillRetires(t *testing.T) {
 	operationErr, cleanupErr := d.WithBorrowedOperation(t.Context(), func(ctx context.Context, op *Operation) error {
 		func() {
 			defer func() {
-				if recovered := recover(); recovered != observerErr {
+				if recovered := recover(); recovered != observerErr { //nolint:errorlint // the panic value itself must be the observer error
 					t.Errorf("panic=%v", recovered)
 				}
 			}()

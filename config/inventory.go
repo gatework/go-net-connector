@@ -23,7 +23,8 @@ func ValidateInventory(document map[string]any) error {
 	if err != nil {
 		return err
 	}
-	return validateValues(owned.(map[string]any))
+	values, _ := owned.(map[string]any)
+	return validateValues(values)
 }
 
 func inventoryPath(path string) bool {

@@ -152,7 +152,7 @@ func TestRelativeSourceContextsAreAbsolute(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	root, e := os.MkdirTemp(base, "config-context-")
+	root, e := os.MkdirTemp(base, "config-context-") //nolint:usetesting // must live under the working directory to test relative paths
 	if e != nil {
 		t.Fatal(e)
 	}

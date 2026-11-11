@@ -10,7 +10,7 @@ import (
 type callScope struct {
 	mu           sync.Mutex
 	active, busy bool
-	ctx          context.Context
+	ctx          context.Context //nolint:containedctx // a call scope is a lifecycle object; Close cancels it
 	cancel       context.CancelFunc
 	calls        sync.WaitGroup
 }

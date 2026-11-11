@@ -255,9 +255,9 @@ type ExecuteOptions struct {
 	MaxOutputBytes int64
 }
 type Executor interface {
-	Execute(context.Context, Command) (StepResult, error)
-	Value(string) string
-	SetValue(string, string)
+	Execute(ctx context.Context, command Command) (StepResult, error)
+	Value(name string) string
+	SetValue(name, value string)
 }
 
 // Terminal is a platform's declarative CLI grammar: prompts, pager, error and
@@ -282,10 +282,10 @@ type LoginState struct{ HAState string }
 
 type ConfigStrategy interface {
 	MatchPrompt(command, rawCurrent string) (expect.Pattern, error)
-	Validate(context.Context, Command, StepResult, Executor) error
+	Validate(ctx context.Context, command Command, step StepResult, executor Executor) error
 	// Finish receives the operation's Close-linked context and must cooperate
 	// with cancellation. Each collection owns its own strategy instance.
-	Finish(context.Context, Result) (string, error)
+	Finish(ctx context.Context, result Result) (string, error)
 }
 
 func (p Terminal) clone() (Terminal, error) {
@@ -420,8 +420,9 @@ func isNilValue(value any) bool {
 	switch v.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
 		return v.IsNil()
+	default:
+		return false
 	}
-	return false
 }
 
 // cleanupError keeps diagnostics safe without hiding a primary Error's metadata.
@@ -437,18 +438,18 @@ func joinCleanup(primary, cleanup error) error {
 	return &cleanupError{cause: errors.Join(primary, cleanup)}
 }
 
-// joinedFailure retains both causes without formatting arbitrary callback errors.
+// joinedError retains both causes without formatting arbitrary callback errors.
 // Primary metadata is first in the errors.Is/As traversal.
-type joinedFailure struct{ primary, secondary error }
+type joinedError struct{ primary, secondary error }
 
-func (e *joinedFailure) Error() string {
+func (e *joinedError) Error() string {
 	if classified, ok := errors.AsType[*Error](e.primary); ok {
 		return classified.Error()
 	}
 	return "connector: multiple failures"
 }
-func (e *joinedFailure) GoString() string { return e.Error() }
-func (e *joinedFailure) Unwrap() []error  { return []error{e.primary, e.secondary} }
+func (e *joinedError) GoString() string { return e.Error() }
+func (e *joinedError) Unwrap() []error  { return []error{e.primary, e.secondary} }
 func joinFailures(primary, secondary error) error {
 	if primary == nil {
 		return secondary
@@ -456,5 +457,5 @@ func joinFailures(primary, secondary error) error {
 	if secondary == nil {
 		return primary
 	}
-	return &joinedFailure{primary, secondary}
+	return &joinedError{primary, secondary}
 }

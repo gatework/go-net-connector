@@ -9,9 +9,10 @@ import (
 	"io"
 	"os"
 
-	expect "github.com/gatework/go-expect"
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
+
+	expect "github.com/gatework/go-expect"
 )
 
 // InteractOptions borrows a file input and cooperative output. Input must have

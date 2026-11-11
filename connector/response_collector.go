@@ -12,12 +12,6 @@ type responseCollector struct {
 
 const responseBlock = 4096
 
-func (c *responseCollector) flush() {
-	if c.small.Len() > 0 {
-		c.parts = append(c.parts, c.small.String())
-		c.small = strings.Builder{}
-	}
-}
 func (c *responseCollector) WriteString(s string) {
 	if len(s) == 0 {
 		return
@@ -49,6 +43,12 @@ func (c *responseCollector) String() string {
 		c.parts = []string{text}
 	}
 	return text
+}
+func (c *responseCollector) flush() {
+	if c.small.Len() > 0 {
+		c.parts = append(c.parts, c.small.String())
+		c.small = strings.Builder{}
+	}
 }
 func (c *responseCollector) clone() responseCollector {
 	c.flush()

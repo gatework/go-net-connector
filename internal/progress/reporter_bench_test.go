@@ -20,7 +20,7 @@ func BenchmarkReporterSuccessfulTask(b *testing.B) {
 			host, vendor := "192.0.2.1", "h3c"
 			b.ReportAllocs()
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				if err := reporter.Start(host, vendor); err != nil {
 					b.Fatal(err)
 				}

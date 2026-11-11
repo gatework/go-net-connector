@@ -8,8 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gatework/go-net-connector/internal/display"
 	"golang.org/x/term"
+
+	"github.com/gatework/go-net-connector/internal/display"
 )
 
 func (p *Reporter) clearLocked() {
@@ -153,7 +154,7 @@ func (p *Reporter) RunUpdates(ctx context.Context) func() {
 	}
 	stop, done := make(chan struct{}), make(chan struct{})
 	var once sync.Once
-	go func() {
+	go func() { //nolint:gosec // after cancellation the panel keeps rendering the shutdown notice until stop
 		defer close(done)
 		ticker := time.NewTicker(p.interval)
 		defer ticker.Stop()

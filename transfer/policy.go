@@ -78,8 +78,8 @@ func VerificationRoot(root string) (string, error) {
 	if e != nil {
 		return "", ErrInvalid
 	}
-	if real, e := filepath.EvalSymlinks(p); e == nil {
-		p = real
+	if resolved, e := filepath.EvalSymlinks(p); e == nil {
+		p = resolved
 	}
 	return p, nil
 }

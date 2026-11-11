@@ -38,7 +38,7 @@ type Rules struct {
 
 // PlatformResolver belongs to Fleet, which consumes platform recognition.
 type PlatformResolver interface {
-	ResolvePlatform(dialect.InventoryIdentity) (platform string, found bool)
+	ResolvePlatform(identity dialect.InventoryIdentity) (platform string, found bool)
 }
 
 var labelChars = regexp.MustCompile(`[^a-z0-9]+`)
@@ -232,12 +232,6 @@ type Plan struct {
 	transfers map[int]transfer.Target
 }
 
-func (p Plan) Entries() []PlanEntry { return append([]PlanEntry(nil), p.entries...) }
-func (p Plan) Tasks() []Task        { return append([]Task(nil), p.tasks...) }
-
-// ErrMissingCredentials reports a device with no configured login credentials.
-var ErrMissingCredentials = errors.New("fleet: missing device credentials")
-
 func NewPlan(rows []inventory.Device, rules *Rules, o PlanOptions) (Plan, error) {
 	if rules == nil || (o.Mode != "backup" && o.Mode != "tftp") || o.LimitPerVendor < 0 || o.LimitPerVendor > 5 || (o.Mode == "tftp" && o.Target == nil) {
 		return Plan{}, ErrInvalidPlan
@@ -349,3 +343,9 @@ func NewPlan(rows []inventory.Device, rules *Rules, o PlanOptions) (Plan, error)
 	}
 	return p, nil
 }
+func (p Plan) Entries() []PlanEntry { return append([]PlanEntry(nil), p.entries...) }
+
+// ErrMissingCredentials reports a device with no configured login credentials.
+var ErrMissingCredentials = errors.New("fleet: missing device credentials")
+
+func (p Plan) Tasks() []Task { return append([]Task(nil), p.tasks...) }

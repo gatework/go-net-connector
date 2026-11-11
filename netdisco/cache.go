@@ -121,7 +121,7 @@ func (c *cache) Fetch(ctx context.Context, mode CacheMode) (result CacheResult, 
 			err = newInventoryError("cache_directory_changed", nil)
 		}
 	}()
-	previous, e := c.read(ctx)
+	previous, _, e := c.read(ctx)
 	if e != nil {
 		return result, e
 	}
@@ -153,7 +153,7 @@ func (c *cache) Fetch(ctx context.Context, mode CacheMode) (result CacheResult, 
 			err = e
 		}
 	}()
-	previous, e = c.read(ctx)
+	previous, _, e = c.read(ctx)
 	if e != nil {
 		return result, e
 	}
@@ -202,51 +202,55 @@ func isPrivateCacheEntry(info os.FileInfo, directory bool) bool {
 	}
 	return info.Mode().IsRegular() && info.Mode().Perm() == 0600 && st.Nlink == 1
 }
-func (c *cache) read(ctx context.Context) (*cacheEntry, error) {
+
+// read loads the cache entry. found is false on a cache miss: no entry, an
+// oversized but private entry, or one that does not decode or validate for
+// this identity. An unsafe entry is an error, not a miss.
+func (c *cache) read(ctx context.Context) (entry *cacheEntry, found bool, err error) {
 	body, fp, e := storage.Read(ctx, c.path, c.limits.MaxInventoryBytes)
 	if errors.Is(e, os.ErrNotExist) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if errors.Is(e, storage.ErrLimit) {
 		// Reopen without following links: only a private regular entry is a cache miss.
 		fd, openErr := unix.Open(c.path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 		if openErr != nil {
-			return nil, newInventoryError("cache_unavailable", openErr)
+			return nil, false, newInventoryError("cache_unavailable", openErr)
 		}
 		file := os.NewFile(uintptr(fd), c.path)
 		info, statErr := file.Stat()
 		closeErr := file.Close()
 		if statErr != nil || closeErr != nil || !isPrivateCacheEntry(info, false) || !storage.SameEntry(c.path, storage.Fingerprint{Info: info}) {
-			return nil, newInventoryError("cache_unavailable", nil)
+			return nil, false, newInventoryError("cache_unavailable", nil)
 		}
 		if e := ctx.Err(); e != nil {
-			return nil, e
+			return nil, false, e
 		}
-		return nil, nil
+		return nil, false, nil
 	}
 	if e != nil {
-		return nil, newInventoryError("cache_unavailable", e)
+		return nil, false, newInventoryError("cache_unavailable", e)
 	}
 	if !isPrivateCacheEntry(fp.Info, false) || !storage.SameEntry(c.path, fp) {
-		return nil, newInventoryError("cache_unavailable", nil)
+		return nil, false, newInventoryError("cache_unavailable", nil)
 	}
-	var entry cacheEntry
+	var decoded cacheEntry
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&entry) != nil {
-		return nil, nil
+	if decoder.Decode(&decoded) != nil {
+		return nil, false, nil //nolint:nilerr // an undecodable entry is a cache miss
 	}
-	if decoder.Decode(new(any)) != io.EOF {
-		return nil, nil
+	if !errors.Is(decoder.Decode(new(any)), io.EOF) {
+		return nil, false, nil // trailing content is a cache miss
 	}
 	now := float64(c.now().UnixNano()) / 1e9
-	if entry.Schema != 1 || entry.Identity != c.identity || math.IsNaN(entry.FetchedAt) || math.IsInf(entry.FetchedAt, 0) || entry.FetchedAt < 0 || entry.FetchedAt > now || entry.Rows == nil {
-		return nil, nil
+	if decoded.Schema != 1 || decoded.Identity != c.identity || math.IsNaN(decoded.FetchedAt) || math.IsInf(decoded.FetchedAt, 0) || decoded.FetchedAt < 0 || decoded.FetchedAt > now || decoded.Rows == nil {
+		return nil, false, nil
 	}
-	if c.validateRows(entry.Rows) != nil {
-		return nil, nil
+	if c.validateRows(decoded.Rows) != nil {
+		return nil, false, nil //nolint:nilerr // invalid rows make the entry a cache miss
 	}
-	return &entry, nil
+	return &decoded, true, nil
 }
 func (c *cache) validateRows(rows []inventory.Device) error {
 	if rows == nil || len(rows) > c.limits.MaxDevices {

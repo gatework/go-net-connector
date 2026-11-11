@@ -53,7 +53,7 @@ func TestProcessCancellationReturnsCleanupOwner(t *testing.T) {
 	}
 }
 
-func authenticateTransport(p *processTransport, ctx context.Context) error {
+func authenticateTransport(ctx context.Context, p *processTransport) error {
 	return p.Authenticated(ctx)
 }
 
@@ -71,7 +71,7 @@ func TestProcessCloseStopsAuthentication(t *testing.T) {
 	if err := p.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := authenticateTransport(p, t.Context()); !errors.Is(err, ErrClosed) {
+	if err := authenticateTransport(t.Context(), p); !errors.Is(err, ErrClosed) {
 		t.Fatalf("authentication admitted after Close: %v", err)
 	}
 	if _, err := os.Stat(directory); !errors.Is(err, os.ErrNotExist) {

@@ -8,8 +8,9 @@ import (
 
 	"github.com/gatework/go-net-connector/internal/batchreport"
 
-	"github.com/gatework/go-net-connector/archive"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/gatework/go-net-connector/archive"
 )
 
 func Defaults(mode string) map[string]any {

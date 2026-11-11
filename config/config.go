@@ -30,7 +30,10 @@ type Snapshot struct {
 	applicable          bool
 }
 
-func (s Snapshot) Public() map[string]any { return cloneValue(s.data).(map[string]any) }
+func (s Snapshot) Public() map[string]any {
+	public, _ := cloneValue(s.data).(map[string]any) // cloneValue preserves the map type
+	return public
+}
 func (s Snapshot) Value(path string) any {
 	var v any = s.data
 	for key := range strings.SplitSeq(path, ".") {
@@ -176,7 +179,7 @@ func Load(ctx context.Context, o Options) (snapshot Snapshot, err error) {
 		if e != nil {
 			return s, e
 		}
-		*layer = owned.(map[string]any)
+		*layer, _ = owned.(map[string]any)
 		if e := rejectRemovedFields(*layer); e != nil {
 			return s, e
 		}
@@ -366,7 +369,7 @@ func Load(ctx context.Context, o Options) (snapshot Snapshot, err error) {
 	}
 	overrides := cloneValue(o.Overrides)
 	if overrides != nil {
-		m := overrides.(map[string]any)
+		m, _ := overrides.(map[string]any)
 		if e := resolvePaths(m, o.CWD, o.Home, ""); e != nil {
 			return s, e
 		}

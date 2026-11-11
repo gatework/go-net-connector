@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/creack/pty"
+
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/internal/bootstrap"
@@ -32,7 +33,7 @@ func (w cancelingWriter) Write([]byte) (int, error) {
 	return 0, errors.New("closed output")
 }
 
-func tftpReportFixture(t *testing.T, output io.Writer, progress io.Writer, ctx context.Context) (int, string) {
+func tftpReportFixture(ctx context.Context, t *testing.T, output io.Writer, progress io.Writer) (int, string) {
 	t.Helper()
 	r, _, _ := fixtureRuntime(t)
 	r.Args = []string{"backup", "tftp", "--success-policy", "selected", "--tftp-server", "192.0.2.9", "--username", "user", "--password", "secret", "--json"}
@@ -79,7 +80,7 @@ func latestReport(t *testing.T, root string) map[string]any {
 
 func TestProgressFailureKeepsCompletedTransferAndEvent(t *testing.T) {
 	var output bytes.Buffer
-	code, root := tftpReportFixture(t, &output, failingWriter{}, t.Context())
+	code, root := tftpReportFixture(t.Context(), t, &output, failingWriter{})
 	if code != 1 {
 		t.Fatal(code, output.String())
 	}
@@ -104,7 +105,7 @@ func TestProgressFailureKeepsCompletedTransferAndEvent(t *testing.T) {
 func TestCanceledReportOutputRetains130AndDiagnostic(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	code, root := tftpReportFixture(t, cancelingWriter{cancel}, io.Discard, ctx)
+	code, root := tftpReportFixture(ctx, t, cancelingWriter{cancel}, io.Discard)
 	if code != 130 {
 		t.Fatal(code)
 	}
@@ -270,6 +271,15 @@ func TestInteractiveDeclinedOptionalEnvContinues(t *testing.T) {
 	if _, err := master.Write([]byte("n\n")); err != nil {
 		t.Fatal(err)
 	}
+	// Drain the terminal: progress output written to slave would otherwise
+	// fill the PTY buffer and block the run.
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		_, _ = io.Copy(io.Discard, master)
+	}()
+	// Closing the slave ends the master read; closing the master does not on macOS.
+	defer func() { _ = slave.Close(); <-drained }()
 	r.Args, r.Input, r.Error = []string{"inventory", "list"}, slave, slave
 	policy, e := config.Load(context.Background(), config.Options{Name: "backup", CWD: r.CWD, Home: r.Home, Directories: []string{}, Environment: map[string]string{}, Defaults: config.Defaults("backup"), AllowMissing: true})
 	if e != nil {

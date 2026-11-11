@@ -246,10 +246,10 @@ func (d *Device) Backup(ctx context.Context, opts BackupOptions) (receipt Backup
 		receipt.TextWarning = sourceWarning(contents, count, offsets)
 	}
 	receipt.PreviousSHA256 = previous.SHA256
-	switch {
-	case previous.SHA256 == "":
+	switch previous.SHA256 {
+	case "":
 		receipt.Change = "created"
-	case previous.SHA256 == digest:
+	case digest:
 		receipt.Change = "unchanged"
 	default:
 		receipt.Change = "changed"

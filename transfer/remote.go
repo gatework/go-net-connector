@@ -16,8 +16,9 @@ import (
 // only by the platform's scoped interaction and is never included in receipts.
 type RemoteOptions struct{ Server, Path, Username, Protocol, Password string }
 
-func (o RemoteOptions) dialectOptions() dialect.RemoteBackupOptions {
-	return dialect.RemoteBackupOptions{Server: o.Server, Path: o.Path, Username: o.Username, Protocol: o.Protocol}
+// MarshalJSON exposes operational metadata only; credentials remain available explicitly on the options.
+func (o RemoteOptions) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct{ Server, Path, Username, Protocol string }{o.Server, o.Path, o.Username, o.Protocol})
 }
 
 func ValidateRemote(o RemoteOptions) error {
@@ -84,9 +85,8 @@ func remoteRejected(command connector.Command, prompt, output string) bool {
 	return matchesEvidencePattern(command, prompt, output, pattern)
 }
 
-// MarshalJSON exposes operational metadata only; credentials remain available explicitly on the options.
-func (o RemoteOptions) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct{ Server, Path, Username, Protocol string }{o.Server, o.Path, o.Username, o.Protocol})
-}
 func (o RemoteOptions) String() string   { b, _ := o.MarshalJSON(); return "RemoteOptions" + string(b) }
 func (o RemoteOptions) GoString() string { return o.String() }
+func (o RemoteOptions) dialectOptions() dialect.RemoteBackupOptions {
+	return dialect.RemoteBackupOptions{Server: o.Server, Path: o.Path, Username: o.Username, Protocol: o.Protocol}
+}

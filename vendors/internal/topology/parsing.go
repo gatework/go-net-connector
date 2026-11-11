@@ -18,11 +18,14 @@ var (
 // Pattern compiles a family-owned parsing expression once and reuses it.
 func Pattern(expression string) *regexp.Regexp {
 	if cached, ok := patternCache.Load(expression); ok {
-		return cached.(*regexp.Regexp)
+		if re, ok := cached.(*regexp.Regexp); ok {
+			return re
+		}
 	}
 	compiled := regexp.MustCompile(expression)
 	actual, _ := patternCache.LoadOrStore(expression, compiled)
-	return actual.(*regexp.Regexp)
+	re, _ := actual.(*regexp.Regexp) // the cache stores only *regexp.Regexp
+	return re
 }
 
 // Field returns a text field from a TextFSM row.

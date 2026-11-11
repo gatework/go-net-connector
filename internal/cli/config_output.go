@@ -6,9 +6,10 @@ import (
 	"io"
 	"strings"
 
+	"go.yaml.in/yaml/v3"
+
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/internal/display"
-	"go.yaml.in/yaml/v3"
 )
 
 func (r Runtime) renderDefaults(scope string, jsonOutput bool) int {

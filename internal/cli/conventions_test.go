@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/creack/pty"
+
 	"github.com/gatework/go-net-connector/config"
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/netdisco"

@@ -40,10 +40,10 @@ func addBackupCommands(root *cobra.Command, leaf commandBuilder) {
 	})
 	exp.Args = func(_ *cobra.Command, args []string) error {
 		if len(args) != 1 {
-			return usageError("必须指定一个设备 IP")
+			return newUsageError("必须指定一个设备 IP")
 		}
 		if a, e := netip.ParseAddr(args[0]); e != nil || a.Zone() != "" {
-			return usageError("设备 IP 无效")
+			return newUsageError("设备 IP 无效")
 		}
 		return nil
 	}

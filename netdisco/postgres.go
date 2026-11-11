@@ -9,9 +9,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/gatework/go-net-connector/inventory"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/gatework/go-net-connector/inventory"
 )
 
 type PostgresOptions struct {
@@ -105,7 +106,7 @@ func (p *Postgres) Devices(parent context.Context) (result []inventory.Device, e
 	}
 	output := make([]inventory.Device, 0)
 	var total int64
-	for page := 0; page < p.limits.MaxPages; page++ {
+	for range p.limits.MaxPages {
 		rows, e := tx.Query(ctx, fmt.Sprintf("FETCH FORWARD %d FROM net_connector_inventory", p.limits.PageSize), pgx.QueryExecModeExec)
 		if e != nil {
 			return nil, newInventoryError("query_failed", e)

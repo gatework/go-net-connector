@@ -87,6 +87,12 @@ func (r *Renderer) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
+func (r *Renderer) Finish() error {
+	if len(r.line) > 0 {
+		return r.emit(false)
+	}
+	return nil
+}
 func (r *Renderer) escape(b byte) error {
 	switch r.state {
 	case 'e':
@@ -100,9 +106,10 @@ func (r *Renderer) escape(b byte) error {
 			r.state = 0
 		}
 	case 'o':
-		if b == 7 {
+		switch b {
+		case 7:
 			r.state = 0
-		} else if b == 27 {
+		case 27:
 			r.state = 's'
 		}
 	case 's':
@@ -150,7 +157,7 @@ func (r *Renderer) escape(b byte) error {
 				case 0:
 					r.line = r.line[:min(r.cursor, len(r.line))]
 				case 1:
-					for i := 0; i < min(r.cursor+1, len(r.line)); i++ {
+					for i := range min(r.cursor+1, len(r.line)) {
 						r.line[i] = ' '
 					}
 				case 2:
@@ -215,12 +222,6 @@ func (r *Renderer) emit(newline bool) error {
 	r.cursor = 0
 	return nil
 }
-func (r *Renderer) Finish() error {
-	if len(r.line) > 0 {
-		return r.emit(false)
-	}
-	return nil
-}
 
 // RenderString avoids byte buffers for ordinary UTF-8 lines. Terminal edits and
 // malformed encodings still use the byte-oriented renderer.
@@ -228,7 +229,7 @@ func RenderString(input string, strict bool) (string, error) {
 	if !utf8.ValidString(input) {
 		return Render([]byte(input), strict)
 	}
-	for i := 0; i < len(input); i++ {
+	for i := range len(input) {
 		c := input[i]
 		if c < 32 && c != '\n' && c != '\t' && !(c == '\r' && i+1 < len(input) && input[i+1] == '\n') {
 			return Render([]byte(input), strict)

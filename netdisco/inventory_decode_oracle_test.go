@@ -5,8 +5,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/gatework/go-net-connector/inventory"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/gatework/go-net-connector/inventory"
 )
 
 // These oracles preserve the allocation-heavy JSON normalization at 59c1af1.

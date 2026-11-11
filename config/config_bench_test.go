@@ -40,7 +40,7 @@ func BenchmarkLoadLayeredConfiguration(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(1 << 10)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		if _, err := Load(context.Background(), options); err != nil {
 			b.Fatal(err)
 		}

@@ -7,14 +7,16 @@ import (
 	"os"
 	"unicode/utf8"
 
-	"github.com/gatework/go-net-connector/config"
 	"golang.org/x/term"
+
+	"github.com/gatework/go-net-connector/config"
 
 	"golang.org/x/sys/unix"
 )
 
+// contextReader makes reads of a terminal observe cancellation.
 type contextReader struct {
-	ctx context.Context
+	ctx context.Context //nolint:containedctx // an io.Reader adapter cannot take ctx per Read
 	in  io.Reader
 }
 
@@ -56,7 +58,7 @@ func readTerminalSecret(ctx context.Context, in *os.File) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer term.Restore(int(in.Fd()), state)
+	defer func() { _ = term.Restore(int(in.Fd()), state) }()
 	reader := contextInput(ctx, in)
 	value := make([]byte, 0, 128)
 	for len(value) <= 64<<10 {

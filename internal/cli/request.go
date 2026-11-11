@@ -41,7 +41,7 @@ type commandRequest struct {
 
 func newCommandRequest(o options) (commandRequest, error) {
 	if o.mode != "backup" && o.mode != "tftp" && o.mode != "topology" && o.mode != "deploy" && o.mode != "exec" && o.mode != "remote" {
-		return commandRequest{}, usageError("用途无效，请查看 --for 选项")
+		return commandRequest{}, newUsageError("用途无效，请查看 --for 选项")
 	}
 	request := commandRequest{}
 	switch o.action {
@@ -57,7 +57,7 @@ func newCommandRequest(o options) (commandRequest, error) {
 		request.kind = requestDiff
 	case "export":
 		if o.mode != "backup" {
-			return request, usageError("此用途不支持导出")
+			return request, newUsageError("此用途不支持导出")
 		}
 		request.kind = requestExport
 	case "inventory":
@@ -97,7 +97,7 @@ func newCommandRequest(o options) (commandRequest, error) {
 		}
 	}
 	if request.kind == requestInvalid {
-		return request, usageError("此用途不支持所选操作")
+		return request, newUsageError("此用途不支持所选操作")
 	}
 	request.useCase = request.newUseCase()
 	return request, nil
@@ -120,8 +120,9 @@ func (r commandRequest) newUseCase() useCase {
 		return &execUseCase{preview: r.kind == requestExecPlan}
 	case requestTopologyPlan, requestTopologyDiscover, requestTopologyApply:
 		return topologyUseCase{mode: r.topologyMode(), options: r.topology}
+	default: // configuration requests and invalid input have no pipeline use case
+		return nil
 	}
-	return nil
 }
 
 func (r commandRequest) startsProgress() bool {

@@ -50,6 +50,7 @@ func TestParseTemplateMissing(t *testing.T) {
 }
 
 func TestParseTemplateFreshAndStrict(t *testing.T) {
+	t.Parallel()
 	template := "Value Required NAME (\\S+)\nValue STATE (up|down)\n\nStart\n  ^${NAME}\\s+${STATE}$$ -> Record\n"
 	for i := range 12 {
 		t.Run(string(rune('a'+i)), func(t *testing.T) {
@@ -129,6 +130,7 @@ Start
 `
 
 func TestTemplateResultsAreIndependent(t *testing.T) {
+	t.Parallel()
 	for i := range 16 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			t.Parallel()

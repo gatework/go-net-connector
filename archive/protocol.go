@@ -34,41 +34,6 @@ var archiveHashPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 func NewProtocol(input io.Writer, output io.Reader) *Protocol {
 	return &Protocol{input: input, output: output, reader: bufio.NewReaderSize(output, ControlLimit+1)}
 }
-func (p *Protocol) bounded(ctx context.Context, read bool) (func(), error) {
-	if e := ctx.Err(); e != nil {
-		return nil, e
-	}
-	deadline, ok := ctx.Deadline()
-	if !ok {
-		return nil, ErrArchive
-	}
-	if time.Now().After(deadline) {
-		return nil, context.DeadlineExceeded
-	}
-	var set func(time.Time) error
-	if read {
-		if x, ok := p.output.(interface{ SetReadDeadline(time.Time) error }); ok {
-			set = x.SetReadDeadline
-		}
-	} else {
-		if x, ok := p.input.(interface{ SetWriteDeadline(time.Time) error }); ok {
-			set = x.SetWriteDeadline
-		}
-	}
-	if set == nil {
-		return nil, ErrArchive
-	}
-	if e := set(deadline); e != nil {
-		return nil, e
-	}
-	done := make(chan struct{})
-	stop := context.AfterFunc(ctx, func() { _ = set(time.Now()); close(done) })
-	return func() {
-		if !stop() {
-			<-done
-		}
-	}, nil
-}
 func (p *Protocol) Send(ctx context.Context, request Request) error {
 	stop, e := p.bounded(ctx, false)
 	if e != nil {
@@ -87,31 +52,6 @@ func (p *Protocol) Send(ctx context.Context, request Request) error {
 }
 func (p *Protocol) Expect(ctx context.Context, phase string) (Proof, error) {
 	return p.readPhase(ctx, phase)
-}
-func (p *Protocol) readPhase(ctx context.Context, phase string) (Proof, error) {
-	stop, e := p.bounded(ctx, true)
-	if e != nil {
-		return Proof{}, e
-	}
-	defer stop()
-	line, e := p.reader.ReadSlice('\n')
-	if e != nil || len(line) > ControlLimit {
-		return Proof{}, protocolFailure(ctx, e)
-	}
-	if e = ctx.Err(); e != nil {
-		return Proof{}, e
-	}
-	var f frame
-	if json.Unmarshal(line, &f) != nil || f.Version != Version || !f.OK || f.Phase != phase {
-		return Proof{}, ErrArchive
-	}
-	proof := Proof{Bytes: f.Bytes, SHA256: f.SHA256, ArchivePath: f.ArchivePath}
-	if phase == "archived" && (proof.Bytes < 1 || proof.Bytes > PayloadLimit || proof.ArchivePath == "" || !archiveHashPattern.MatchString(proof.SHA256)) {
-		return Proof{}, ErrArchive
-	}
-	p.phase = phase
-	p.last = f
-	return proof, nil
 }
 
 // Receive drains the full body and validates server delivery even after a local sink fails.
@@ -158,6 +98,67 @@ func (p *Protocol) Receive(ctx context.Context, proof Proof, sink io.Writer) (Pr
 	}
 	proof.Verified = true
 	return proof, sinkError
+}
+func (p *Protocol) bounded(ctx context.Context, read bool) (func(), error) {
+	if e := ctx.Err(); e != nil {
+		return nil, e
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return nil, ErrArchive
+	}
+	if time.Now().After(deadline) {
+		return nil, context.DeadlineExceeded
+	}
+	var set func(time.Time) error
+	if read {
+		if x, ok := p.output.(interface{ SetReadDeadline(t time.Time) error }); ok {
+			set = x.SetReadDeadline
+		}
+	} else {
+		if x, ok := p.input.(interface{ SetWriteDeadline(t time.Time) error }); ok {
+			set = x.SetWriteDeadline
+		}
+	}
+	if set == nil {
+		return nil, ErrArchive
+	}
+	if e := set(deadline); e != nil {
+		return nil, e
+	}
+	done := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() { _ = set(time.Now()); close(done) })
+	return func() {
+		if !stop() {
+			<-done
+		}
+	}, nil
+}
+
+func (p *Protocol) readPhase(ctx context.Context, phase string) (Proof, error) {
+	stop, e := p.bounded(ctx, true)
+	if e != nil {
+		return Proof{}, e
+	}
+	defer stop()
+	line, e := p.reader.ReadSlice('\n')
+	if e != nil || len(line) > ControlLimit {
+		return Proof{}, protocolFailure(ctx, e)
+	}
+	if e = ctx.Err(); e != nil {
+		return Proof{}, e
+	}
+	var f frame
+	if json.Unmarshal(line, &f) != nil || f.Version != Version || !f.OK || f.Phase != phase {
+		return Proof{}, ErrArchive
+	}
+	proof := Proof{Bytes: f.Bytes, SHA256: f.SHA256, ArchivePath: f.ArchivePath}
+	if phase == "archived" && (proof.Bytes < 1 || proof.Bytes > PayloadLimit || proof.ArchivePath == "" || !archiveHashPattern.MatchString(proof.SHA256)) {
+		return Proof{}, ErrArchive
+	}
+	p.phase = phase
+	p.last = f
+	return proof, nil
 }
 
 // Error reports safe archive metadata while preserving all underlying causes.

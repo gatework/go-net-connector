@@ -18,7 +18,7 @@ import (
 )
 
 type Source interface {
-	Devices(context.Context) ([]inventory.Device, error)
+	Devices(ctx context.Context) ([]inventory.Device, error)
 }
 type SourceFunc func(context.Context) ([]inventory.Device, error)
 
@@ -203,7 +203,7 @@ func (h *HTTP) Devices(parent context.Context) ([]inventory.Device, error) {
 	seen := make(map[string]bool)
 	unique := make(map[inventory.Device]bool)
 	rows := make([]inventory.Device, 0)
-	for page := 0; page < h.limits.MaxPages; page++ {
+	for page := range h.limits.MaxPages {
 		query := url.Values{"fields": {httpInventoryFields}, "limit": {strconv.Itoa(h.limits.PageSize)}, "offset": {strconv.Itoa(page * h.limits.PageSize)}}
 		body, status, e := request(httpInventoryEndpoint, http.MethodGet, query, key)
 		if e != nil {

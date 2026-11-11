@@ -70,7 +70,7 @@ func newHostTrust(ctx context.Context, cfg ConnectionConfig, port int) (*hostTru
 	return t, nil
 }
 func (t *hostTrust) keys(ctx context.Context, path string) ([]string, error) {
-	output, e := exec.CommandContext(ctx, "ssh-keygen", "-F", t.host, "-f", path).Output()
+	output, e := exec.CommandContext(ctx, "ssh-keygen", "-F", t.host, "-f", path).Output() //nolint:gosec // host and path are validated connector configuration
 	if e != nil {
 		var status *exec.ExitError
 		if ctx.Err() == nil && errors.As(e, &status) && status.ExitCode() == 1 {
@@ -87,7 +87,7 @@ func (t *hostTrust) keys(ctx context.Context, path string) ([]string, error) {
 	return keys, nil
 }
 func (t *hostTrust) remove(ctx context.Context, path string) error {
-	if e := exec.CommandContext(ctx, "ssh-keygen", "-R", t.host, "-f", path).Run(); e != nil {
+	if e := exec.CommandContext(ctx, "ssh-keygen", "-R", t.host, "-f", path).Run(); e != nil { //nolint:gosec // host and path are validated connector configuration
 		return newError("host_key_update_failed", "login", Command{}, errors.Join(ctx.Err(), e))
 	}
 	return nil

@@ -16,73 +16,74 @@ func prepareCommandOptions(c *cobra.Command, o *options) error {
 		if f.Changed(name) {
 			value, _ := f.GetString(name)
 			if strings.TrimSpace(value) == "" {
-				return usageError("--" + name + " 不能为空")
+				return newUsageError("--" + name + " 不能为空")
 			}
 		}
 	}
 	if f.Lookup("for") != nil {
 		scope, _ := f.GetString("for")
 		if scope != "backup" && scope != "topology" && (c.Parent().Name() != "config" || scope != "tftp") {
-			return usageError("用途无效，请查看 --for 选项")
+			return newUsageError("用途无效，请查看 --for 选项")
 		}
 		o.mode = scope
 	}
 	if f.Lookup("method") != nil {
 		method, _ := f.GetString("method")
 		if method != "cli" && method != "tftp" && method != "remote" {
-			return usageError("备份方式必须为 cli、tftp 或 remote")
+			return newUsageError("备份方式必须为 cli、tftp 或 remote")
 		}
 		if method != "cli" {
 			o.mode = method
 		}
 	}
 	if o.action == "export" && o.batch == "" {
-		return usageError("导出必须通过 --batch 明确指定批次目录")
+		return newUsageError("导出必须通过 --batch 明确指定批次目录")
 	}
 	if o.action == "export" && o.json && o.output == "" {
-		return usageError("--json 需与 --output 同时使用；直接导出正文时不附加元数据")
+		return newUsageError("--json 需与 --output 同时使用；直接导出正文时不附加元数据")
 	}
 	if o.nonInteractive && o.interactive || o.all && o.sample != 0 || o.sample < 0 || o.sample > 5 || f.Changed("sample") && o.sample == 0 || o.parallel < 0 || o.parallel > 500 || f.Changed("parallel") && o.parallel == 0 || o.limit < 0 || f.Changed("limit") && o.limit == 0 {
-		return usageError("抽样、并发、数量上限或交互选项无效")
+		return newUsageError("抽样、并发、数量上限或交互选项无效")
 	}
 	if !batchreport.Layout(o.layout).Valid() {
-		return usageError("目录布局必须为 batch 或 flat")
+		return newUsageError("目录布局必须为 batch 或 flat")
 	}
 	if o.policy != "" && !batchreport.SuccessPolicy(o.policy).AllowedFor(o.mode == "tftp") {
-		return usageError("成功策略无效；verified 仅适用于 TFTP")
+		return newUsageError("成功策略无效；verified 仅适用于 TFTP")
 	}
 	if f.Changed("host") && f.Changed("hosts") {
-		return usageError("--host 与 --hosts 不能同时指定")
+		return newUsageError("--host 与 --hosts 不能同时指定")
 	}
 	if f.Changed("host") {
 		hosts, _ := f.GetStringArray("host")
 		for _, host := range hosts {
 			a, e := netip.ParseAddr(host)
 			if e != nil || a.Zone() != "" {
-				return usageError("--host 必须为精确 IP 地址；范围筛选请使用 --hosts")
+				return newUsageError("--host 必须为精确 IP 地址；范围筛选请使用 --hosts")
 			}
 		}
 	}
 	askDevice, _ := f.GetBool("ask-password")
 	askInventory, _ := f.GetBool("ask-netdisco-password")
 	if o.stdin && (askDevice || askInventory) || askDevice && f.Changed("password") || askInventory && f.Changed("netdisco-password") || o.nonInteractive && (askDevice || askInventory) {
-		return usageError("凭据输入方式互斥或当前模式禁止交互")
+		return newUsageError("凭据输入方式互斥或当前模式禁止交互")
 	}
 	if o.refresh && f.Changed("cache-only") {
-		return usageError("刷新清单与仅使用缓存不能同时指定")
+		return newUsageError("刷新清单与仅使用缓存不能同时指定")
 	}
 	if o.quiet && o.verbose {
-		return usageError("--quiet 与 --verbose 不能同时指定")
+		return newUsageError("--quiet 与 --verbose 不能同时指定")
 	}
 	if f.Changed("cache-mode") {
 		cacheMode, _ := f.GetString("cache-mode")
 		only, _ := f.GetBool("cache-only")
 		if o.refresh && netdisco.CacheMode(cacheMode) != netdisco.CacheRefresh || only && netdisco.CacheMode(cacheMode) != netdisco.CacheOnly {
-			return usageError("清单缓存选项互相冲突")
+			return newUsageError("清单缓存选项互相冲突")
 		}
 	}
 	public := map[string]string{"netdisco-url": "ND_URL", "source": "ND_SOURCE", "query": "ND_QUERY", "query-params": "ND_QUERY_PARAMS", "cache-mode": "ND_CACHE_MODE", "known-hosts": "NC_KNOWN_HOSTS", "jump-host": "NC_SSH_JUMP_HOST", "connect-retries": "NC_SSH_CONNECT_RETRIES", "host-key-policy": "NC_HOST_KEY_POLICY", "protocol": "NC_PROTOCOL", "max-script-output-bytes": "NC_MAX_SCRIPT_OUTPUT_BYTES", "tftp-root": "NC_TFTP_ROOT", "tftp-server": "NC_TFTP_HOST", "name-match": "NC_NAME_MATCH", "model-match": "NC_MODEL_MATCH", "layout": "NC_BACKUP_LAYOUT"}
-	secrets := map[string]string{"username": "NC_DEVICE_USERNAME", "password": "NC_DEVICE_PASSWORD", "enable-password": "NC_ENABLE_PASSWORD", "netdisco-username": "ND_USERNAME", "netdisco-password": "ND_PASSWORD"}
+	secrets := map[string]string{ //nolint:gosec // maps flags to environment variable names, not secrets
+		"username": "NC_DEVICE_USERNAME", "password": "NC_DEVICE_PASSWORD", "enable-password": "NC_ENABLE_PASSWORD", "netdisco-username": "ND_USERNAME", "netdisco-password": "ND_PASSWORD"}
 	filters := map[string]string{"hosts": "NC_INCLUDE_HOSTS", "host": "NC_INCLUDE_HOSTS", "exclude-hosts": "NC_EXCLUDE_HOSTS", "name": "NC_INCLUDE_NAMES", "exclude-name": "NC_EXCLUDE_NAMES", "vendor": "NC_INCLUDE_VENDORS", "exclude-vendor": "NC_EXCLUDE_VENDORS", "model": "NC_INCLUDE_MODELS", "exclude-model": "NC_EXCLUDE_MODELS"}
 	for name, key := range public {
 		if f.Changed(name) {
@@ -101,7 +102,7 @@ func prepareCommandOptions(c *cobra.Command, o *options) error {
 		}
 	}
 	if o.stdin && len(o.secrets) > 0 {
-		return usageError("stdin 凭据不能与显式凭据同时使用")
+		return newUsageError("stdin 凭据不能与显式凭据同时使用")
 	}
 	if only, _ := f.GetBool("cache-only"); only {
 		o.public["ND_CACHE_MODE"] = string(netdisco.CacheOnly)

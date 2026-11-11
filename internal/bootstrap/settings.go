@@ -147,17 +147,17 @@ func resolveSettings(policy config.Snapshot) (resolvedSettings, error) {
 
 // WithSessionObserver binds an operation-local observer without mutating shared templates.
 func (s *Services) WithSessionObserver(observer func(context.Context, connector.SessionEvent) error) *Services {
-	copy := *s
-	copy.observer = observer
-	return &copy
+	clone := *s
+	clone.observer = observer
+	return &clone
 }
 func (s *Services) Policy() config.Snapshot     { return s.policy }
 func (s *Services) Rules() *fleet.Rules         { return s.rules }
 func (s *Services) Registry() *vendors.Registry { return s.registry }
 func (s *Services) WithDeviceFactory(factory DeviceFactory) *Services {
-	copy := *s
-	copy.factory = factory
-	return &copy
+	clone := *s
+	clone.factory = factory
+	return &clone
 }
 func stringValue(snapshot config.Snapshot, path string) string {
 	if v, ok := snapshot.Value(path).(string); ok {
@@ -261,23 +261,6 @@ func ruleOptions(p config.Snapshot) (fleet.RuleOptions, error) {
 	}
 	return o, nil
 }
-func (s *Services) compileConnection(vendor string) (connector.ConnectionConfig, error) {
-	p := s.policy
-	c := connector.ConnectionConfig{LogLevel: stringValue(p, "ssh.log_level"), Protocol: connector.Protocol(stringValue(p, "ssh.protocol")), KnownHosts: stringValue(p, "ssh.known_hosts"), JumpHost: stringValue(p, "ssh.jump_host"), ConnectRetries: integerValue(p, "ssh.connect_retries"), HostKeyPolicy: connector.HostKeyPolicy(stringValue(p, "ssh.host_key_policy")), MaxScriptOutputBytes: int64(integerValue(p, "ssh.max_script_output_bytes"))}
-	protocols, e := stringMap(p, "ssh.vendor_protocols")
-	if e != nil {
-		return c, e
-	}
-	for name, v := range protocols {
-		if _, e := s.registry.Lookup(name); e != nil || v != "ssh" && v != "telnet" {
-			return c, config.ErrInvalid
-		}
-	}
-	if v := protocols[vendor]; v != "" {
-		c.Protocol = connector.Protocol(v)
-	}
-	return c, nil
-}
 func (s *Services) DeviceWithLogger(ctx context.Context, r fleet.Record, logger io.Writer) (*connector.Device, error) {
 	if e := ctx.Err(); e != nil {
 		return nil, e
@@ -312,9 +295,6 @@ func (s *Services) DeviceWithLogger(ctx context.Context, r fleet.Record, logger 
 	c.Password = get(keys.password)
 	c.EnablePassword = get(keys.enablePassword)
 	return s.factory(d, c)
-}
-func (s *Services) limits() netdisco.Limits {
-	return s.settings.inventoryLimits
 }
 func (s *Services) Inventory(ctx context.Context, mode netdisco.CacheMode) (netdisco.CacheResult, error) {
 	p := s.policy
@@ -384,11 +364,11 @@ func (s *Services) Inventory(ctx context.Context, mode netdisco.CacheMode) (netd
 		return netdisco.CacheResult{}, config.ErrInvalid
 	}
 }
+func (s *Services) Workers() int { return s.settings.parallel }
+func (s *Services) Limit() int   { return s.settings.limitPerVendor }
 func quoteDSNValue(s string) string {
 	return "'" + strings.ReplaceAll(strings.ReplaceAll(s, "\\", "\\\\"), "'", "\\'") + "'"
 }
-func (s *Services) Workers() int      { return s.settings.parallel }
-func (s *Services) Limit() int        { return s.settings.limitPerVendor }
 func (s *Services) Directory() string { return s.settings.backupDirectory }
 func (s *Services) String() string    { return "bootstrap.Services" }
 func (s *Services) GoString() string  { return s.String() }
@@ -404,6 +384,27 @@ func (s *Services) LogDirectory(mode, directory string) string {
 		return filepath.Join(directory, "logs")
 	}
 	return ""
+}
+func (s *Services) compileConnection(vendor string) (connector.ConnectionConfig, error) {
+	p := s.policy
+	c := connector.ConnectionConfig{LogLevel: stringValue(p, "ssh.log_level"), Protocol: connector.Protocol(stringValue(p, "ssh.protocol")), KnownHosts: stringValue(p, "ssh.known_hosts"), JumpHost: stringValue(p, "ssh.jump_host"), ConnectRetries: integerValue(p, "ssh.connect_retries"), HostKeyPolicy: connector.HostKeyPolicy(stringValue(p, "ssh.host_key_policy")), MaxScriptOutputBytes: int64(integerValue(p, "ssh.max_script_output_bytes"))}
+	protocols, e := stringMap(p, "ssh.vendor_protocols")
+	if e != nil {
+		return c, e
+	}
+	for name, v := range protocols {
+		if _, e := s.registry.Lookup(name); e != nil || v != "ssh" && v != "telnet" {
+			return c, config.ErrInvalid
+		}
+	}
+	if v := protocols[vendor]; v != "" {
+		c.Protocol = connector.Protocol(v)
+	}
+	return c, nil
+}
+
+func (s *Services) limits() netdisco.Limits {
+	return s.settings.inventoryLimits
 }
 
 // deviceCredentialKeys lists secret names in lookup order: the most specific

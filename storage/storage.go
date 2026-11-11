@@ -145,8 +145,9 @@ func WriteStream(ctx context.Context, path string, produce func(io.Writer) error
 	return
 }
 
+// contextWriter makes one streamed copy observe cancellation.
 type contextWriter struct {
-	ctx context.Context
+	ctx context.Context //nolint:containedctx // an io.Writer adapter cannot take ctx per Write
 	w   io.Writer
 }
 
@@ -246,8 +247,9 @@ func Read(ctx context.Context, path string, limit int64) ([]byte, Fingerprint, e
 	return readFile(ctx, path, limit, true)
 }
 
+// contextReader makes one bounded read observe cancellation.
 type contextReader struct {
-	ctx context.Context
+	ctx context.Context //nolint:containedctx // an io.Reader adapter cannot take ctx per Read
 	r   io.Reader
 }
 

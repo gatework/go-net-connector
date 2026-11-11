@@ -28,14 +28,14 @@ func Lines(text string) []string {
 // Diff returns the shortest edit script from a to b (Myers' O(ND) algorithm).
 func Diff(a, b []string) []Op {
 	n, m := len(a), len(b)
-	max := n + m
-	if max == 0 {
+	limit := n + m
+	if limit == 0 {
 		return nil
 	}
-	offset := max + 1
-	v := make([]int, 2*max+3)
+	offset := limit + 1
+	v := make([]int, 2*limit+3)
 	var trace [][]int
-	for d := 0; d <= max; d++ {
+	for d := 0; d <= limit; d++ {
 		snapshot := make([]int, len(v))
 		copy(snapshot, v)
 		trace = append(trace, snapshot)

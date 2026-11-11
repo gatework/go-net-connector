@@ -13,9 +13,9 @@ func TestResponseCollectorBoundsFragmentMetadata(t *testing.T) {
 	if len(c.parts) > 100000/responseBlock+1 {
 		t.Fatal("unbounded metadata")
 	}
-	copy := c.clone()
+	snapshot := c.clone()
 	c.WriteString("tail")
-	if copy.String() != strings.Repeat("x", 100000) || c.String() != strings.Repeat("x", 100000)+"tail" {
+	if snapshot.String() != strings.Repeat("x", 100000) || c.String() != strings.Repeat("x", 100000)+"tail" {
 		t.Fatal("snapshot changed")
 	}
 	if len(c.parts) != 1 {

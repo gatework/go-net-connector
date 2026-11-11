@@ -106,45 +106,14 @@ type promptState struct {
 	err       error
 }
 
-func (d *Device) RawPrompt() string       { return d.prompt.Load().(promptState).raw }
-func (d *Device) Prompt() (string, error) { s := d.prompt.Load().(promptState); return s.text, s.err }
-func (d *Device) setPrompt(response Response) {
-	raw := strings.Trim(response.RawPrompt(), " \t\r\n\x00")
-	// A privilege acknowledgement may be part of the match. Only its final
-	// wire line identifies the next command boundary.
-	if i := strings.LastIndexAny(raw, "\r\n"); i >= 0 {
-		raw = strings.Trim(raw[i+1:], " \t\x00")
-	}
-	text, _, err := textcodec.Decode(raw, "auto")
-	if err == nil {
-		text, err = terminal.RenderString(text, true)
-	}
-	d.prompt.Store(promptState{raw: raw, text: text, err: err})
+func (d *Device) RawPrompt() string {
+	s, _ := d.prompt.Load().(promptState)
+	return s.raw
 }
-func (d *Device) acquire() error {
-	d.lifeMu.Lock()
-	defer d.lifeMu.Unlock()
-	if d.closed {
-		return ErrClosed
-	}
-	if !d.lease.CompareAndSwap(false, true) {
-		return ErrBusy
-	}
-	return nil
-}
-func (d *Device) release() { d.lease.Store(false) }
 
-// operationContext links all callbacks and I/O in an admitted operation to Close.
-func (d *Device) operationContext(parent context.Context) (context.Context, func()) {
-	ctx, cancel := context.WithCancel(parent)
-	d.lifeMu.Lock()
-	if d.closed {
-		cancel()
-	} else {
-		d.cancel = cancel
-	}
-	d.lifeMu.Unlock()
-	return ctx, func() { cancel(); d.lifeMu.Lock(); d.cancel = nil; d.lifeMu.Unlock() }
+func (d *Device) Prompt() (string, error) {
+	s, _ := d.prompt.Load().(promptState)
+	return s.text, s.err
 }
 func (d *Device) Connect(ctx context.Context) (err error) {
 	if err = d.acquire(); err != nil {
@@ -170,6 +139,63 @@ func (d *Device) Connect(ctx context.Context) (err error) {
 	return
 }
 
+// Close rejects new work and interrupts admitted I/O without waiting for callbacks.
+// A later Close can retry cleanup that previously failed.
+func (d *Device) Close() error {
+	d.lifeMu.Lock()
+	d.closed = true
+	d.connected.Store(false)
+	if d.cancel != nil {
+		d.cancel()
+	}
+	session := d.session
+	d.lifeMu.Unlock()
+	var err error
+	if session != nil {
+		err = session.Close()
+	}
+	if d.lease.CompareAndSwap(false, true) {
+		defer d.release()
+		err = errors.Join(err, d.closeResources())
+	}
+	if err != nil {
+		return newError("cleanup_failed", "cleanup", Command{}, err)
+	}
+	return nil
+}
+func (d *Device) HAState() string {
+	if !d.connected.Load() {
+		return ""
+	}
+	state, _ := d.haState.Load().(string)
+	return state
+}
+
+func (d *Device) setPrompt(response Response) {
+	raw := strings.Trim(response.RawPrompt(), " \t\r\n\x00")
+	// A privilege acknowledgement may be part of the match. Only its final
+	// wire line identifies the next command boundary.
+	if i := strings.LastIndexAny(raw, "\r\n"); i >= 0 {
+		raw = strings.Trim(raw[i+1:], " \t\x00")
+	}
+	text, _, err := textcodec.Decode(raw, "auto")
+	if err == nil {
+		text, err = terminal.RenderString(text, true)
+	}
+	d.prompt.Store(promptState{raw: raw, text: text, err: err})
+}
+func (d *Device) acquire() error {
+	d.lifeMu.Lock()
+	defer d.lifeMu.Unlock()
+	if d.closed {
+		return ErrClosed
+	}
+	if !d.lease.CompareAndSwap(false, true) {
+		return ErrBusy
+	}
+	return nil
+}
+
 var errConnectionRefused = errors.New("connector: connection refused")
 var errNoRoute = errors.New("connector: no route to host")
 var errConnectTimeout = errors.New("connector: connection timed out")
@@ -184,6 +210,24 @@ var errCleanup = errors.New("connector: cleanup failed")
 var errHostKeyChanged = errors.New("connector: host key changed")
 var errRSATooSmall = errors.New("connector: RSA modulus too small")
 var errUnsupportedCipher = errors.New("connector: unsupported cipher")
+
+func (d *Device) release() { d.lease.Store(false) }
+
+// connectRetryDelay is the linear backoff unit between connection attempts.
+var connectRetryDelay = 2 * time.Second
+
+// operationContext links all callbacks and I/O in an admitted operation to Close.
+func (d *Device) operationContext(parent context.Context) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(parent)
+	d.lifeMu.Lock()
+	if d.closed {
+		cancel()
+	} else {
+		d.cancel = cancel
+	}
+	d.lifeMu.Unlock()
+	return ctx, func() { cancel(); d.lifeMu.Lock(); d.cancel = nil; d.lifeMu.Unlock() }
+}
 
 // connect connects once, then retries only failures that happened before any
 // login prompt (refused, no route, timed out): nothing was written, so a retry
@@ -210,10 +254,6 @@ func (d *Device) connect(parent context.Context) error {
 		d.retired.Store(false)
 	}
 }
-
-// connectRetryDelay is the linear backoff unit between connection attempts.
-var connectRetryDelay = 2 * time.Second
-
 func (d *Device) connectWithRecovery(parent context.Context) error {
 	if err := parent.Err(); err != nil {
 		return err
@@ -354,7 +394,9 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if c, ok := t.(interface{ Authenticated(context.Context) error }); ok {
+	if c, ok := t.(interface {
+		Authenticated(ctx context.Context) error
+	}); ok {
 		if e = c.Authenticated(ctx); e != nil {
 			return newError("host_key_commit_failed", "login", Command{}, e)
 		}
@@ -364,6 +406,7 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 	}
 	return d.sessionEvent(ctx, "login_complete", "info", Command{}, "ok")
 }
+
 func (d *Device) baseSecrets() []string {
 	var s []string
 	for _, v := range []string{d.config.Username, d.config.Password, d.config.EnablePassword, d.config.KeyPassphrase} {
@@ -373,6 +416,7 @@ func (d *Device) baseSecrets() []string {
 	}
 	return s
 }
+
 func (d *Device) loginInteractions(secret string) []Interaction {
 	hostkey := Interaction{Pattern: hostKeyQuestion, Limit: 1, Respond: func(context.Context, string) (string, error) {
 		if d.config.HostKeyPolicy == "strict" {
@@ -401,31 +445,6 @@ func (d *Device) loginInteractions(secret string) []Interaction {
 	return append(replies, user, pass)
 }
 
-// Close rejects new work and interrupts admitted I/O without waiting for callbacks.
-// A later Close can retry cleanup that previously failed.
-func (d *Device) Close() error {
-	d.lifeMu.Lock()
-	d.closed = true
-	d.connected.Store(false)
-	if d.cancel != nil {
-		d.cancel()
-	}
-	session := d.session
-	d.lifeMu.Unlock()
-	var err error
-	if session != nil {
-		err = session.Close()
-	}
-	if d.lease.CompareAndSwap(false, true) {
-		defer d.release()
-		err = errors.Join(err, d.closeResources())
-	}
-	if err != nil {
-		return newError("cleanup_failed", "cleanup", Command{}, err)
-	}
-	return nil
-}
-
 func (d *Device) closeResources() error {
 	if o := d.operation; o != nil && (o.borrowed || o.retired.Load()) {
 		return o.retire()
@@ -440,7 +459,6 @@ func (d *Device) retireFailure(err error) error {
 	}
 	return joinCleanup(err, cleanupErr)
 }
-
 func (d *Device) closeOwnedResources() error {
 	d.retired.Store(true)
 	d.connected.Store(false)
@@ -477,10 +495,4 @@ func (d *Device) closeOwnedResources() error {
 	}
 	failure = errors.Join(failure, d.log.finish())
 	return failure
-}
-func (d *Device) HAState() string {
-	if !d.connected.Load() {
-		return ""
-	}
-	return d.haState.Load().(string)
 }

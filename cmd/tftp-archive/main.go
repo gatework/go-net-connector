@@ -1,3 +1,8 @@
+// Command tftp-archive runs on the TFTP server and is invoked over SSH by
+// `netman backup tftp`. It checks protocol capabilities and directory
+// permissions before a device uploads, verifies that the uploaded file is
+// fresh and stable, hashes and archives it by date, and returns it to the
+// client.
 package main
 
 import (
@@ -8,10 +13,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/gatework/go-net-connector/archive"
-	"github.com/gatework/go-net-connector/internal/buildinfo"
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
+
+	"github.com/gatework/go-net-connector/archive"
+	"github.com/gatework/go-net-connector/internal/buildinfo"
 )
 
 func main() {

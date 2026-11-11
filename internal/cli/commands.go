@@ -7,22 +7,23 @@ import (
 	"io"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/internal/batchreport"
 	"github.com/gatework/go-net-connector/internal/buildinfo"
 	"github.com/gatework/go-net-connector/inventory"
 	"github.com/gatework/go-net-connector/netdisco"
-	"github.com/spf13/cobra"
 )
 
-type commandExit int
+type exitError int
 
-func (e commandExit) Error() string { return "命令未完成" }
+func (e exitError) Error() string { return "命令未完成" }
 
-type commandUsage struct{ message string }
+type usageError struct{ message string }
 
-func (e *commandUsage) Error() string { return e.message }
-func usageError(message string) error { return &commandUsage{message} }
+func (e *usageError) Error() string      { return e.message }
+func newUsageError(message string) error { return &usageError{message} }
 
 func (r Runtime) runCommands(ctx context.Context) int {
 	var outputErr error
@@ -41,11 +42,11 @@ func (r Runtime) runCommands(ctx context.Context) int {
 	if err == nil {
 		return 0
 	}
-	if exit, ok := errors.AsType[commandExit](err); ok {
+	if exit, ok := errors.AsType[exitError](err); ok {
 		return int(exit)
 	}
 	message := "命令或参数无效，请使用 netman help 查看用法"
-	if bad, ok := errors.AsType[*commandUsage](err); ok {
+	if bad, ok := errors.AsType[*usageError](err); ok {
 		message = bad.message
 	}
 	fmt.Fprintln(r.Error, "netman："+message)
@@ -61,7 +62,7 @@ func (r Runtime) commandTree(ctx context.Context, outputErr *error) *cobra.Comma
 	root.Flags().BoolP("version", "v", false, "显示版本和源码修订号")
 	root.SetVersionTemplate("netman {{.Version}}\n")
 	root.SetFlagErrorFunc(func(c *cobra.Command, _ error) error {
-		return usageError("选项无效或缺少参数，请使用 " + c.CommandPath() + " --help 查看用法")
+		return newUsageError("选项无效或缺少参数，请使用 " + c.CommandPath() + " --help 查看用法")
 	})
 	root.SetHelpFunc(func(c *cobra.Command, _ []string) {
 		if err := renderChineseHelp(c, c.OutOrStdout()); err != nil && *outputErr == nil {
@@ -74,7 +75,7 @@ func (r Runtime) commandTree(ctx context.Context, outputErr *error) *cobra.Comma
 	help := &cobra.Command{Use: "help [命令路径]", Short: "显示指定命令的中文帮助", Long: "按命令层级查询帮助，不读取配置文件或凭据。", Example: "  netman help backup run", RunE: func(c *cobra.Command, args []string) error {
 		target, remaining, err := root.Find(args)
 		if err != nil || len(remaining) > 0 {
-			return usageError("未找到指定命令，请使用 netman --help 查看子命令")
+			return newUsageError("未找到指定命令，请使用 netman --help 查看子命令")
 		}
 		return renderChineseHelp(target, c.OutOrStdout())
 	}}
@@ -100,7 +101,7 @@ func (r Runtime) commandTree(ctx context.Context, outputErr *error) *cobra.Comma
 		}
 		c.RunE = func(c *cobra.Command, _ []string) error {
 			if code := r.executeSelected(c.Context(), o, request); code != 0 {
-				return commandExit(code)
+				return exitError(code)
 			}
 			return nil
 		}
@@ -146,7 +147,7 @@ func (r Runtime) commandTree(ctx context.Context, outputErr *error) *cobra.Comma
 }
 func noArguments(_ *cobra.Command, args []string) error {
 	if len(args) > 0 {
-		return usageError("存在未知子命令或多余的位置参数")
+		return newUsageError("存在未知子命令或多余的位置参数")
 	}
 	return nil
 }

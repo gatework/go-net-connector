@@ -41,11 +41,11 @@ func PrepareDirectory(path string) error {
 	return nil
 }
 func SyncDirectory(path string) error {
-	real, e := filepath.EvalSymlinks(path)
+	resolved, e := filepath.EvalSymlinks(path)
 	if e != nil {
 		return e
 	}
-	f, e := os.Open(real)
+	f, e := os.Open(resolved)
 	if e != nil {
 		return e
 	}

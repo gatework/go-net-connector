@@ -100,7 +100,7 @@ func parseYAML(data []byte, requireMapping bool) (map[string]any, error) {
 			case "!!str":
 				return n.Value, nil
 			case "!!null":
-				return nil, nil
+				return nil, nil //nolint:nilnil // YAML null decodes to a nil value
 			case "!!bool":
 				var v bool
 				if n.Decode(&v) != nil {
@@ -120,6 +120,8 @@ func parseYAML(data []byte, requireMapping bool) (map[string]any, error) {
 				}
 				return v, nil
 			}
+			return nil, ErrInvalid
+		case yaml.AliasNode: // rejected before the switch; aliases could expand without bound
 			return nil, ErrInvalid
 		}
 		return nil, ErrInvalid
@@ -249,7 +251,7 @@ func ParseEnvironment(text string, inherited, process map[string]string) (map[st
 				if strings.HasPrefix(text, "(") {
 					return nil, ErrInvalid
 				}
-				name := ""
+				var name string
 				if strings.HasPrefix(text, "{") {
 					end := strings.IndexByte(text, '}')
 					if end < 0 {

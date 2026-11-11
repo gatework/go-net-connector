@@ -23,10 +23,10 @@ const maxScriptBytes = 1 << 20
 func (r Runtime) loadDeployScripts(o options) (workflow.DeployScripts, error) {
 	scripts := workflow.DeployScripts{ByPlatform: map[string]connector.Script{}}
 	if o.deployScript == "" && len(o.deployScriptFor) == 0 {
-		return scripts, usageError("必须通过 --script 或 --script-for 指定命令脚本")
+		return scripts, newUsageError("必须通过 --script 或 --script-for 指定命令脚本")
 	}
 	if o.deployStopAfter < 0 {
-		return scripts, usageError("--stop-after-failures 不能为负数")
+		return scripts, newUsageError("--stop-after-failures 不能为负数")
 	}
 	known := map[string]bool{}
 	for _, name := range vendors.NewBuiltinRegistry().Names() {
@@ -42,13 +42,13 @@ func (r Runtime) loadDeployScripts(o options) (workflow.DeployScripts, error) {
 	for _, entry := range o.deployScriptFor {
 		platform, path, ok := strings.Cut(entry, "=")
 		if !ok || platform == "" || path == "" {
-			return scripts, usageError("--script-for 格式应为 平台=文件")
+			return scripts, newUsageError("--script-for 格式应为 平台=文件")
 		}
 		if !known[platform] {
-			return scripts, usageError("未知平台 " + display.Text(platform) + "；可用平台：" + strings.Join(vendors.NewBuiltinRegistry().Names(), "、"))
+			return scripts, newUsageError("未知平台 " + display.Text(platform) + "；可用平台：" + strings.Join(vendors.NewBuiltinRegistry().Names(), "、"))
 		}
 		if _, exists := scripts.ByPlatform[platform]; exists {
-			return scripts, usageError("平台 " + platform + " 重复指定了脚本")
+			return scripts, newUsageError("平台 " + platform + " 重复指定了脚本")
 		}
 		script, err := r.readScript(path)
 		if err != nil {
@@ -66,31 +66,31 @@ func (r Runtime) readScript(path string) (connector.Script, error) {
 	name := filepath.Base(path)
 	file, err := os.Open(path)
 	if err != nil {
-		return connector.Script{}, usageError("无法读取脚本 " + display.Text(name))
+		return connector.Script{}, newUsageError("无法读取脚本 " + display.Text(name))
 	}
 	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, maxScriptBytes+1))
 	if err != nil {
-		return connector.Script{}, usageError("无法读取脚本 " + display.Text(name))
+		return connector.Script{}, newUsageError("无法读取脚本 " + display.Text(name))
 	}
 	if len(data) > maxScriptBytes {
-		return connector.Script{}, usageError("脚本 " + display.Text(name) + " 超过 1 MiB")
+		return connector.Script{}, newUsageError("脚本 " + display.Text(name) + " 超过 1 MiB")
 	}
 	script, err := connector.ParseScript(string(data), name)
 	if err != nil {
 		if invalid, ok := errors.AsType[*connector.Error](err); ok && invalid.Line > 0 {
-			return connector.Script{}, usageError(fmt.Sprintf("脚本 %s 第 %d 行无效（含 NUL 或非 UTF-8 字符）", display.Text(name), invalid.Line))
+			return connector.Script{}, newUsageError(fmt.Sprintf("脚本 %s 第 %d 行无效（含 NUL 或非 UTF-8 字符）", display.Text(name), invalid.Line))
 		}
-		return connector.Script{}, usageError("脚本 " + display.Text(name) + " 无效")
+		return connector.Script{}, newUsageError("脚本 " + display.Text(name) + " 无效")
 	}
 	if len(script.Commands) == 0 {
-		return connector.Script{}, usageError("脚本 " + display.Text(name) + " 没有命令")
+		return connector.Script{}, newUsageError("脚本 " + display.Text(name) + " 没有命令")
 	}
 	// A control byte such as Ctrl-A or ESC would be interpreted by the device
 	// line editor rather than sent as command text; reject it before connecting.
 	for _, command := range script.Commands {
 		if strings.ContainsFunc(command.Text, func(c rune) bool { return c != '\t' && unicode.IsControl(c) }) {
-			return connector.Script{}, usageError(fmt.Sprintf("脚本 %s 第 %d 行含控制字符", display.Text(name), command.Line))
+			return connector.Script{}, newUsageError(fmt.Sprintf("脚本 %s 第 %d 行含控制字符", display.Text(name), command.Line))
 		}
 	}
 	return script, nil

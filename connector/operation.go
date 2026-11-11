@@ -120,18 +120,10 @@ func (o *Operation) Retire() error {
 	return o.retire()
 }
 
-// retire runs under the operation's lease, either in one admitted call or after
-// scope.end joins it. The first cleanup result survives every enclosing defer.
-func (o *Operation) retire() error {
-	if !o.retired.Swap(true) {
-		o.cleanupErr = joinCleanup(nil, o.device.closeOwnedResources())
-	}
-	return o.cleanupErr
-}
-
 func (o *Operation) ExecuteCommand(ctx context.Context, c Command, opts ExecuteOptions) (Result, error) {
 	return o.ExecuteScript(ctx, Script{Commands: []Command{c}}, opts)
 }
+
 func (o *Operation) ExecuteScript(ctx context.Context, s Script, opts ExecuteOptions) (Result, error) {
 	script, e := s.clone()
 	if e != nil {
@@ -175,8 +167,17 @@ func (o *Operation) SaveConfig(ctx context.Context, opts ExecuteOptions) (Result
 	}
 	return o.device.saveConfig(ctx, opts)
 }
+func (o *Operation) RawPrompt() string { return o.device.RawPrompt() }
 
-func (o *Operation) RawPrompt() string       { return o.device.RawPrompt() }
 func (o *Operation) Prompt() (string, error) { return o.device.Prompt() }
 func (o *Operation) PlatformName() string    { return o.device.PlatformName() }
 func (o *Operation) Host() string            { return o.device.Host() }
+
+// retire runs under the operation's lease, either in one admitted call or after
+// scope.end joins it. The first cleanup result survives every enclosing defer.
+func (o *Operation) retire() error {
+	if !o.retired.Swap(true) {
+		o.cleanupErr = joinCleanup(nil, o.device.closeOwnedResources())
+	}
+	return o.cleanupErr
+}

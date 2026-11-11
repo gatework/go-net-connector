@@ -8,8 +8,10 @@ import (
 )
 
 const (
-	controlTimeout  = 10 * time.Second
-	maxStageTimeout = (time.Duration(1<<63-1) - controlTimeout) / time.Millisecond * time.Millisecond
+	controlTimeout = 10 * time.Second
+	// maxStageTimeout is the largest whole-millisecond budget that still
+	// leaves room for the control timeout.
+	maxStageTimeout = time.Duration(1<<63-1) - controlTimeout - (time.Duration(1<<63-1)-controlTimeout)%time.Millisecond
 )
 
 // Timeouts bound separate stages. Zero fields select defaults; negative or
@@ -28,6 +30,24 @@ func DefaultTimeouts() Timeouts {
 	return Timeouts{Prepare: 240 * time.Second, Upload: transfer.DefaultUploadTimeout, Verify: 100 * time.Second, Cleanup: 10 * time.Second}
 }
 
+// Validate checks explicit stage durations without filling absent defaults.
+func (t Timeouts) Validate() error {
+	if t.Prepare <= 0 || t.Upload <= 0 || t.Verify <= 0 || t.Cleanup <= 0 {
+		return ErrArchive
+	}
+	_, err := t.normalize()
+	return err
+}
+
+// TimeoutBudget is the v2 wire representation. Every field is a positive
+// millisecond count; Go callers normally use Timeouts on ClientOptions.
+type TimeoutBudget struct {
+	Prepare int64 `json:"prepare_ms"`
+	Upload  int64 `json:"upload_ms"`
+	Verify  int64 `json:"verify_ms"`
+	Cleanup int64 `json:"cleanup_ms"`
+}
+
 func (t Timeouts) normalize() (Timeouts, error) {
 	d := DefaultTimeouts()
 	defaults := [...]time.Duration{d.Prepare, d.Upload, d.Verify, d.Cleanup}
@@ -42,24 +62,6 @@ func (t Timeouts) normalize() (Timeouts, error) {
 		}
 	}
 	return t, nil
-}
-
-// TimeoutBudget is the v2 wire representation. Every field is a positive
-// millisecond count; Go callers normally use Timeouts on ClientOptions.
-type TimeoutBudget struct {
-	Prepare int64 `json:"prepare_ms"`
-	Upload  int64 `json:"upload_ms"`
-	Verify  int64 `json:"verify_ms"`
-	Cleanup int64 `json:"cleanup_ms"`
-}
-
-// Validate checks explicit stage durations without filling absent defaults.
-func (t Timeouts) Validate() error {
-	if t.Prepare <= 0 || t.Upload <= 0 || t.Verify <= 0 || t.Cleanup <= 0 {
-		return ErrArchive
-	}
-	_, err := t.normalize()
-	return err
 }
 
 func milliseconds(d time.Duration) int64 {

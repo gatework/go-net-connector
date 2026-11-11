@@ -31,7 +31,7 @@ func BenchmarkReadStableArchiveSource(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(size))
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				digest, _, err := readFile(context.Background(), directory, "config.cfg", false, nil)
 				if err != nil || digest != want {
 					b.Fatalf("digest=%q error=%v", digest, err)

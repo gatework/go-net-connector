@@ -146,14 +146,14 @@ func (u *execUseCase) prepare(r Runtime, o options) error {
 	if text != "" {
 		script, err := connector.ParseScript(text, name)
 		if err != nil {
-			return usageError("--command 含空命令、控制字符或非 UTF-8")
+			return newUsageError("--command 含空命令、控制字符或非 UTF-8")
 		}
 		for _, c := range script.Commands {
 			u.commands = append(u.commands, c.Text)
 		}
 	}
 	if len(u.commands) == 0 {
-		return usageError("必须通过 --command 或 --commands-file 指定只读命令")
+		return newUsageError("必须通过 --command 或 --commands-file 指定只读命令")
 	}
 	return nil
 }
@@ -185,7 +185,7 @@ func (u remoteUseCase) run(ctx context.Context, env useCaseEnv) (workflow.Result
 	}
 	o := env.options
 	if o.remoteServer == "" || o.remoteUsername == "" {
-		return workflow.Result{}, usageError("远程导出需指定 --remote-server 与 --remote-username")
+		return workflow.Result{}, newUsageError("远程导出需指定 --remote-server 与 --remote-username")
 	}
 	options := transfer.RemoteOptions{Server: o.remoteServer, Path: o.remotePath, Username: o.remoteUsername, Protocol: o.remoteProtocol}
 	if !u.preview {

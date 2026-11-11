@@ -1,3 +1,7 @@
+// Command netman is the operator entry point for device automation: login,
+// configuration collection and backup (TFTP and native remote), neighbor
+// discovery and interface description repair, batch script deployment and
+// read-only command collection.
 package main
 
 import (

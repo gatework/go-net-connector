@@ -9,8 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gatework/go-net-connector/inventory"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/gatework/go-net-connector/inventory"
 )
 
 func benchmarkInventoryBody(count int) []byte {
