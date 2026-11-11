@@ -140,7 +140,7 @@ func (x *selectedRun) setup(ctx context.Context) (code int, done bool) {
 	if o.mode == "topology" {
 		name = "topology"
 	}
-	createConfig, createEnv := true, true
+	var createConfig, createEnv bool
 	reader := bufio.NewReader(contextInput(ctx, r.Input))
 	var e error
 	if request.kind == requestInitialize {

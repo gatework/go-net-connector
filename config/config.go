@@ -502,6 +502,7 @@ func decodeJSON(s string) (any, error) {
 	}
 	return v, nil
 }
+
 // validateValues checks every section and field against the schema.
 func validateValues(values map[string]any) error {
 	for section, v := range values {
