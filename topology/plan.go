@@ -119,14 +119,51 @@ func BuildAudit(registry dialect.Registry, host, vendor string, peers []Neighbor
 	denial, _ := d.(WriteRestriction)
 	return buildAudit(host, d.Terminal(), identity, writer, denial, peers, descriptions, opts)
 }
+// buildAudit compares each local interface's description with the one its
+// single neighbor implies and plans the changes when the platform can write
+// descriptions; otherwise any mismatch requires manual work.
 func buildAudit(host string, profile connector.Terminal, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Audit, error) {
 	if identity == nil {
 		return Audit{}, ErrUnsupported
 	}
 	a := Audit{Comparisons: []Comparison{}, Issues: []Issue{}}
 	p := Plan{Host: host, Vendor: profile.Name, Scope: "interfaces", Evidence: map[string]Evidence{}, Changes: []Change{}, Commands: []string{}}
-	groups := map[string][]Neighbor{}
-	order := []string{}
+	order, groups := groupPeers(identity, peers)
+	for _, k := range order {
+		group := groups[k]
+		row, code, e := compareInterface(&p, identity, k, group, descriptions, opts)
+		if e != nil {
+			return a, e
+		}
+		if code != "" {
+			row.Reason = code
+			a.Issues = append(a.Issues, Issue{group[0].LocalInterface, code})
+		}
+		a.Comparisons = append(a.Comparisons, row)
+	}
+	if requireWriter(writer, denial) != nil {
+		for _, r := range a.Comparisons {
+			if r.Status != "matches" {
+				a.ManualRequired = true
+			}
+		}
+		return a, nil
+	}
+	if len(p.Changes) > 0 {
+		s, e := stagesFor(profile, identity, writer, denial, p.Changes)
+		if e != nil {
+			return a, e
+		}
+		p.Commands = s.commands()
+	}
+	a.Plan = &p
+	return a, nil
+}
+
+// groupPeers groups neighbors by local interface identity, in first-seen
+// order.
+func groupPeers(identity InterfaceIdentity, peers []Neighbor) (order []string, groups map[string][]Neighbor) {
+	groups = map[string][]Neighbor{}
 	for _, n := range peers {
 		k := identityKey(identity, n.LocalInterface)
 		if _, ok := groups[k]; !ok {
@@ -134,73 +171,53 @@ func buildAudit(host string, profile connector.Terminal, identity InterfaceIdent
 		}
 		groups[k] = append(groups[k], n)
 	}
-	for _, k := range order {
-		group := groups[k]
-		n := group[0]
-		old, exists := descriptions[k]
-		row := Comparison{Interface: n.LocalInterface, Neighbor: n.NeighborName, Port: n.NeighborInterface, Status: "unverified"}
-		if exists {
-			row.Current = &old
-		}
-		code := ""
-		switch {
-		case len(group) != 1:
-			code = "ambiguous_neighbor"
-		case n.IdentityIssue() != "":
-			code = n.IdentityIssue()
-		case !exists:
-			code = "interface_missing"
-		}
-		if code == "" {
-			proposed, e := formatDescription(n, opts)
-			var formatterError *Error
-			if errors.As(e, &formatterError) && formatterError.Code == "formatter_failed" {
-				return a, e
-			}
-			local := identity.ConfigName(n.LocalInterface)
-			if e != nil || ValidateInterface(local) != nil {
-				code = "unsafe_description"
-			} else {
-				row.Expected = &proposed
-				match := EquivalentDescription(old, proposed)
-				if opts.DescriptionMatcher != nil {
-					match = opts.DescriptionMatcher(old, proposed, n)
-				}
-				row.Status = "content_mismatch"
-				if match {
-					row.Status = "matches"
-				} else if old == "" {
-					row.Status = "missing_description"
-				}
-				p.Evidence[k] = Evidence{n.NeighborName, n.NeighborInterface, old}
-				if !match {
-					p.Changes = append(p.Changes, Change{local, old, proposed, n})
-				}
-			}
-		}
-		if code != "" {
-			row.Reason = code
-			a.Issues = append(a.Issues, Issue{n.LocalInterface, code})
-		}
-		a.Comparisons = append(a.Comparisons, row)
+	return order, groups
+}
+
+// compareInterface compares interface k's description with the one its
+// neighbors imply, recording evidence and any change in p. code names why
+// the interface cannot be verified; the error is a formatter failure.
+func compareInterface(p *Plan, identity InterfaceIdentity, k string, group []Neighbor, descriptions map[string]string, opts FormatOptions) (row Comparison, code string, err error) {
+	n := group[0]
+	old, exists := descriptions[k]
+	row = Comparison{Interface: n.LocalInterface, Neighbor: n.NeighborName, Port: n.NeighborInterface, Status: "unverified"}
+	if exists {
+		row.Current = &old
 	}
-	if requireWriter(writer, denial) == nil {
-		if len(p.Changes) > 0 {
-			s, e := stagesFor(profile, identity, writer, denial, p.Changes)
-			if e != nil {
-				return a, e
-			}
-			p.Commands = s.commands()
-		}
-		a.Plan = &p
-	} else {
-		for _, r := range a.Comparisons {
-			if r.Status != "matches" {
-				a.ManualRequired = true
-			}
-		}
+	switch {
+	case len(group) != 1:
+		return row, "ambiguous_neighbor", nil
+	case n.IdentityIssue() != "":
+		return row, n.IdentityIssue(), nil
+	case !exists:
+		return row, "interface_missing", nil
 	}
-	return a, nil
+	proposed, e := formatDescription(n, opts)
+	if formatterError, ok := errors.AsType[*Error](e); ok && formatterError.Code == "formatter_failed" {
+		return row, "", e
+	}
+	local := identity.ConfigName(n.LocalInterface)
+	if e != nil || ValidateInterface(local) != nil {
+		return row, "unsafe_description", nil
+	}
+	row.Expected = &proposed
+	match := EquivalentDescription(old, proposed)
+	if opts.DescriptionMatcher != nil {
+		match = opts.DescriptionMatcher(old, proposed, n)
+	}
+	switch {
+	case match:
+		row.Status = "matches"
+	case old == "":
+		row.Status = "missing_description"
+	default:
+		row.Status = "content_mismatch"
+	}
+	p.Evidence[k] = Evidence{n.NeighborName, n.NeighborInterface, old}
+	if !match {
+		p.Changes = append(p.Changes, Change{local, old, proposed, n})
+	}
+	return row, "", nil
 }
 
 type stages struct{ change, verify, persist []string }
