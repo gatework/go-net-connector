@@ -66,6 +66,8 @@ func (m *sshMaster) commandArgs(batch bool, tail ...string) []string {
 	return args
 }
 
+// prepare starts the SSH ControlMaster once and waits until it accepts
+// control commands. A failed start removes the private directory.
 func (m *sshMaster) prepare(ctx context.Context) (err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -85,12 +87,29 @@ func (m *sshMaster) prepare(ctx context.Context) (err error) {
 			err = errors.Join(err, m.closeLocked())
 		}
 	}()
+	cmd, err := m.masterCommand()
+	if err != nil {
+		return err
+	}
+	if err = cmd.Start(); err != nil {
+		return ErrArchive
+	}
+	m.cmd = cmd
+	m.done = make(chan error, 1)
+	done := m.done
+	go func() { done <- cmd.Wait(); close(done) }()
+	return m.awaitReady(ctx)
+}
+
+// masterCommand builds the ControlMaster command, writing the askpass
+// helper when a password is configured.
+func (m *sshMaster) masterCommand() (*exec.Cmd, error) {
 	args := m.args(m.password == "")
 	if m.password != "" {
 		// The script contains no credential; OpenSSH receives it in its private environment.
 		helper := filepath.Join(m.dir, "askpass")
-		if err = os.WriteFile(helper, []byte("#!/bin/sh\nprintf '%s\\n' \"$NC_ARCHIVE_ASKPASS_SECRET\"\n"), 0700); err != nil { //nolint:gosec // SSH_ASKPASS must be executable; the private directory is 0700
-			return err
+		if err := os.WriteFile(helper, []byte("#!/bin/sh\nprintf '%s\\n' \"$NC_ARCHIVE_ASKPASS_SECRET\"\n"), 0700); err != nil { //nolint:gosec // SSH_ASKPASS must be executable; the private directory is 0700
+			return nil, err
 		}
 		args = append(args, "-o", "PreferredAuthentications=password,keyboard-interactive", "-o", "PubkeyAuthentication=no")
 	}
@@ -103,36 +122,18 @@ func (m *sshMaster) prepare(ctx context.Context) (err error) {
 	if m.password != "" {
 		cmd.Env = append(os.Environ(), "SSH_ASKPASS="+filepath.Join(m.dir, "askpass"), "SSH_ASKPASS_REQUIRE=force", "DISPLAY=netman:0", "NC_ARCHIVE_ASKPASS_SECRET="+m.password)
 	}
-	if err = cmd.Start(); err != nil {
-		return ErrArchive
-	}
-	m.cmd = cmd
-	m.done = make(chan error, 1)
-	done := m.done
-	go func() { done <- cmd.Wait(); close(done) }()
+	return cmd, nil
+}
+
+// awaitReady polls the ControlMaster until it answers a check, exits, or
+// 15 seconds pass.
+func (m *sshMaster) awaitReady(ctx context.Context) error {
 	deadline := time.NewTimer(15 * time.Second)
 	defer deadline.Stop()
 	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()
 	for {
-		checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		check := exec.CommandContext(checkCtx, "ssh", m.commandArgs(true, "-O", "check")...) //nolint:gosec // arguments come from validated operator configuration
-		check.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		check.WaitDelay = 750 * time.Millisecond
-		check.Cancel = func() error {
-			if check.Process == nil {
-				return os.ErrProcessDone
-			}
-			e := syscall.Kill(-check.Process.Pid, syscall.SIGKILL)
-			if errors.Is(e, syscall.ESRCH) {
-				return os.ErrProcessDone
-			}
-			return e
-		}
-		check.Stdin, check.Stdout, check.Stderr = nil, nil, nil
-		e := check.Run()
-		cancel()
-		if e == nil {
+		if m.check(ctx) == nil {
 			return nil
 		}
 		select {
@@ -146,6 +147,28 @@ func (m *sshMaster) prepare(ctx context.Context) (err error) {
 		case <-tick.C:
 		}
 	}
+}
+
+// check runs one bounded "ssh -O check" against the ControlMaster, killing
+// its process group on cancellation.
+func (m *sshMaster) check(ctx context.Context) error {
+	checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	check := exec.CommandContext(checkCtx, "ssh", m.commandArgs(true, "-O", "check")...) //nolint:gosec // arguments come from validated operator configuration
+	check.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	check.WaitDelay = 750 * time.Millisecond
+	check.Cancel = func() error {
+		if check.Process == nil {
+			return os.ErrProcessDone
+		}
+		e := syscall.Kill(-check.Process.Pid, syscall.SIGKILL)
+		if errors.Is(e, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return e
+	}
+	check.Stdin, check.Stdout, check.Stderr = nil, nil, nil
+	return check.Run()
 }
 
 func (m *sshMaster) launch(ctx context.Context) (Channel, error) {
