@@ -296,12 +296,13 @@ func (s *Services) DeviceWithLogger(ctx context.Context, r fleet.Record, logger 
 	c.EnablePassword = get(keys.enablePassword)
 	return s.factory(d, c)
 }
+// Inventory fetches the device inventory from the configured Netdisco
+// source through the cache policy; an empty mode uses the configured one.
 func (s *Services) Inventory(ctx context.Context, mode netdisco.CacheMode) (netdisco.CacheResult, error) {
 	p := s.policy
 	if mode == "" {
 		mode = netdisco.CacheMode(stringValue(p, "netdisco.cache_mode"))
 	}
-	limits := s.limits()
 	fetch := netdisco.FetchOptions{Mode: mode}
 	if boolValue(p, "netdisco.cache_enabled") {
 		ttl := durationValue(p, "netdisco.cache_ttl")
@@ -311,59 +312,76 @@ func (s *Services) Inventory(ctx context.Context, mode netdisco.CacheMode) (netd
 	}
 	switch stringValue(p, "netdisco.source") {
 	case "http":
-		raw := stringValue(p, "netdisco.url")
-		u, err := url.Parse(raw)
-		if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") || (!boolValue(p, "netdisco.allow_insecure_http") && u.Scheme != "https") {
-			return netdisco.CacheResult{}, config.ErrInvalid
-		}
-		user, key := s.secret("ND_USERNAME"), s.secret("ND_API_KEY")
-		if key != "" && fetch.Cache != nil && strings.TrimSpace(user) == "" && strings.TrimSpace(fetch.Cache.Namespace) == "" {
-			return netdisco.CacheResult{}, &netdisco.InventoryError{Code: "cache_namespace_required"}
-		}
-		if key == "" {
-			if user == "" {
-				return netdisco.CacheResult{}, ErrCredentials
-			}
-		}
-		options := netdisco.HTTPOptions{URL: u.String(), Username: user, APIKey: key, RequireHTTPS: !boolValue(p, "netdisco.allow_insecure_http"), Limits: limits}
-		if mode != "only" {
-			options.Password = s.secret("ND_PASSWORD")
+		options, err := s.httpOptions(mode, fetch)
+		if err != nil {
+			return netdisco.CacheResult{}, err
 		}
 		return netdisco.FetchHTTP(ctx, options, fetch)
 	case "postgres":
-		keys := []struct{ name, env string }{{"host", "ND_DB_HOST"}, {"dbname", "ND_DB_NAME"}, {"user", "ND_DB_USER"}}
-		dsn := []string{}
-		for _, k := range keys {
-			v := s.secret(k.env)
-			if v == "" || strings.ContainsRune(v, 0) {
-				return netdisco.CacheResult{}, ErrCredentials
-			}
-			dsn = append(dsn, k.name+"="+quoteDSNValue(v))
+		options, err := s.postgresOptions(mode)
+		if err != nil {
+			return netdisco.CacheResult{}, err
 		}
-		for _, k := range []string{"port", "sslmode", "sslrootcert", "connect_timeout"} {
-			v := p.Value("netdisco.db_" + k)
-			if v != nil {
-				value := fmt.Sprint(v)
-				dsn = append(dsn, k+"="+quoteDSNValue(value))
-			}
-		}
-		query := stringValue(p, "netdisco.query")
-		params, _ := p.Value("netdisco.query_params").([]any)
-		if params == nil {
-			params = []any{}
-		}
-		if mode != "only" {
-			password := s.secret("ND_DB_PASS")
-			if password == "" {
-				return netdisco.CacheResult{}, ErrCredentials
-			}
-			dsn = append(dsn, "password="+quoteDSNValue(password))
-		}
-		return netdisco.FetchPostgres(ctx, netdisco.PostgresOptions{Connection: strings.Join(dsn, " "), Query: query, Parameters: params, Limits: limits}, fetch)
+		return netdisco.FetchPostgres(ctx, options, fetch)
 	default:
 		return netdisco.CacheResult{}, config.ErrInvalid
 	}
 }
+
+// httpOptions builds the Netdisco HTTP source options. A cache-only fetch
+// needs no password.
+func (s *Services) httpOptions(mode netdisco.CacheMode, fetch netdisco.FetchOptions) (netdisco.HTTPOptions, error) {
+	p := s.policy
+	insecure := boolValue(p, "netdisco.allow_insecure_http")
+	u, err := url.Parse(stringValue(p, "netdisco.url"))
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") || (!insecure && u.Scheme != "https") {
+		return netdisco.HTTPOptions{}, config.ErrInvalid
+	}
+	user, key := s.secret("ND_USERNAME"), s.secret("ND_API_KEY")
+	if key != "" && fetch.Cache != nil && strings.TrimSpace(user) == "" && strings.TrimSpace(fetch.Cache.Namespace) == "" {
+		return netdisco.HTTPOptions{}, &netdisco.InventoryError{Code: "cache_namespace_required"}
+	}
+	if key == "" && user == "" {
+		return netdisco.HTTPOptions{}, ErrCredentials
+	}
+	options := netdisco.HTTPOptions{URL: u.String(), Username: user, APIKey: key, RequireHTTPS: !insecure, Limits: s.limits()}
+	if mode != netdisco.CacheOnly {
+		options.Password = s.secret("ND_PASSWORD")
+	}
+	return options, nil
+}
+
+// postgresOptions builds the Netdisco database source options. A
+// cache-only fetch needs no password.
+func (s *Services) postgresOptions(mode netdisco.CacheMode) (netdisco.PostgresOptions, error) {
+	p := s.policy
+	dsn := []string{}
+	for _, k := range []struct{ name, env string }{{"host", "ND_DB_HOST"}, {"dbname", "ND_DB_NAME"}, {"user", "ND_DB_USER"}} {
+		v := s.secret(k.env)
+		if v == "" || strings.ContainsRune(v, 0) {
+			return netdisco.PostgresOptions{}, ErrCredentials
+		}
+		dsn = append(dsn, k.name+"="+quoteDSNValue(v))
+	}
+	for _, k := range []string{"port", "sslmode", "sslrootcert", "connect_timeout"} {
+		if v := p.Value("netdisco.db_" + k); v != nil {
+			dsn = append(dsn, k+"="+quoteDSNValue(fmt.Sprint(v)))
+		}
+	}
+	params, _ := p.Value("netdisco.query_params").([]any)
+	if params == nil {
+		params = []any{}
+	}
+	if mode != netdisco.CacheOnly {
+		password := s.secret("ND_DB_PASS")
+		if password == "" {
+			return netdisco.PostgresOptions{}, ErrCredentials
+		}
+		dsn = append(dsn, "password="+quoteDSNValue(password))
+	}
+	return netdisco.PostgresOptions{Connection: strings.Join(dsn, " "), Query: stringValue(p, "netdisco.query"), Parameters: params, Limits: s.limits()}, nil
+}
+
 func (s *Services) Workers() int { return s.settings.parallel }
 func (s *Services) Limit() int   { return s.settings.limitPerVendor }
 func quoteDSNValue(s string) string {

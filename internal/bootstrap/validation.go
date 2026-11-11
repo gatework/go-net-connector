@@ -8,7 +8,20 @@ import (
 	"github.com/gatework/go-net-connector/netdisco"
 )
 
+// validatePolicy checks the inventory and topology settings that the
+// configuration schema cannot express.
 func (s *Services) validatePolicy() error {
+	if e := s.validateLimits(); e != nil {
+		return e
+	}
+	if e := s.validateSource(); e != nil {
+		return e
+	}
+	return s.validateDatabase()
+}
+
+// validateLimits checks the inventory limits and topology bounds.
+func (s *Services) validateLimits() error {
 	p := s.policy
 	for _, key := range []string{"page_size", "max_pages", "max_devices", "max_response_bytes", "max_inventory_bytes"} {
 		if v := p.Value("netdisco." + key); v != nil {
@@ -32,6 +45,12 @@ func (s *Services) validatePolicy() error {
 	if n := integerValue(p, "topology.limit"); n < 0 {
 		return config.ErrInvalid
 	}
+	return nil
+}
+
+// validateSource checks the settings of the selected inventory source.
+func (s *Services) validateSource() error {
+	p := s.policy
 	switch stringValue(p, "netdisco.source") {
 	case "http":
 		if p.Value("netdisco.query") != nil || p.Value("netdisco.query_params") != nil {
@@ -43,14 +62,19 @@ func (s *Services) validatePolicy() error {
 				return config.ErrInvalid
 			}
 		}
+		return nil
 	case "postgres":
 		params, _ := p.Value("netdisco.query_params").([]any)
-		if _, e := netdisco.NewPostgres(netdisco.PostgresOptions{Connection: "host=localhost user=preflight dbname=preflight sslmode=disable", Query: stringValue(p, "netdisco.query"), Parameters: params, Limits: s.limits()}); e != nil {
-			return e
-		}
+		_, e := netdisco.NewPostgres(netdisco.PostgresOptions{Connection: "host=localhost user=preflight dbname=preflight sslmode=disable", Query: stringValue(p, "netdisco.query"), Parameters: params, Limits: s.limits()})
+		return e
 	default:
 		return config.ErrInvalid
 	}
+}
+
+// validateDatabase checks the database connection settings.
+func (s *Services) validateDatabase() error {
+	p := s.policy
 	if n := integerValue(p, "netdisco.db_port"); n < 1 || n > 65535 {
 		return config.ErrInvalid
 	}
