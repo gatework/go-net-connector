@@ -119,6 +119,7 @@ func BuildAudit(registry dialect.Registry, host, vendor string, peers []Neighbor
 	denial, _ := d.(WriteRestriction)
 	return buildAudit(host, d.Terminal(), identity, writer, denial, peers, descriptions, opts)
 }
+
 // buildAudit compares each local interface's description with the one its
 // single neighbor implies and plans the changes when the platform can write
 // descriptions; otherwise any mismatch requires manual work.
@@ -198,7 +199,7 @@ func compareInterface(p *Plan, identity InterfaceIdentity, k string, group []Nei
 	}
 	local := identity.ConfigName(n.LocalInterface)
 	if e != nil || ValidateInterface(local) != nil {
-		return row, "unsafe_description", nil
+		return row, "unsafe_description", nil //nolint:nilerr // an unformattable description is an interface issue, not an audit failure
 	}
 	row.Expected = &proposed
 	match := EquivalentDescription(old, proposed)

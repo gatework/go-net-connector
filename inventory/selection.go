@@ -207,6 +207,7 @@ func NewSelection(o SelectionOptions) (Selection, error) {
 	s.vendors, e = makeRules(o.IncludeVendors, o.ExcludeVendors, MatchExact)
 	return s, e
 }
+
 // Evaluate returns the reasons d is not selected; none means selected.
 func (s Selection) Evaluate(d Device) Decision {
 	reasons := make([]string, 0, 4)

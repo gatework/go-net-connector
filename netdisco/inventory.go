@@ -141,6 +141,7 @@ const httpFallbackQuery = "%"
 
 func (h *HTTP) String() string   { return "netdisco.HTTP" }
 func (h *HTTP) GoString() string { return h.String() }
+
 // Devices logs in when no API key is configured and pages through the
 // inventory search, falling back to a single wildcard query on servers that
 // require one. The whole call is bounded by the configured timeout and

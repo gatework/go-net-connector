@@ -296,6 +296,7 @@ func (s *Services) DeviceWithLogger(ctx context.Context, r fleet.Record, logger 
 	c.EnablePassword = get(keys.enablePassword)
 	return s.factory(d, c)
 }
+
 // Inventory fetches the device inventory from the configured Netdisco
 // source through the cache policy; an empty mode uses the configured one.
 func (s *Services) Inventory(ctx context.Context, mode netdisco.CacheMode) (netdisco.CacheResult, error) {
@@ -326,6 +327,30 @@ func (s *Services) Inventory(ctx context.Context, mode netdisco.CacheMode) (netd
 	default:
 		return netdisco.CacheResult{}, config.ErrInvalid
 	}
+}
+
+func (s *Services) Workers() int { return s.settings.parallel }
+
+func (s *Services) Limit() int { return s.settings.limitPerVendor }
+
+func (s *Services) Directory() string { return s.settings.backupDirectory }
+func (s *Services) String() string    { return "bootstrap.Services" }
+func quoteDSNValue(s string) string {
+	return "'" + strings.ReplaceAll(strings.ReplaceAll(s, "\\", "\\\\"), "'", "\\'") + "'"
+}
+func (s *Services) GoString() string { return s.String() }
+
+// LogDirectory resolves the frozen command-mode policy once at the composition
+// root. Root backup/TFTP and ordinary batch backup have no implicit session log;
+// batch TFTP and topology fall back to their batch directory's logs subdirectory.
+func (s *Services) LogDirectory(mode, directory string) string {
+	if explicit := s.settings.logDirectory; explicit != "" {
+		return explicit
+	}
+	if mode == "topology" || mode == "tftp" || mode == "deploy" || mode == "exec" {
+		return filepath.Join(directory, "logs")
+	}
+	return ""
 }
 
 // httpOptions builds the Netdisco HTTP source options. A cache-only fetch
@@ -380,28 +405,6 @@ func (s *Services) postgresOptions(mode netdisco.CacheMode) (netdisco.PostgresOp
 		dsn = append(dsn, "password="+quoteDSNValue(password))
 	}
 	return netdisco.PostgresOptions{Connection: strings.Join(dsn, " "), Query: stringValue(p, "netdisco.query"), Parameters: params, Limits: s.limits()}, nil
-}
-
-func (s *Services) Workers() int { return s.settings.parallel }
-func (s *Services) Limit() int   { return s.settings.limitPerVendor }
-func quoteDSNValue(s string) string {
-	return "'" + strings.ReplaceAll(strings.ReplaceAll(s, "\\", "\\\\"), "'", "\\'") + "'"
-}
-func (s *Services) Directory() string { return s.settings.backupDirectory }
-func (s *Services) String() string    { return "bootstrap.Services" }
-func (s *Services) GoString() string  { return s.String() }
-
-// LogDirectory resolves the frozen command-mode policy once at the composition
-// root. Root backup/TFTP and ordinary batch backup have no implicit session log;
-// batch TFTP and topology fall back to their batch directory's logs subdirectory.
-func (s *Services) LogDirectory(mode, directory string) string {
-	if explicit := s.settings.logDirectory; explicit != "" {
-		return explicit
-	}
-	if mode == "topology" || mode == "tftp" || mode == "deploy" || mode == "exec" {
-		return filepath.Join(directory, "logs")
-	}
-	return ""
 }
 func (s *Services) compileConnection(vendor string) (connector.ConnectionConfig, error) {
 	p := s.policy

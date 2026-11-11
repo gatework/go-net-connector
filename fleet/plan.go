@@ -46,6 +46,7 @@ var labelChars = regexp.MustCompile(`[^a-z0-9]+`)
 func normalizeIdentityField(s string) string {
 	return strings.TrimSpace(labelChars.ReplaceAllString(strings.ToLower(s), " "))
 }
+
 // NewRules validates o against the connectors in registry and returns the
 // rules that map inventory devices to connectors.
 func NewRules(o RuleOptions, registry dialect.Registry) (*Rules, error) {
@@ -91,73 +92,6 @@ func NewRules(o RuleOptions, registry dialect.Registry) (*Rules, error) {
 	return r, nil
 }
 
-// known reports whether connector is registered.
-func (r *Rules) known(connector string) bool {
-	_, ok := r.registered[connector]
-	return ok
-}
-
-// addVendorOverrides records connector overrides by normalized vendor
-// label, rejecting labels that normalize to the same key with different
-// connectors.
-func (r *Rules) addVendorOverrides(overrides map[string]string) error {
-	for k, v := range overrides {
-		k = normalizeIdentityField(k)
-		if k == "" || !r.known(v) {
-			return ErrInvalidPlan
-		}
-		if old, ok := r.vendors[k]; ok && old != v {
-			return ErrInvalidPlan
-		}
-		r.vendors[k] = v
-	}
-	return nil
-}
-
-// addHostOverrides records connector overrides by canonical address.
-func (r *Rules) addHostOverrides(overrides map[string]string) error {
-	for k, v := range overrides {
-		a, e := netip.ParseAddr(k)
-		if e != nil || a.Zone() != "" || !r.known(v) {
-			return ErrInvalidPlan
-		}
-		k = a.String()
-		if old, ok := r.hosts[k]; ok && old != v {
-			return ErrInvalidPlan
-		}
-		r.hosts[k] = v
-	}
-	return nil
-}
-
-// addMappings records identity mappings with normalized fields.
-func (r *Rules) addMappings(mappings []Mapping) error {
-	for _, m := range mappings {
-		m.Vendor = normalizeIdentityField(m.Vendor)
-		if m.Vendor == "" || !r.known(m.Connector) {
-			return ErrInvalidPlan
-		}
-		m.OS = normalizedField(m.OS)
-		m.ModelPrefix = normalizedField(m.ModelPrefix)
-		r.mappings = append(r.mappings, m)
-	}
-	return nil
-}
-
-// normalizedField returns a normalized copy of an optional field.
-func normalizedField(v *string) *string {
-	if v == nil {
-		return nil
-	}
-	n := normalizeIdentityField(*v)
-	return &n
-}
-
-func platformResolver(registry dialect.Registry) PlatformResolver {
-	resolver, _ := registry.(PlatformResolver)
-	return resolver
-}
-
 func (r *Rules) Resolve(d inventory.Device) string {
 	if a, e := netip.ParseAddr(d.IP); e == nil {
 		if v := r.hosts[a.String()]; v != "" {
@@ -186,8 +120,6 @@ func (r *Rules) Resolve(d inventory.Device) string {
 	return platform
 }
 
-type Record struct{ Host, SourceIP, Name, Vendor, SourceVendor, Model, OS, OSVersion, Serial, Issue string }
-
 func (r *Rules) Record(d inventory.Device) Record {
 	v := Record{SourceIP: d.IP, Name: strings.TrimSpace(d.Name), Vendor: r.Resolve(d), SourceVendor: d.Vendor, Model: d.Model, OS: d.OS, OSVersion: d.OSVersion, Serial: d.Serial}
 	if v.Name == "" {
@@ -207,6 +139,75 @@ func (r *Rules) Record(d inventory.Device) Record {
 		v.Issue = string(planStatusUnsupportedVendor)
 	}
 	return v
+}
+
+// known reports whether connector is registered.
+func (r *Rules) known(connector string) bool {
+	_, ok := r.registered[connector]
+	return ok
+}
+
+// addVendorOverrides records connector overrides by normalized vendor
+// label, rejecting labels that normalize to the same key with different
+// connectors.
+func (r *Rules) addVendorOverrides(overrides map[string]string) error {
+	for k, v := range overrides {
+		k = normalizeIdentityField(k)
+		if k == "" || !r.known(v) {
+			return ErrInvalidPlan
+		}
+		if old, ok := r.vendors[k]; ok && old != v {
+			return ErrInvalidPlan
+		}
+		r.vendors[k] = v
+	}
+	return nil
+}
+
+// normalizedField returns a normalized copy of an optional field.
+func normalizedField(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	n := normalizeIdentityField(*v)
+	return &n
+}
+
+func platformResolver(registry dialect.Registry) PlatformResolver {
+	resolver, _ := registry.(PlatformResolver)
+	return resolver
+}
+
+// addHostOverrides records connector overrides by canonical address.
+func (r *Rules) addHostOverrides(overrides map[string]string) error {
+	for k, v := range overrides {
+		a, e := netip.ParseAddr(k)
+		if e != nil || a.Zone() != "" || !r.known(v) {
+			return ErrInvalidPlan
+		}
+		k = a.String()
+		if old, ok := r.hosts[k]; ok && old != v {
+			return ErrInvalidPlan
+		}
+		r.hosts[k] = v
+	}
+	return nil
+}
+
+type Record struct{ Host, SourceIP, Name, Vendor, SourceVendor, Model, OS, OSVersion, Serial, Issue string }
+
+// addMappings records identity mappings with normalized fields.
+func (r *Rules) addMappings(mappings []Mapping) error {
+	for _, m := range mappings {
+		m.Vendor = normalizeIdentityField(m.Vendor)
+		if m.Vendor == "" || !r.known(m.Connector) {
+			return ErrInvalidPlan
+		}
+		m.OS = normalizedField(m.OS)
+		m.ModelPrefix = normalizedField(m.ModelPrefix)
+		r.mappings = append(r.mappings, m)
+	}
+	return nil
 }
 func (r Record) BackupFilename(style string) (string, error) {
 	a, e := netip.ParseAddr(r.Host)

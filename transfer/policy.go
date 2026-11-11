@@ -83,6 +83,7 @@ func VerificationRoot(root string) (string, error) {
 	}
 	return p, nil
 }
+
 // NewPolicy validates o against the TFTP-capable platforms in registry and
 // returns the policy that resolves per-device transfer targets.
 func NewPolicy(o PolicyOptions, registry dialect.Registry) (*Policy, error) {
@@ -113,6 +114,37 @@ func NewPolicy(o PolicyOptions, registry dialect.Registry) (*Policy, error) {
 		return nil, e
 	}
 	return p, nil
+}
+
+func (p *Policy) For(host, vendor string) (Target, error) {
+	h, e := exactAddress(host)
+	if e != nil {
+		return Target{}, e
+	}
+	server := p.server
+	if s, ok := p.servers[h]; ok {
+		server = s
+	}
+	get := func(m map[string]vendorValue) string {
+		v := m[vendor]
+		if s, ok := v.hosts[h]; ok {
+			return s
+		}
+		return v.fallback
+	}
+	vrf := get(p.vrfs)
+	platform, ok := p.platforms[vendor]
+	if !ok {
+		return Target{}, ErrUnsupported
+	}
+	if vrf == "" {
+		vrf = platform.DefaultVRF()
+	}
+	root := p.roots[server]
+	if platform.RequiresVerificationRoot() && server != "" && root == "" {
+		return Target{}, ErrInvalid
+	}
+	return Target{TFTPOptions: TFTPOptions{Server: server, SourceFile: get(p.files), SourceInterface: get(p.interfaces), VRF: vrf}, Root: root}, nil
 }
 
 // setServers records the default server and the per-host servers.
@@ -178,38 +210,6 @@ func (p *Policy) setRoots(o PolicyOptions) error {
 		seen[root] = true
 	}
 	return nil
-}
-
-// setVendorValues records the per-vendor source files, source interfaces
-// and VRFs, each validated by its platform.
-func (p *Policy) setVendorValues(o PolicyOptions) error {
-	preflight := func(platform TFTPPolicy, options TFTPOptions) error {
-		options.Server = "preflight.invalid"
-		return platform.ValidateOptions("192.0.2.1", options)
-	}
-	var e error
-	p.files, e = vendorValues(o.SourceFiles, p.platforms, func(platform TFTPPolicy, v string) error {
-		if v == "" {
-			return nil
-		}
-		if ValidateSource(v) != nil {
-			return ErrInvalid
-		}
-		return preflight(platform, TFTPOptions{SourceFile: v})
-	})
-	if e != nil {
-		return e
-	}
-	p.interfaces, e = vendorValues(o.SourceInterfaces, p.platforms, func(platform TFTPPolicy, v string) error {
-		return preflight(platform, TFTPOptions{SourceInterface: v})
-	})
-	if e != nil {
-		return e
-	}
-	p.vrfs, e = vendorValues(o.VRFs, p.platforms, func(platform TFTPPolicy, v string) error {
-		return preflight(platform, TFTPOptions{VRF: v})
-	})
-	return e
 }
 
 // vendorValues decodes per-vendor settings: each value is a string, or a
@@ -281,33 +281,34 @@ func decodeVendorValue(raw any, normalize func(any) (string, error)) (vendorValu
 	return value, nil
 }
 
-func (p *Policy) For(host, vendor string) (Target, error) {
-	h, e := exactAddress(host)
-	if e != nil {
-		return Target{}, e
+// setVendorValues records the per-vendor source files, source interfaces
+// and VRFs, each validated by its platform.
+func (p *Policy) setVendorValues(o PolicyOptions) error {
+	preflight := func(platform TFTPPolicy, options TFTPOptions) error {
+		options.Server = "preflight.invalid"
+		return platform.ValidateOptions("192.0.2.1", options)
 	}
-	server := p.server
-	if s, ok := p.servers[h]; ok {
-		server = s
-	}
-	get := func(m map[string]vendorValue) string {
-		v := m[vendor]
-		if s, ok := v.hosts[h]; ok {
-			return s
+	var e error
+	p.files, e = vendorValues(o.SourceFiles, p.platforms, func(platform TFTPPolicy, v string) error {
+		if v == "" {
+			return nil
 		}
-		return v.fallback
+		if ValidateSource(v) != nil {
+			return ErrInvalid
+		}
+		return preflight(platform, TFTPOptions{SourceFile: v})
+	})
+	if e != nil {
+		return e
 	}
-	vrf := get(p.vrfs)
-	platform, ok := p.platforms[vendor]
-	if !ok {
-		return Target{}, ErrUnsupported
+	p.interfaces, e = vendorValues(o.SourceInterfaces, p.platforms, func(platform TFTPPolicy, v string) error {
+		return preflight(platform, TFTPOptions{SourceInterface: v})
+	})
+	if e != nil {
+		return e
 	}
-	if vrf == "" {
-		vrf = platform.DefaultVRF()
-	}
-	root := p.roots[server]
-	if platform.RequiresVerificationRoot() && server != "" && root == "" {
-		return Target{}, ErrInvalid
-	}
-	return Target{TFTPOptions: TFTPOptions{Server: server, SourceFile: get(p.files), SourceInterface: get(p.interfaces), VRF: vrf}, Root: root}, nil
+	p.vrfs, e = vendorValues(o.VRFs, p.platforms, func(platform TFTPPolicy, v string) error {
+		return preflight(platform, TFTPOptions{VRF: v})
+	})
+	return e
 }

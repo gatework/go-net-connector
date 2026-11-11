@@ -202,6 +202,7 @@ func (x *selectedRun) checkOrShow() (code int, done bool) {
 		data := policy.Public()
 		data["sources"] = policy.Sources()
 		return r.renderConfiguration(data, o.mode, false, o.json), true
+	default:
 	}
 	if o.mode == "topology" {
 		if e := bootstrap.ValidateTopology(policy, request.topologyMode()); e != nil {

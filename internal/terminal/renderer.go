@@ -123,6 +123,7 @@ func (r *Renderer) escape(b byte) error {
 	}
 	return nil
 }
+
 // csi consumes one byte of a control sequence: parameter bytes are
 // collected and a final byte applies the sequence.
 func (r *Renderer) csi(b byte) error {

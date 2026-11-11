@@ -75,6 +75,7 @@ func postgresProtocolBodyLimit(limits Limits) int {
 
 func (p *Postgres) String() string   { return "netdisco.Postgres" }
 func (p *Postgres) GoString() string { return p.String() }
+
 // Devices reads the configured query through a read-only cursor, one page
 // at a time, within the configured timeout and limits.
 func (p *Postgres) Devices(parent context.Context) (result []inventory.Device, err error) {

@@ -93,6 +93,7 @@ func newCache(source Source, o cacheOptions, identity string) (*cache, error) {
 	}
 	return &cache{source, directory, identity, filepath.Join(directory, identity+".json"), filepath.Join(directory, identity+".lock"), ttl, lockTimeout, limits, now}, nil
 }
+
 // Fetch returns the inventory according to mode: from a fresh or stale
 // cache entry, or by refreshing from the source under the cache lock.
 func (c *cache) Fetch(ctx context.Context, mode CacheMode) (result CacheResult, err error) {

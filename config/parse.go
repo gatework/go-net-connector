@@ -275,6 +275,8 @@ type boundedValue struct {
 	base int
 }
 
+func (v *boundedValue) String() string { return v.b.String() }
+
 func (v *boundedValue) write(s string) error {
 	if len(s) > MaxBytes-v.b.Len() || len(s) > MaxBytes-v.base-v.b.Len() {
 		return ErrInvalid
@@ -290,8 +292,6 @@ func (v *boundedValue) writeByte(c byte) error {
 	v.b.WriteByte(c)
 	return nil
 }
-
-func (v *boundedValue) String() string { return v.b.String() }
 
 // environmentSize bounds an effective environment snapshot, including key bytes.
 func environmentSize(values map[string]string) (int, error) {
