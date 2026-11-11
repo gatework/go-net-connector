@@ -141,97 +141,33 @@ const httpFallbackQuery = "%"
 
 func (h *HTTP) String() string   { return "netdisco.HTTP" }
 func (h *HTTP) GoString() string { return h.String() }
+// Devices logs in when no API key is configured and pages through the
+// inventory search, falling back to a single wildcard query on servers that
+// require one. The whole call is bounded by the configured timeout and
+// byte, page and device limits.
 func (h *HTTP) Devices(parent context.Context) ([]inventory.Device, error) {
 	ctx, cancel := context.WithTimeout(parent, h.limits.Timeout)
 	defer cancel()
-	var total int64
-	count := 0
-	request := func(endpoint, method string, query url.Values, key string) ([]byte, int, error) {
-		u := *h.base
-		u.Path = strings.TrimRight(u.Path, "/") + "/" + endpoint
-		u.RawQuery = query.Encode()
-		req, e := http.NewRequestWithContext(ctx, method, u.String(), nil)
-		if e != nil {
-			return nil, 0, newInventoryError("request_failed", e)
-		}
-		req.Header.Set("Accept", "application/json")
-		if key != "" {
-			req.Header.Set("Authorization", "Apikey "+key)
-		} else {
-			req.SetBasicAuth(h.username, h.password)
-		}
-		resp, e := h.client.Do(req)
-		if e != nil {
-			return nil, 0, newInventoryError("connection_failed", e)
-		}
-		defer resp.Body.Close()
-		limit := min(h.limits.MaxResponseBytes, h.limits.MaxInventoryBytes-total)
-		b, e := io.ReadAll(io.LimitReader(resp.Body, limit+1))
-		if e != nil {
-			return nil, resp.StatusCode, newInventoryError("connection_failed", e)
-		}
-		total += int64(len(b))
-		if total > h.limits.MaxInventoryBytes {
-			return nil, resp.StatusCode, newInventoryError("max_inventory_bytes", nil)
-		}
-		if int64(len(b)) > h.limits.MaxResponseBytes {
-			return nil, resp.StatusCode, newInventoryError("max_response_bytes", nil)
-		}
-		if e = ctx.Err(); e != nil {
-			return nil, 0, newInventoryError("inventory_timeout", e)
-		}
-		return b, resp.StatusCode, nil
-	}
-	key := h.key
-	if key == "" {
-		b, status, e := request("login", http.MethodPost, nil, "")
-		if e != nil {
+	f := &httpFetch{source: h, ctx: ctx, key: h.key}
+	if f.key == "" {
+		if e := f.login(); e != nil {
 			return nil, e
 		}
-		if status < 200 || status >= 300 {
-			return nil, newInventoryError("request_failed", nil)
-		}
-		var data struct {
-			APIKey string `json:"api_key"`
-		}
-		if e = json.Unmarshal(b, &data); e != nil || data.APIKey == "" || strings.ContainsAny(data.APIKey, "\r\n\x00") {
-			return nil, newInventoryError("authentication_failed", nil)
-		}
-		key = data.APIKey
 	}
-
-	seen := make(map[string]bool)
-	unique := make(map[inventory.Device]bool)
-	rows := make([]inventory.Device, 0)
+	pages := newPageSet()
 	for page := range h.limits.MaxPages {
 		query := url.Values{"fields": {httpInventoryFields}, "limit": {strconv.Itoa(h.limits.PageSize)}, "offset": {strconv.Itoa(page * h.limits.PageSize)}}
-		body, status, e := request(httpInventoryEndpoint, http.MethodGet, query, key)
+		body, status, e := f.request(httpInventoryEndpoint, http.MethodGet, query)
 		if e != nil {
 			return nil, e
 		}
-		if status == 400 {
-			var message struct {
-				Error string `json:"error"`
-			}
-			if json.Unmarshal(body, &message) == nil && message.Error == "Missing query" {
-				body, status, e = request(httpInventoryEndpoint, http.MethodGet, url.Values{"q": {httpFallbackQuery}, "seeallcolumns": {"true"}}, key)
-				if e != nil {
-					return nil, e
-				}
-				if status < 200 || status >= 300 {
-					return nil, newInventoryError("request_failed", nil)
-				}
-				data, e := decodeHTTPInventory(ctx, body, h.limits.MaxDevices, &count)
-				if e != nil {
-					return nil, e
-				}
-				return dedupContext(ctx, data)
-			}
+		if status == http.StatusBadRequest && missingQuery(body) {
+			return f.fallback()
 		}
 		if status < 200 || status >= 300 {
 			return nil, newInventoryError("request_failed", fmt.Errorf("HTTP %d", status))
 		}
-		data, e := decodeHTTPInventory(ctx, body, h.limits.MaxDevices, &count)
+		data, e := decodeHTTPInventory(ctx, body, h.limits.MaxDevices, &f.count)
 		if e != nil {
 			return nil, e
 		}
@@ -239,21 +175,11 @@ func (h *HTTP) Devices(parent context.Context) ([]inventory.Device, error) {
 			if e := ctx.Err(); e != nil {
 				return nil, newInventoryError("inventory_timeout", e)
 			}
-			return rows, nil
+			return pages.rows, nil
 		}
-		advances := false
-		for _, row := range data {
-			if e := ctx.Err(); e != nil {
-				return nil, newInventoryError("inventory_timeout", e)
-			}
-			if !seen[row.IP] {
-				advances = true
-			}
-			seen[row.IP] = true
-			if !unique[row] {
-				unique[row] = true
-				rows = append(rows, row)
-			}
+		advances, e := pages.add(ctx, data)
+		if e != nil {
+			return nil, e
 		}
 		if !advances {
 			return nil, newInventoryError("pagination_stalled", nil)
@@ -261,6 +187,132 @@ func (h *HTTP) Devices(parent context.Context) ([]inventory.Device, error) {
 	}
 	return nil, newInventoryError("max_pages", nil)
 }
+
+// httpFetch is one bounded inventory download.
+type httpFetch struct {
+	source *HTTP
+	ctx    context.Context //nolint:containedctx // one fetch shares a single deadline across its requests
+	key    string
+	total  int64
+	count  int
+}
+
+// request sends one API request and reads its body within the per-response
+// and whole-inventory byte limits.
+func (f *httpFetch) request(endpoint, method string, query url.Values) ([]byte, int, error) {
+	h := f.source
+	u := *h.base
+	u.Path = strings.TrimRight(u.Path, "/") + "/" + endpoint
+	u.RawQuery = query.Encode()
+	req, e := http.NewRequestWithContext(f.ctx, method, u.String(), nil)
+	if e != nil {
+		return nil, 0, newInventoryError("request_failed", e)
+	}
+	req.Header.Set("Accept", "application/json")
+	if f.key != "" {
+		req.Header.Set("Authorization", "Apikey "+f.key)
+	} else {
+		req.SetBasicAuth(h.username, h.password)
+	}
+	resp, e := h.client.Do(req)
+	if e != nil {
+		return nil, 0, newInventoryError("connection_failed", e)
+	}
+	defer resp.Body.Close()
+	limit := min(h.limits.MaxResponseBytes, h.limits.MaxInventoryBytes-f.total)
+	b, e := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if e != nil {
+		return nil, resp.StatusCode, newInventoryError("connection_failed", e)
+	}
+	f.total += int64(len(b))
+	if f.total > h.limits.MaxInventoryBytes {
+		return nil, resp.StatusCode, newInventoryError("max_inventory_bytes", nil)
+	}
+	if int64(len(b)) > h.limits.MaxResponseBytes {
+		return nil, resp.StatusCode, newInventoryError("max_response_bytes", nil)
+	}
+	if e = f.ctx.Err(); e != nil {
+		return nil, 0, newInventoryError("inventory_timeout", e)
+	}
+	return b, resp.StatusCode, nil
+}
+
+// login exchanges the basic credentials for an API key.
+func (f *httpFetch) login() error {
+	b, status, e := f.request("login", http.MethodPost, nil)
+	if e != nil {
+		return e
+	}
+	if status < 200 || status >= 300 {
+		return newInventoryError("request_failed", nil)
+	}
+	var data struct {
+		APIKey string `json:"api_key"`
+	}
+	if e = json.Unmarshal(b, &data); e != nil || data.APIKey == "" || strings.ContainsAny(data.APIKey, "\r\n\x00") {
+		return newInventoryError("authentication_failed", nil)
+	}
+	f.key = data.APIKey
+	return nil
+}
+
+// fallback fetches the whole inventory with the wildcard query.
+func (f *httpFetch) fallback() ([]inventory.Device, error) {
+	body, status, e := f.request(httpInventoryEndpoint, http.MethodGet, url.Values{"q": {httpFallbackQuery}, "seeallcolumns": {"true"}})
+	if e != nil {
+		return nil, e
+	}
+	if status < 200 || status >= 300 {
+		return nil, newInventoryError("request_failed", nil)
+	}
+	data, e := decodeHTTPInventory(f.ctx, body, f.source.limits.MaxDevices, &f.count)
+	if e != nil {
+		return nil, e
+	}
+	return dedupContext(f.ctx, data)
+}
+
+// missingQuery reports whether a 400 body is the server's "Missing query"
+// error, which means paging without a query is unsupported.
+func missingQuery(body []byte) bool {
+	var message struct {
+		Error string `json:"error"`
+	}
+	return json.Unmarshal(body, &message) == nil && message.Error == "Missing query"
+}
+
+// pageSet accumulates unique rows across pages and detects pages that add
+// no new address.
+type pageSet struct {
+	seen   map[string]bool
+	unique map[inventory.Device]bool
+	rows   []inventory.Device
+}
+
+// newPageSet returns an empty set.
+func newPageSet() *pageSet {
+	return &pageSet{seen: map[string]bool{}, unique: map[inventory.Device]bool{}, rows: make([]inventory.Device, 0)}
+}
+
+// add appends the rows not yet seen and reports whether data contained an
+// address not seen on earlier pages.
+func (s *pageSet) add(ctx context.Context, data []inventory.Device) (advances bool, err error) {
+	for _, row := range data {
+		if e := ctx.Err(); e != nil {
+			return false, newInventoryError("inventory_timeout", e)
+		}
+		if !s.seen[row.IP] {
+			advances = true
+		}
+		s.seen[row.IP] = true
+		if !s.unique[row] {
+			s.unique[row] = true
+			s.rows = append(s.rows, row)
+		}
+	}
+	return advances, nil
+}
+
 func dedupContext(ctx context.Context, rows []inventory.Device) ([]inventory.Device, error) {
 	seen := make(map[inventory.Device]bool)
 	out := make([]inventory.Device, 0, len(rows))
