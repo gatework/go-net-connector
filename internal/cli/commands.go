@@ -80,14 +80,34 @@ func (r Runtime) commandTree(ctx context.Context, outputErr *error) *cobra.Comma
 		return renderChineseHelp(target, c.OutOrStdout())
 	}}
 	root.SetHelpCommand(help)
-	leaf := func(parent *cobra.Command, name, short, mode, action string, bind func(*cobra.Command, *options)) *cobra.Command {
+	leaf := r.leafFactory(&configFile, &envFile)
+	addBackupCommands(root, leaf)
+	addInventoryCommands(root, leaf)
+	addTopologyCommands(root, leaf)
+	addDeployCommands(root, leaf)
+	addExecCommands(root, leaf)
+	addConfigCommands(root, leaf)
+	addCompletionCommands(root)
+	root.AddCommand(&cobra.Command{Use: "version", Short: "显示版本与源码修订号", Long: "显示构建身份，不读取配置或凭据。", Example: "  netman version", Args: noArguments, RunE: func(c *cobra.Command, _ []string) error {
+		_, err := fmt.Fprintln(c.OutOrStdout(), "netman", buildinfo.Identity)
+		return err
+	}})
+	customizeTree(root)
+	return root
+}
+
+// leafFactory returns the constructor of runnable commands. Each leaf owns
+// its options, prepares them from its flags and the global --config and
+// --env-file before running, and executes the selected request.
+func (r Runtime) leafFactory(configFile, envFile *string) func(parent *cobra.Command, name, short, mode, action string, bind func(*cobra.Command, *options)) *cobra.Command {
+	return func(parent *cobra.Command, name, short, mode, action string, bind func(*cobra.Command, *options)) *cobra.Command {
 		o := options{mode: mode, action: action, policy: "selected", layout: "batch", public: map[string]string{}, secrets: map[string]string{}}
 		var request commandRequest
 		c := &cobra.Command{Use: name, Short: short, Long: short, Args: noArguments, Example: "  netman " + parent.Name() + " " + strings.Fields(name)[0] + " --help"}
 		bind(c, &o)
 		c.PreRunE = func(c *cobra.Command, args []string) error {
-			o.config = configFile
-			o.envFile = envFile
+			o.config = *configFile
+			o.envFile = *envFile
 			o.flags = c.Flags()
 			if action == "export" || action == "diff" {
 				o.export = args[0]
@@ -108,42 +128,36 @@ func (r Runtime) commandTree(ctx context.Context, outputErr *error) *cobra.Comma
 		parent.AddCommand(c)
 		return c
 	}
-	addBackupCommands(root, leaf)
-	addInventoryCommands(root, leaf)
-	addTopologyCommands(root, leaf)
-	addDeployCommands(root, leaf)
-	addExecCommands(root, leaf)
-	addConfigCommands(root, leaf)
-	addCompletionCommands(root)
-	root.AddCommand(&cobra.Command{Use: "version", Short: "显示版本与源码修订号", Long: "显示构建身份，不读取配置或凭据。", Example: "  netman version", Args: noArguments, RunE: func(c *cobra.Command, _ []string) error {
-		_, err := fmt.Fprintln(c.OutOrStdout(), "netman", buildinfo.Identity)
-		return err
-	}})
-	var customize func(*cobra.Command)
-	customize = func(c *cobra.Command) {
-		c.InitDefaultHelpFlag()
-		if f := c.Flags().Lookup("help"); f != nil {
-			f.Usage = "显示当前命令的中文帮助"
-		}
-		for name, values := range flagCompletions() {
-			if c.Flags().Lookup(name) != nil {
-				_ = c.RegisterFlagCompletionFunc(name, func(_ *cobra.Command, _ []string, prefix string) ([]string, cobra.ShellCompDirective) {
-					var matches []string
-					for _, value := range values {
-						if strings.HasPrefix(value, prefix) {
-							matches = append(matches, value)
-						}
-					}
-					return matches, cobra.ShellCompDirectiveNoFileComp
-				})
-			}
-		}
-		for _, child := range c.Commands() {
-			customize(child)
+}
+
+// customizeTree localizes the help flag and registers value completions on
+// c and every descendant.
+func customizeTree(c *cobra.Command) {
+	c.InitDefaultHelpFlag()
+	if f := c.Flags().Lookup("help"); f != nil {
+		f.Usage = "显示当前命令的中文帮助"
+	}
+	for name, values := range flagCompletions() {
+		if c.Flags().Lookup(name) != nil {
+			_ = c.RegisterFlagCompletionFunc(name, completeFrom(values))
 		}
 	}
-	customize(root)
-	return root
+	for _, child := range c.Commands() {
+		customizeTree(child)
+	}
+}
+
+// completeFrom completes a flag value from a fixed list.
+func completeFrom(values []string) cobra.CompletionFunc {
+	return func(_ *cobra.Command, _ []string, prefix string) ([]string, cobra.ShellCompDirective) {
+		var matches []string
+		for _, value := range values {
+			if strings.HasPrefix(value, prefix) {
+				matches = append(matches, value)
+			}
+		}
+		return matches, cobra.ShellCompDirectiveNoFileComp
+	}
 }
 func noArguments(_ *cobra.Command, args []string) error {
 	if len(args) > 0 {
