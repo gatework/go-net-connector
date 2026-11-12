@@ -10,11 +10,16 @@ import (
 	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
+// PolicyOptions configures the TFTP servers, verification roots and per-
+// vendor source settings.
 type PolicyOptions struct {
 	Server, Root                        string
 	Servers, Roots                      map[string]string
 	SourceFiles, SourceInterfaces, VRFs map[string]any
 }
+
+// Target is the resolved TFTP options for one device and the verification
+// root of its server.
 type Target struct {
 	TFTPOptions
 	Root string
@@ -23,6 +28,8 @@ type vendorValue struct {
 	fallback string
 	hosts    map[string]string
 }
+
+// Policy resolves per-device TFTP targets.
 type Policy struct {
 	server                  string
 	servers, roots          map[string]string
@@ -116,6 +123,7 @@ func NewPolicy(o PolicyOptions, registry dialect.Registry) (*Policy, error) {
 	return p, nil
 }
 
+// For resolves the target for host on vendor's platform.
 func (p *Policy) For(host, vendor string) (Target, error) {
 	h, e := exactAddress(host)
 	if e != nil {

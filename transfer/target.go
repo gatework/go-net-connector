@@ -10,6 +10,7 @@ import (
 	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
+// TFTPOptions configures one device upload.
 type TFTPOptions = dialect.TFTPOptions
 
 var filenameLabel = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
@@ -18,12 +19,15 @@ var pathPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$`)
 var sourcePattern = regexp.MustCompile(`^[A-Za-z0-9._:/-]+$`)
 var vrfPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*$`)
 
+// ValidateServer accepts a TFTP server address or host name.
 func ValidateServer(host string) error {
 	if len(host) > 253 || !serverPattern.MatchString(host) || strings.Contains(host, "..") {
 		return ErrInvalid
 	}
 	return nil
 }
+
+// ValidatePath accepts a relative remote path of safe segments.
 func ValidatePath(path string) error {
 	if len(path) > 220 || !pathPattern.MatchString(path) {
 		return ErrInvalid
@@ -35,6 +39,8 @@ func ValidatePath(path string) error {
 	}
 	return nil
 }
+
+// ValidateSource accepts a device file path of safe characters.
 func ValidateSource(source string) error {
 	if !sourcePattern.MatchString(source) {
 		return ErrInvalid
@@ -44,6 +50,8 @@ func ValidateSource(source string) error {
 	}
 	return nil
 }
+
+// Validate checks o for vendor's TFTP platform and device host.
 func Validate(registry dialect.Registry, vendor, deviceHost string, o TFTPOptions) error {
 	if o.Timeout < 0 {
 		return ErrInvalid
@@ -73,6 +81,8 @@ func Validate(registry dialect.Registry, vendor, deviceHost string, o TFTPOption
 	}
 	return nil
 }
+
+// Filename returns the platform's remote file name for host and label.
 func Filename(registry dialect.Registry, vendor, host, label string) (string, error) {
 	if registry == nil {
 		return "", ErrUnsupported
@@ -91,6 +101,9 @@ func Filename(registry dialect.Registry, vendor, host, label string) (string, er
 	}
 	return name, nil
 }
+
+// InventoryFilename returns the remote file name for host labeled by its
+// inventory name, or by vendor when the name is unusable.
 func InventoryFilename(registry dialect.Registry, vendor, host, name string) (string, error) {
 	label := filenameLabel.ReplaceAllString(name, "-")
 	if len(label) > 180 {

@@ -20,6 +20,7 @@ type Client struct {
 	profile           connector.Terminal
 }
 
+// New returns a topology client for device's platform.
 func New(device *connector.Device, registry dialect.Registry) (*Client, error) {
 	if device == nil || registry == nil {
 		return nil, ErrInvalid
@@ -47,6 +48,8 @@ func New(device *connector.Device, registry dialect.Registry) (*Client, error) {
 	}, nil
 }
 
+// Discover collects the neighbors and interface descriptions in one
+// operation.
 func (client *Client) Discover(ctx context.Context) (snapshot Snapshot, err error) {
 	if err = client.supportsNeighbors(); err != nil {
 		return
@@ -61,6 +64,9 @@ func (client *Client) Discover(ctx context.Context) (snapshot Snapshot, err erro
 	})
 	return
 }
+
+// Audit discovers the device and compares its descriptions with those its
+// neighbors imply.
 func (client *Client) Audit(ctx context.Context, opts FormatOptions) (audit Audit, err error) {
 	if err = client.supportsNeighbors(); err != nil {
 		return

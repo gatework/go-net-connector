@@ -21,6 +21,7 @@ func (o RemoteOptions) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct{ Server, Path, Username, Protocol string }{o.Server, o.Path, o.Username, o.Protocol})
 }
 
+// ValidateRemote checks remote backup options.
 func ValidateRemote(o RemoteOptions) error {
 	if o.Protocol != "" && o.Protocol != "ftp" && o.Protocol != "scp" || ValidateServer(o.Server) != nil || ValidatePath(o.Path) != nil || !vrfPattern.MatchString(o.Username) || strings.ContainsAny(o.Password, "\r\n\x00") {
 		return ErrInvalid
@@ -85,7 +86,9 @@ func remoteRejected(command connector.Command, prompt, output string) bool {
 	return matchesEvidencePattern(command, prompt, output, pattern)
 }
 
-func (o RemoteOptions) String() string   { b, _ := o.MarshalJSON(); return "RemoteOptions" + string(b) }
+func (o RemoteOptions) String() string { b, _ := o.MarshalJSON(); return "RemoteOptions" + string(b) }
+
+// GoString returns the same password-free text as String.
 func (o RemoteOptions) GoString() string { return o.String() }
 func (o RemoteOptions) dialectOptions() dialect.RemoteBackupOptions {
 	return dialect.RemoteBackupOptions{Server: o.Server, Path: o.Path, Username: o.Username, Protocol: o.Protocol}

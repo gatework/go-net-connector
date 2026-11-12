@@ -11,25 +11,38 @@ import (
 	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
+// ErrInvalid reports invalid transfer options.
 var ErrInvalid = errors.New("transfer: invalid options")
+
+// ErrUnsupported reports a platform without the requested transfer.
 var ErrUnsupported = errors.New("transfer: unsupported operation")
+
+// ErrUnconfirmed reports a transfer the device did not confirm.
 var ErrUnconfirmed = errors.New("transfer: completion unconfirmed")
+
+// ErrSourceFileRequired reports a platform that needs an explicit source
+// file.
 var ErrSourceFileRequired = errors.New("transfer: source file required")
 
+// DefaultUploadTimeout bounds an upload when none is configured.
 const DefaultUploadTimeout = 180 * time.Second
 
+// Error carries a failure code, its phase and its cause.
 type Error struct {
 	Code, Phase string
 	cause       error
 }
 
-func (e *Error) Error() string    { return "transfer: " + e.Code + " (" + e.Phase + ")" }
-func (e *Error) Unwrap() error    { return e.cause }
+func (e *Error) Error() string { return "transfer: " + e.Code + " (" + e.Phase + ")" }
+func (e *Error) Unwrap() error { return e.cause }
+
+// GoString returns the same safe text as Error.
 func (e *Error) GoString() string { return e.Error() }
 func newError(code string, cause error) error {
 	return &Error{Code: code, Phase: "tftp_backup", cause: cause}
 }
 
+// Result is a transfer receipt with the command steps that produced it.
 type Result struct {
 	Receipt Receipt
 	Steps   []connector.StepResult
@@ -38,6 +51,8 @@ type Result struct {
 func (r Result) String() string {
 	return fmt.Sprintf("transfer.Result{steps:%d,reported:%t}", len(r.Steps), r.Receipt.Reported())
 }
+
+// GoString returns the same text as String.
 func (r Result) GoString() string { return r.String() }
 
 // TFTP runs the common transfer workflow through the resolved platform's

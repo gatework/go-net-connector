@@ -267,6 +267,9 @@ func stagesFor(profile connector.Terminal, identity InterfaceIdentity, writer De
 	}
 	return s, nil
 }
+
+// ValidatePlan checks that p was planned for host and vendor and that its
+// commands are exactly those the platform would generate for its changes.
 func ValidatePlan(registry dialect.Registry, p Plan, host, vendor string) error {
 	if registry == nil {
 		return ErrInvalid

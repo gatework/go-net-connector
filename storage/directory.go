@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+// PrepareDirectory creates path and its missing parents with mode 0700 and
+// syncs each new entry's parent. An existing non-directory is unsafe.
 func PrepareDirectory(path string) error {
 	path, e := filepath.Abs(path)
 	if e != nil {
@@ -40,6 +42,8 @@ func PrepareDirectory(path string) error {
 	}
 	return nil
 }
+
+// SyncDirectory flushes the directory at path so its entries are durable.
 func SyncDirectory(path string) error {
 	resolved, e := filepath.EvalSymlinks(path)
 	if e != nil {
@@ -56,6 +60,9 @@ func SyncDirectory(path string) error {
 	}
 	return e
 }
+
+// CreateBatchDirectory creates a new private directory under root named after
+// stamp in UTC+8, adding a numeric suffix when the name is taken.
 func CreateBatchDirectory(root string, stamp time.Time) (string, error) {
 	if e := PrepareDirectory(root); e != nil {
 		return "", e
