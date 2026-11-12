@@ -1,0 +1,50 @@
+# go-net-connector import boundaries (STANDARD.md ARC-1), enforced by
+# archcheck in `make check`. Rules apply to production imports, transitively.
+declared:
+  - ./archive
+  - ./config
+  - ./connector
+  - ./fleet
+  - ./inventory
+  - ./netdisco
+  - ./parallel
+  - ./storage
+  - ./textfsm
+  - ./topology
+  - ./transfer
+  - ./vendors/...
+  - ./internal/batchreport
+  - ./internal/buildinfo
+  - ./internal/display
+  - ./internal/ifname
+  - ./internal/progress
+  - ./internal/terminal
+  - ./internal/textcodec
+  - ./internal/textdiff
+  - ./internal/workflow
+  - ./internal/bootstrap
+  - ./internal/cli
+  - ./cmd/netman
+  - ./cmd/tftp-archive
+
+rules:
+  - name: libraries never depend on application orchestration
+    packages: [./archive/..., ./config/..., ./connector/..., ./fleet/..., ./inventory/..., ./netdisco/...,
+               ./parallel/..., ./storage/..., ./textfsm/..., ./topology/..., ./transfer/..., ./vendors/...]
+    deny: [./cmd/..., ./internal/bootstrap/..., ./internal/cli/..., ./internal/workflow/...]
+    transitive: true
+
+  - name: generic device execution never selects vendor implementations
+    packages: [./connector/...]
+    deny: [./vendors/...]
+    transitive: true
+
+  - name: bootstrap never depends on the CLI
+    packages: [./internal/bootstrap/...]
+    deny: [./cmd/..., ./internal/cli/...]
+    transitive: true
+
+  - name: workflows report events without owning CLI composition or progress reporters
+    packages: [./internal/workflow/...]
+    deny: [./cmd/..., ./internal/bootstrap/..., ./internal/cli/..., ./internal/progress/...]
+    transitive: true

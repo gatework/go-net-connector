@@ -1,6 +1,6 @@
 # Go net-connector
 
-Use the golang-how-to skill for Go implementation, review and debugging.
+Follow [the gatework Go engineering standard](../go-standards/STANDARD.md) (go-standards/STANDARD.md); this file adds only what is specific to go-net-connector. Run `make check` before every commit; package boundaries live in `architecture.yaml`.
 
 - Preserve reference workspaces and concurrent edits. No commits, publication or deployment without explicit authorization.
 - A platform is a connector.Driver: Terminal declares CLI grammar, driver methods carry vendor behavior; consumer-owned interfaces declare optional vendor capabilities. Device owns its operation lease and session; transport owns processes; go-expect owns stream matching and I/O.

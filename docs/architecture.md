@@ -37,7 +37,7 @@ Driver 提供终端语法（Terminal）与需要代码的厂商行为（配置�
 
 文件输入边界统一为 `config.ReadFile(ctx, path, missingOK)`：跟随可读符号链接，只接纳 16 MiB 以内普通文件，使用非阻塞打开拒绝 FIFO，分块同步读取并在边界检查取消。失败不交付部分正文，文件错误不包含路径或内容；取消原因可由 `errors.Is` 判断。`ParseYAML` 与要求显式根映射的 `ParseYAMLMapping` 共用严格解析与资源预算。各应用继续拥有 schema、文件发现和覆盖策略。Connector 的 `LoadContext` 在发现、各层解码与最终返回前传播调用方 context；旧 `Load` 只作兼容。上下文检查不承诺中断阻塞的文件系统调用。
 
-`scripts/check-architecture.py` 从 `GOWORK=off go list -json ./...` 的实际生产包和传递依赖检查边界：公开库不依赖 cmd、bootstrap、CLI 或 workflow；通用 connector 不选择 vendors；bootstrap 不依赖 CLI；workflow 不反向依赖 bootstrap、CLI 或进度 Reporter。规则按完整包路径及其子包匹配，允许既有纯呈现、存储和厂商能力依赖，测试专用导入不计入生产边界。CI 同时运行临时 Go 模块负例，验证嵌套包、间接导入和解析失败不能绕过规则。
+`architecture.yaml` 声明全部生产包与依赖边界，由 go-standards 的 archcheck 在 `make check` 中依据 `go list -json ./...` 的生产包及其传递依赖检查：公开库不依赖 cmd、bootstrap、CLI 或 workflow；通用 connector 不选择 vendors；bootstrap 不依赖 CLI；workflow 不反向依赖 bootstrap、CLI 或进度 Reporter。规则按完整包路径及其子包匹配，测试专用导入不计入生产边界；新增包必须先在 `declared` 中登记（STANDARD.md ARC-1）。
 
 ## 厂商方言与能力
 

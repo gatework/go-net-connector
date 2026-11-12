@@ -12,7 +12,7 @@
 - `vendors`：静态内建平台目录。每个 family 包提供平台对象（终端规则与可选能力）；能力接口由消费包定义，Registry 只做身份识别与键查找，不做运行时插件。
 - `fleet`：清单到批次计划、统一执行与报告。
 - `topology`、`transfer`、`archive`：各自业务能力；不包含厂商命令分支。
-- `internal/*`：组合根（bootstrap）、CLI、展示和进度。业务包不得依赖 CLI 或组合根（`scripts/check-architecture.py` 校验）。
+- `internal/*`：组合根（bootstrap）、CLI、展示和进度。业务包不得依赖 CLI 或组合根（`architecture.yaml`，由 `make check` 校验）。
 - 新 API 使用 `context`、有界资源所有权和显式依赖注入；不使用全局服务定位器。
 
 ## 设备操作规则

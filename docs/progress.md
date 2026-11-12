@@ -34,3 +34,11 @@
 验证：`GOWORK=off go test -race -skip TestInteractiveDeclinedOptionalEnvContinues ./...` PASS；`go vet ./...` PASS；golangci-lint v2.15.0 0 issues；`check-architecture.py`/`test_architecture.py` PASS；`go mod tidy -diff` 无差异；`deadcode ./cmd/...` 仅剩脱敏方法与供下游复用的公开 API。模拟传输覆盖：阶段拦截、认证阶段失败、三种策略、取消、归档上传→报告→移动后导出、deploy 拒绝后不再发送、保存未确认为 partial、exec 写命令零连接、Juniper 导出命令字节与回执解析、diff 退出码、重试边界与跳板机参数。未在真实设备、真实跳板机或远端 SCP/FTP 服务器上验证。
 
 发布准备：版本定为 v0.7.0；更新 `scripts/verify-consumer.py` 至新 API（平台即 Driver、`StaticDriver`、`Pool.Prepare(ctx, nil)`）并覆盖新命令帮助，本地 PASS；三个 fuzz 目标各 20000 次 PASS。
+
+## 2026-11-12 采纳 go-standards v1.0.2
+
+- 门禁：`make check`（`standard.mk`）取代 `scripts/ci`；仓库附加 `modverify modules integration fuzz consumer`。`architecture.yaml` 取代 `check-architecture.py`/`test_architecture.py`，规则不变（库不依赖编排、connector 不选择 vendors、bootstrap 不依赖 CLI、workflow 不依赖 bootstrap/CLI/progress，均按传递依赖）。
+- 复杂度：拆分全部 funlen/gocognit 超标函数（归档 worker 建模为 `worker`/`stageClock`，客户端上传为 `uploadTransaction`，`fleet.NewPlan` 为 `planBuilder`，`Runner.Execute` 为 `batch`，TFTP 为 `tftpRun`，netdisco HTTP 为 `httpFetch`/`pageSet` 等）；所有导出标识均有文档注释。
+- 行为对照：重构前后差分测试一致——`ParseEnvironment` 40 万份文档、`fleet.NewPlan` 2 万个随机计划、`inventory` 6 万个地址集与 15.7 万次筛选、`DecodeQuoted` 30 万个输入。
+
+验证：`make check STANDARDS_DIR=../go-standards` PASS（golangci-lint 0 issues，govulncheck 无漏洞，archcheck 38 个包，PostgreSQL 集成启用，三个 fuzz 目标各 100000 次，consumer PASS）。`TestSSHMasterExitReapsDescendant` 在一次全量并行运行中超出其 5 秒预算（假 ssh 脚本在高负载下变慢），单独 20 次与随后 3 次全量运行均通过。未在真实设备上验证。

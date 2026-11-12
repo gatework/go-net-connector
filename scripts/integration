@@ -1,19 +1,10 @@
 #!/usr/bin/env bash
+# Repository-specific checks appended to `make check` (STANDARD.md MOD-5):
+# built binaries, the installed archive worker and a real PostgreSQL server
+# when one is available.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export GOWORK=off GOFLAGS=-mod=readonly GOTOOLCHAIN=local
-format_files=$(go run golang.org/x/tools/cmd/goimports@v0.52.0 -l .)
-if [[ -n "$format_files" ]]; then
-  printf 'Go files require import/format normalization:\n%s\n' "$format_files"
-  exit 1
-fi
-python3 scripts/release.py check-modules
-python3 scripts/check-architecture.py
-python3 scripts/test_architecture.py
-go version
-go mod verify
-go mod tidy -diff
-git diff --exit-code -- go.mod go.sum
 ci_tmp=$(mktemp -d)
 trap 'rm -rf "$ci_tmp"' EXIT
 go build -o "$ci_tmp/bin/" ./cmd/...
@@ -40,11 +31,4 @@ fi
 for ci_binary in netman tftp-archive; do
   "$ci_tmp/bin/$ci_binary" --version
 done
-go test -race -shuffle=on -count=1 -v ./...
-go vet ./...
-
-# Fixed execution counts avoid fuzz coordinator deadline races.
-go test -run '^$' -fuzz '^FuzzYAMLBoundary$' -fuzztime=100000x -parallel=2 ./config
-go test -run '^$' -fuzz '^FuzzTargetValidation$' -fuzztime=100000x -parallel=2 ./transfer
-go test -run '^$' -fuzz '^FuzzRenderString$' -fuzztime=100000x -parallel=2 ./internal/terminal
-python3 scripts/verify-consumer.py
+go test -race -shuffle=on -count=1 ./archive ./netdisco

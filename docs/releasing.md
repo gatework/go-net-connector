@@ -15,7 +15,7 @@ All release checks and builds use `GOWORK=off`, read-only module resolution and 
 Set the committed `VERSION` to a non-placeholder `vMAJOR.MINOR.PATCH`. From a checkout of the intended SHA:
 
 ```sh
-bash scripts/ci
+make check
 python3 scripts/test_release.py -v
 python3 scripts/release.py package --sha "$(git rev-parse HEAD)"
 python3 scripts/release.py verify --sha "$(git rev-parse HEAD)" --version "$(cat VERSION)"
