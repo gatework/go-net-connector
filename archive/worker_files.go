@@ -106,7 +106,7 @@ type fingerprint struct {
 
 func statFD(fd int) (unix.Stat_t, error) { var s unix.Stat_t; e := unix.Fstat(fd, &s); return s, e }
 func fingerprintOf(s unix.Stat_t) fingerprint {
-	return fingerprint{uint64(s.Dev), s.Ino, s.Size, mtime(s), ctime(s)}
+	return fingerprint{device(s), s.Ino, s.Size, mtime(s), ctime(s)}
 }
 func readFile(ctx context.Context, parent int, name string, missingOK bool, consume func([]byte) error) (string, *fingerprint, error) {
 	fd, e := unix.Openat(parent, name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)

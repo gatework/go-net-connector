@@ -134,8 +134,18 @@ func TestActualPTYKeepsProgressPanelStableWhenEnterIsEchoed(t *testing.T) {
 				p.tick()
 				time.Sleep(20 * time.Millisecond)
 			}
-			time.Sleep(30 * time.Millisecond)
+			// The reader drains the PTY asynchronously; wait for the panel
+			// to settle instead of assuming a fixed delay suffices.
 			rawOutput := output.String()
+			for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+				screen := vt.NewEmulator(80, 24)
+				screen.Write([]byte(rawOutput))
+				if strings.Contains(screen.String(), tc.visible) {
+					break
+				}
+				time.Sleep(20 * time.Millisecond)
+				rawOutput = output.String()
+			}
 			if count := strings.Count(rawOutput, "-- 当前进度"); count != 1 {
 				t.Fatalf("progress title was emitted %d times during one live panel", count)
 			}
