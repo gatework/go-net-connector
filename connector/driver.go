@@ -45,8 +45,11 @@ type StaticDriver struct {
 	AfterLogin   func(context.Context, StepResult) (LoginState, error)
 }
 
+// Terminal returns the declared grammar.
 func (s StaticDriver) Terminal() Terminal { return s.Grammar }
 
+// NewConfigCollector returns a new collection strategy, or nil for the
+// default rendered-output strategy.
 func (s StaticDriver) NewConfigCollector() ConfigStrategy {
 	if s.Collector == nil {
 		return nil
@@ -54,6 +57,8 @@ func (s StaticDriver) NewConfigCollector() ConfigStrategy {
 	return s.Collector()
 }
 
+// ValidateSave confirms a save result with Save; without Save no save can be
+// confirmed.
 func (s StaticDriver) ValidateSave(ctx context.Context, result Result) error {
 	if s.Save == nil {
 		return ErrUnconfirmed

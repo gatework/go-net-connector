@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// Request is one control request from client to worker.
 type Request struct {
 	Version     int            `json:"version"`
 	Timeouts    *TimeoutBudget `json:"timeouts,omitempty"`

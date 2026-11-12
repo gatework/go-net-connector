@@ -24,6 +24,7 @@ type PoolOptions struct {
 // PrepareStage identifies the safe phase of archive service preparation.
 type PrepareStage string
 
+// Preparation stages, in order.
 const (
 	PrepareStageSSH      PrepareStage = "ssh"
 	PrepareStageProtocol PrepareStage = "protocol"
@@ -37,6 +38,8 @@ type PrepareProgress struct {
 	Stage                    PrepareStage
 }
 
+// Pool shares a bounded set of archive clients, one SSH ControlMaster each
+// for a remote root, across parallel transfers.
 type Pool struct {
 	timeouts                             Timeouts
 	clients                              []*Client
@@ -53,6 +56,8 @@ type Pool struct {
 	active                               sync.WaitGroup
 }
 
+// NewPool validates o and builds Parallel clients; nothing connects until
+// Prepare.
 func NewPool(o PoolOptions) (*Pool, error) {
 	timeouts, err := o.Timeouts.normalize()
 	if err != nil {
@@ -155,6 +160,8 @@ func (p *Pool) Upload(ctx context.Context, filename, archiveName string, upload 
 	}
 }
 
+// Close stops new transactions, waits for active ones and closes every client
+// and SSH master. A failed cleanup can be retried.
 func (p *Pool) Close() error {
 	p.mu.Lock()
 	if p.closed && p.cleaned && p.closeErr != nil {
@@ -412,7 +419,9 @@ func (o PoolOptions) MarshalJSON() ([]byte, error) {
 		Parallel                    int
 	}{safeOptionURL(o.Root), o.Directory, o.WorkerPath, o.Parallel})
 }
-func (o PoolOptions) String() string   { b, _ := o.MarshalJSON(); return "PoolOptions" + string(b) }
+func (o PoolOptions) String() string { b, _ := o.MarshalJSON(); return "PoolOptions" + string(b) }
+
+// GoString returns the same credential-free text as String.
 func (o PoolOptions) GoString() string { return o.String() }
 
 func safeOptionURL(raw string) string {

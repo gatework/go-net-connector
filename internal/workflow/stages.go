@@ -25,8 +25,10 @@ import (
 // platform's positive save confirmation; a prompt alone is unconfirmed.
 type SaveStage struct{}
 
+// Name returns "save".
 func (SaveStage) Name() string { return "save" }
 
+// Admit skips platforms that declare no save commands.
 func (SaveStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	if len(platform.Terminal().SaveCommands) == 0 {
 		return "save_unsupported"
@@ -34,6 +36,8 @@ func (SaveStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	return ""
 }
 
+// Run saves the running configuration and requires the platform's
+// confirmation.
 func (SaveStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	device, err := s.Device(ctx)
 	if err != nil {
@@ -47,8 +51,10 @@ func (SaveStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 // BackupStage collects the running configuration into "<name>-<IP>.txt".
 type BackupStage struct{ Directory string }
 
+// Name returns "backup".
 func (BackupStage) Name() string { return "backup" }
 
+// Admit skips platforms that declare no configuration commands.
 func (BackupStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	if len(platform.Terminal().ConfigCommands) == 0 {
 		return "unsupported_operation"
@@ -56,10 +62,13 @@ func (BackupStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	return ""
 }
 
+// Plan records the backup file name in target.
 func (b BackupStage) Plan(task fleet.Task, _ dialect.Platform, target *batchreport.Target) {
 	target.File, _ = task.Device.BackupFilename("hostname_ip")
 }
 
+// Run collects the configuration and writes the backup, recording its receipt
+// in e.
 func (b BackupStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	name, err := s.Record.BackupFilename("hostname_ip")
 	if err != nil {
@@ -96,8 +105,10 @@ type TFTPStage struct {
 	Pools    map[string]*archive.Pool
 }
 
+// Name returns "tftp".
 func (TFTPStage) Name() string { return "tftp" }
 
+// Admit skips platforms without a TFTP policy.
 func (TFTPStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	if _, ok := platform.(transfer.TFTPPolicy); !ok {
 		return "unsupported_operation"
@@ -105,12 +116,15 @@ func (TFTPStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	return ""
 }
 
+// Plan records the TFTP server, file and source settings in target.
 func (TFTPStage) Plan(task fleet.Task, _ dialect.Platform, target *batchreport.Target) {
 	t := task.Target
 	target.File, target.Server, target.VerificationRoot = t.Path, t.Server, t.Root
 	target.SourceFile, target.SourceInterface, target.VRF = t.SourceFile, t.SourceInterface, t.VRF
 }
 
+// Run makes the device upload its configuration, inside an archive
+// transaction when a verification root is set.
 func (t TFTPStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	target := s.Target
 	upload := func(ctx context.Context, name string) (transfer.Receipt, error) {
@@ -162,8 +176,10 @@ func (t TFTPStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 // lease. The first rejected command stops the script; nothing is retried.
 type ExecuteStage struct{ Scripts DeployScripts }
 
+// Name returns "execute".
 func (ExecuteStage) Name() string { return "execute" }
 
+// Admit skips devices whose platform has no script.
 func (x ExecuteStage) Admit(record fleet.Record, _ dialect.Platform) string {
 	if script, ok := x.Scripts.For(record.Vendor); !ok || len(script.Commands) == 0 {
 		return "missing_script"
@@ -171,11 +187,14 @@ func (x ExecuteStage) Admit(record fleet.Record, _ dialect.Platform) string {
 	return ""
 }
 
+// Plan records the script name and command count in target.
 func (x ExecuteStage) Plan(task fleet.Task, _ dialect.Platform, target *batchreport.Target) {
 	script, _ := x.Scripts.For(task.Device.Vendor)
 	target.Script, target.Commands = script.Name, len(script.Commands)
 }
 
+// Run sends the platform's script in one operation, stopping at the first
+// rejected command.
 func (x ExecuteStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	script, _ := x.Scripts.For(s.Record.Vendor)
 	device, err := s.Device(ctx)
@@ -279,6 +298,7 @@ type ExecStage struct {
 	Directory string
 }
 
+// Name returns "exec".
 func (ExecStage) Name() string { return "exec" }
 
 // Admit refuses a platform unless every command is read-only for it, so no
@@ -296,11 +316,13 @@ func (x ExecStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	return ""
 }
 
+// Plan records the output file name and command count in target.
 func (x ExecStage) Plan(task fleet.Task, _ dialect.Platform, target *batchreport.Target) {
 	target.File, _ = task.Device.BackupFilename("hostname_ip")
 	target.Commands = len(x.Commands)
 }
 
+// Run runs the read-only commands and saves their output bodies.
 func (x ExecStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	name, err := s.Record.BackupFilename("hostname_ip")
 	if err != nil {
@@ -354,8 +376,10 @@ type RemoteStage struct {
 	Stamp   string
 }
 
+// Name returns "remote".
 func (RemoteStage) Name() string { return "remote" }
 
+// Admit skips platforms without a remote backup policy.
 func (RemoteStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	if _, ok := platform.(transfer.RemoteBackupPolicy); !ok {
 		return "unsupported_operation"
@@ -363,10 +387,12 @@ func (RemoteStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	return ""
 }
 
+// Plan records the remote server and path in target.
 func (x RemoteStage) Plan(task fleet.Task, _ dialect.Platform, target *batchreport.Target) {
 	target.Server, target.File = x.Options.Server, x.path(task.Device.Host)
 }
 
+// Run makes the device export its configuration to the remote server.
 func (x RemoteStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	device, err := s.Device(ctx)
 	if err != nil {

@@ -12,9 +12,13 @@ import (
 	expect "github.com/gatework/go-expect"
 )
 
+// ExecuteCommand runs one command as a single-command script.
 func (d *Device) ExecuteCommand(ctx context.Context, c Command, opts ExecuteOptions) (Result, error) {
 	return d.ExecuteScript(ctx, Script{Commands: []Command{c}}, opts)
 }
+
+// ExecuteScript runs script's commands in order in one exclusive session
+// operation, stopping at the first failure.
 func (d *Device) ExecuteScript(ctx context.Context, script Script, opts ExecuteOptions) (Result, error) {
 	s, e := script.clone()
 	if e != nil {

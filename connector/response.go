@@ -24,24 +24,31 @@ type responseData struct {
 	verifiedText                                       bool // strict conversion, not a backup preservation view
 }
 
+// Raw returns the bytes received for the command.
 func (r Response) Raw() string {
 	if r.data == nil {
 		return ""
 	}
 	return r.data.raw
 }
+
+// RawPrompt returns the prompt bytes as received.
 func (r Response) RawPrompt() string {
 	if r.data == nil {
 		return ""
 	}
 	return r.data.rawPrompt
 }
+
+// Encoding returns the text encoding the response was decoded with.
 func (r Response) Encoding() string {
 	if r.data == nil {
 		return ""
 	}
 	return r.data.encoding
 }
+
+// Output returns the verified command output without the prompt.
 func (r Response) Output() (string, error) {
 	if r.data == nil {
 		return "", ErrIncomplete
@@ -51,20 +58,28 @@ func (r Response) Output() (string, error) {
 	}
 	return r.data.output, nil
 }
+
+// Rendered returns the output after applying terminal edits.
 func (r Response) Rendered() (string, error) {
 	if r.data == nil {
 		return "", ErrIncomplete
 	}
 	return r.data.rendered, r.data.renderErr
 }
+
+// Prompt returns the verified, rendered prompt.
 func (r Response) Prompt() (string, error) {
 	if r.data == nil {
 		return "", ErrIncomplete
 	}
 	return r.data.prompt, r.data.promptErr
 }
-func (r Response) String() string   { return fmt.Sprintf("connector.Response{bytes:%d}", len(r.Raw())) }
+func (r Response) String() string { return fmt.Sprintf("connector.Response{bytes:%d}", len(r.Raw())) }
+
+// GoString returns the same metadata-only text as String.
 func (r Response) GoString() string { return r.String() }
+
+// MarshalJSON encodes only the response size, never its content.
 func (r Response) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Bytes int `json:"bytes"`

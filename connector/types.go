@@ -16,6 +16,8 @@ import (
 	expect "github.com/gatework/go-expect"
 )
 
+// Errors returned by devices, operations and results. Wrapped *Error values
+// carry the phase and command location.
 var (
 	ErrClosed         = errors.New("connector: device closed")
 	ErrNotConnected   = errors.New("connector: explicit reconnect required")
@@ -41,13 +43,17 @@ type Error struct {
 	cause               error
 }
 
-func (e *Error) Error() string    { return "connector: " + e.Code + " (" + e.Phase + ")" }
+func (e *Error) Error() string { return "connector: " + e.Code + " (" + e.Phase + ")" }
+
+// GoString returns the same safe text as Error.
 func (e *Error) GoString() string { return e.Error() }
 func (e *Error) Unwrap() error    { return e.cause }
 func newError(code, phase string, command Command, cause error) error {
 	return &Error{code, phase, command.Source, command.Line, cause}
 }
 
+// Interaction answers a prompt that appears while a command or login runs,
+// with a fixed Reply or a Respond callback.
 type Interaction struct {
 	Pattern            expect.Pattern
 	Reply              string
@@ -56,6 +62,9 @@ type Interaction struct {
 	Unlimited          bool // explicit legacy/pager repetition, still bounded by the operation deadline.
 	Capture, Sensitive bool
 }
+
+// Command is one line sent to the device with its prompt, timeout and
+// interaction rules.
 type Command struct {
 	Text                       string
 	Timeout                    *time.Duration // nil inherits; zero disables the relative timer.
@@ -67,8 +76,12 @@ type Command struct {
 	Line                       int
 }
 
-func (c Command) String() string   { return fmt.Sprintf("connector.Command{line:%d}", c.Line) }
+func (c Command) String() string { return fmt.Sprintf("connector.Command{line:%d}", c.Line) }
+
+// GoString returns the same metadata-only text as String.
 func (c Command) GoString() string { return c.String() }
+
+// MarshalJSON encodes only the command's source location, never its text.
 func (c Command) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Source string `json:"source,omitempty"`
@@ -121,11 +134,14 @@ func (c Command) clone() Command {
 	return c
 }
 
+// Script is a named sequence of commands.
 type Script struct {
 	Name     string
 	Commands []Command
 }
 
+// ParseScript parses one command per line, skipping blank lines and lines
+// starting with "#".
 func ParseScript(text, name string) (Script, error) {
 	s := Script{Name: name}
 	for i, line := range strings.Split(text, "\n") {
@@ -159,13 +175,22 @@ type StepResult struct {
 	duration time.Duration
 }
 
-func (s StepResult) Command() Command        { return s.command.clone() }
-func (s StepResult) Response() Response      { return s.response }
+// Command returns a copy of the command that ran.
+func (s StepResult) Command() Command { return s.command.clone() }
+
+// Response returns the accepted response.
+func (s StepResult) Response() Response { return s.response }
+
+// Duration returns how long the command took.
 func (s StepResult) Duration() time.Duration { return s.duration }
 func (s StepResult) String() string {
 	return fmt.Sprintf("connector.StepResult{bytes:%d}", len(s.response.Raw()))
 }
+
+// GoString returns the same metadata-only text as String.
 func (s StepResult) GoString() string { return s.String() }
+
+// MarshalJSON encodes the response size and duration, never content.
 func (s StepResult) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Bytes    int     `json:"bytes"`
@@ -173,6 +198,8 @@ func (s StepResult) MarshalJSON() ([]byte, error) {
 	}{len(s.response.Raw()), s.duration.Seconds()})
 }
 
+// Result holds the accepted steps and every attempt of a script, and the
+// collected configuration when there is one.
 type Result struct {
 	attempts []Attempt
 	steps    []StepResult
@@ -189,15 +216,28 @@ type Attempt struct {
 	err      error
 }
 
+// Response returns what was received, which may be partial.
 func (a Attempt) Response() Response { return a.response }
-func (a Attempt) Command() Command   { return a.command.clone() }
-func (a Attempt) Written() int       { return a.written }
-func (a Attempt) Complete() bool     { return a.complete }
-func (a Attempt) Err() error         { return a.err }
+
+// Command returns a copy of the attempted command.
+func (a Attempt) Command() Command { return a.command.clone() }
+
+// Written returns how many bytes of the command line were written.
+func (a Attempt) Written() int { return a.written }
+
+// Complete reports whether a prompt was observed after the command.
+func (a Attempt) Complete() bool { return a.complete }
+
+// Err returns the attempt's failure, or nil.
+func (a Attempt) Err() error { return a.err }
 func (a Attempt) String() string {
 	return fmt.Sprintf("connector.Attempt{written:%d complete:%t failed:%t}", a.written, a.complete, a.err != nil)
 }
+
+// GoString returns the same metadata-only text as String.
 func (a Attempt) GoString() string { return a.String() }
+
+// MarshalJSON encodes the attempt's progress, never content.
 func (a Attempt) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Written  int  `json:"written"`
@@ -210,6 +250,7 @@ func (a Attempt) MarshalJSON() ([]byte, error) {
 // Steps and their JSON format continue to include only accepted main commands.
 func (r Result) Attempts() []Attempt { return append([]Attempt(nil), r.attempts...) }
 
+// Steps returns a copy of the accepted main command steps.
 func (r Result) Steps() []StepResult {
 	out := append([]StepResult(nil), r.steps...)
 	return out
@@ -227,14 +268,20 @@ func (r Result) JoinedOutput() (string, error) {
 	}
 	return strings.Join(parts, ""), nil
 }
+
+// Config returns the collected configuration and whether one was collected.
 func (r Result) Config() (string, bool) {
 	if r.config == nil {
 		return "", false
 	}
 	return *r.config, true
 }
-func (r Result) String() string   { return fmt.Sprintf("connector.Result{steps:%d}", len(r.steps)) }
+func (r Result) String() string { return fmt.Sprintf("connector.Result{steps:%d}", len(r.steps)) }
+
+// GoString returns the same metadata-only text as String.
 func (r Result) GoString() string { return r.String() }
+
+// MarshalJSON encodes the steps and whether a configuration was collected.
 func (r Result) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Steps     []StepResult `json:"steps"`
@@ -242,6 +289,7 @@ func (r Result) MarshalJSON() ([]byte, error) {
 	}{r.Steps(), r.config != nil})
 }
 
+// ExecuteOptions adjusts how a script runs and observes its steps.
 type ExecuteOptions struct {
 	// PreserveSessionOnRejection keeps a borrowed session after one command's
 	// complete, valid device rejection. It requires WithBorrowedOperation and a
@@ -254,6 +302,9 @@ type ExecuteOptions struct {
 	OnStep         func(context.Context, StepResult) error
 	MaxOutputBytes int64
 }
+
+// Executor runs follow-up commands for a driver hook and keeps per-operation
+// values between hooks.
 type Executor interface {
 	Execute(ctx context.Context, command Command) (StepResult, error)
 	Value(name string) string
@@ -280,6 +331,8 @@ type Terminal struct {
 // LoginState contains the device state discovered by AfterLogin.
 type LoginState struct{ HAState string }
 
+// ConfigStrategy collects a configuration: it chooses the prompt for each
+// command, validates each step and assembles the result.
 type ConfigStrategy interface {
 	MatchPrompt(command, rawCurrent string) (expect.Pattern, error)
 	Validate(ctx context.Context, command Command, step StepResult, executor Executor) error
@@ -331,6 +384,7 @@ func (p Terminal) clone() (Terminal, error) {
 // Protocol identifies the explicitly selected system client.
 type Protocol string
 
+// Supported protocols.
 const (
 	ProtocolSSH    Protocol = "ssh"
 	ProtocolTelnet Protocol = "telnet"
@@ -339,6 +393,8 @@ const (
 // HostKeyPolicy controls explicit host-key trust behavior.
 type HostKeyPolicy string
 
+// Host-key policies: strict requires a known key, accept_new trusts first
+// use, replace overwrites a changed key.
 const (
 	HostKeyStrict    HostKeyPolicy = "strict"
 	HostKeyAcceptNew HostKeyPolicy = "accept_new"
@@ -348,6 +404,8 @@ const (
 // SessionEvent contains only operation metadata; it never contains command or response text.
 type SessionEvent struct{ Host, Name, Status string }
 
+// ConnectionConfig configures how a Device connects, authenticates, bounds
+// output and logs.
 type ConnectionConfig struct {
 	// OnSessionEvent runs synchronously under the operation lease, independently
 	// of session logging. Callbacks must cooperate with context and not reenter.
@@ -383,8 +441,12 @@ type ConnectionConfig struct {
 	LogLevel string
 }
 
-func (c ConnectionConfig) String() string   { return "connector.ConnectionConfig" }
+func (c ConnectionConfig) String() string { return "connector.ConnectionConfig" }
+
+// GoString returns the same secret-free text as String.
 func (c ConnectionConfig) GoString() string { return c.String() }
+
+// MarshalJSON encodes only the host, protocol and port, never credentials.
 func (c ConnectionConfig) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Host     string
@@ -399,9 +461,12 @@ func (c ConnectionConfig) MarshalJSON() ([]byte, error) {
 // evidence after login. That hook receives the admitted login context and must
 // synchronize with Close.
 type TransportFactory func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error)
+
+// Option configures New.
 type Option func(*options) error
 type options struct{ factory TransportFactory }
 
+// WithTransportFactory replaces the system SSH or Telnet client with f.
 func WithTransportFactory(f TransportFactory) Option {
 	return func(o *options) error {
 		if f == nil {

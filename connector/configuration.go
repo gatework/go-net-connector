@@ -36,6 +36,9 @@ func (renderedConfig) Finish(_ context.Context, r Result) (string, error) {
 	}
 	return r.steps[len(r.steps)-1].Response().Rendered()
 }
+
+// RunningConfig collects the running configuration with the platform's
+// collection strategy.
 func (d *Device) RunningConfig(ctx context.Context) (Result, error) {
 	if e := d.acquire(); e != nil {
 		return Result{}, e
@@ -178,6 +181,7 @@ func (d *Device) save(ctx context.Context, opts ExecuteOptions) (result Result, 
 	return result, ctx.Err()
 }
 
+// BackupOptions controls where and how Backup writes the configuration.
 type BackupOptions struct {
 	// PreserveInvalidEncoding retains original configuration bytes with explicit warnings when strict decoding fails.
 	PreserveInvalidEncoding bool
@@ -187,6 +191,9 @@ type BackupOptions struct {
 	LockTimeout   time.Duration
 	RejectSymlink bool
 }
+
+// BackupReceipt records what Backup collected and how far it was persisted.
+// Complete is the contract for a finished backup.
 type BackupReceipt struct {
 	TextOnly        bool            `json:"text_only,omitempty"`
 	Source          *BackupSource   `json:"source,omitempty"`
@@ -203,6 +210,9 @@ type BackupReceipt struct {
 	File            storage.Receipt `json:"file"`
 }
 
+// Backup collects the running configuration and writes it to opts.Path under
+// a lock, skipping the write when the content is unchanged. The receipt
+// records the commit and durability boundary even on error.
 func (d *Device) Backup(ctx context.Context, opts BackupOptions) (receipt BackupReceipt, err error) {
 	if e := d.acquire(); e != nil {
 		return receipt, e
@@ -283,7 +293,9 @@ func (d *Device) Backup(ctx context.Context, opts BackupOptions) (receipt Backup
 // Before commit, Backup returns the original storage.WriteError instead.
 type BackupPersistenceError struct{ failure *Error }
 
-func (e *BackupPersistenceError) Error() string    { return e.failure.Error() }
+func (e *BackupPersistenceError) Error() string { return e.failure.Error() }
+
+// GoString returns the same safe text as Error.
 func (e *BackupPersistenceError) GoString() string { return e.Error() }
 func (e *BackupPersistenceError) Unwrap() error    { return e.failure }
 

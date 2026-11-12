@@ -120,10 +120,13 @@ func (o *Operation) Retire() error {
 	return o.retire()
 }
 
+// ExecuteCommand runs one command inside the operation.
 func (o *Operation) ExecuteCommand(ctx context.Context, c Command, opts ExecuteOptions) (Result, error) {
 	return o.ExecuteScript(ctx, Script{Commands: []Command{c}}, opts)
 }
 
+// ExecuteScript runs script inside the operation. It fails with ErrScope once
+// the operation has ended.
 func (o *Operation) ExecuteScript(ctx context.Context, s Script, opts ExecuteOptions) (Result, error) {
 	script, e := s.clone()
 	if e != nil {
@@ -142,6 +145,8 @@ func (o *Operation) ExecuteScript(ctx context.Context, s Script, opts ExecuteOpt
 	}
 	return o.device.execute(ctx, script, opts, nil)
 }
+
+// RunningConfig collects the running configuration inside the operation.
 func (o *Operation) RunningConfig(ctx context.Context) (Result, error) {
 	ctx, leave, e := o.scope.enter(ctx)
 	if e != nil {
@@ -153,6 +158,9 @@ func (o *Operation) RunningConfig(ctx context.Context) (Result, error) {
 	}
 	return o.device.runningConfig(ctx)
 }
+
+// SaveConfig runs the platform's save commands inside the operation and
+// confirms them with the driver.
 func (o *Operation) SaveConfig(ctx context.Context, opts ExecuteOptions) (Result, error) {
 	if opts.PreserveSessionOnRejection {
 		return Result{}, ErrInvalid
@@ -167,11 +175,18 @@ func (o *Operation) SaveConfig(ctx context.Context, opts ExecuteOptions) (Result
 	}
 	return o.device.saveConfig(ctx, opts)
 }
+
+// RawPrompt returns the device's last raw prompt.
 func (o *Operation) RawPrompt() string { return o.device.RawPrompt() }
 
+// Prompt returns the device's last rendered prompt.
 func (o *Operation) Prompt() (string, error) { return o.device.Prompt() }
-func (o *Operation) PlatformName() string    { return o.device.PlatformName() }
-func (o *Operation) Host() string            { return o.device.Host() }
+
+// PlatformName returns the device's platform name.
+func (o *Operation) PlatformName() string { return o.device.PlatformName() }
+
+// Host returns the device's host address.
+func (o *Operation) Host() string { return o.device.Host() }
 
 // retire runs under the operation's lease, either in one admitted call or after
 // scope.end joins it. The first cleanup result survives every enclosing defer.

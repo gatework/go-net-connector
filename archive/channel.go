@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+// Channel is a launched worker's control stream: Input carries requests,
+// Output carries frames, and Close releases the process.
 type Channel struct {
 	Input  io.Writer
 	Output io.Reader

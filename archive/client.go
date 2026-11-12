@@ -12,11 +12,16 @@ import (
 	"github.com/gatework/go-net-connector/transfer"
 )
 
+// ClientOptions configures a Client: the remote archive root, the local batch
+// directory, how to launch the worker and the stage timeouts.
 type ClientOptions struct {
 	Root, Directory string
 	Launcher        Launcher
 	Timeouts        Timeouts
 }
+
+// Client runs archive transactions against one worker endpoint, with at most
+// four in flight.
 type Client struct {
 	cleanupMu              sync.Mutex
 	pending                []func() error
@@ -32,6 +37,8 @@ type Client struct {
 	prepared               bool
 }
 
+// NewClient validates o and returns an unprepared client whose batch is named
+// after today's date in UTC+8.
 func NewClient(o ClientOptions) (*Client, error) {
 	if !filepath.IsAbs(o.Root) || filepath.Clean(o.Root) != o.Root || o.Directory == "" || o.Launcher == nil {
 		return nil, ErrArchive
@@ -47,6 +54,9 @@ func NewClient(o ClientOptions) (*Client, error) {
 	batch := time.Now().In(time.FixedZone("UTC+8", 8*3600)).Format("2006-01-02")
 	return &Client{root: o.Root, directory: directory, batch: batch, launch: o.Launcher, timeouts: timeouts, persist: storage.WriteStream, slots: make(chan struct{}, 4), prepareGate: make(chan struct{}, 1)}, nil
 }
+
+// Prepare probes the worker and prepares the local batch directory once;
+// later calls return immediately.
 func (c *Client) Prepare(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, c.timeouts.Prepare)
 	defer cancel()

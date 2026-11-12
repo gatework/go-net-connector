@@ -17,11 +17,19 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+// Version is the archive protocol version.
 const Version = 2
+
+// ControlLimit bounds one control frame in bytes.
 const ControlLimit = 16 << 10
+
+// PayloadLimit bounds an archived file in bytes.
 const PayloadLimit = 64 << 20
+
+// ChunkSize is the size of a delivered body chunk.
 const ChunkSize = 64 << 10
 
+// ErrArchive identifies every archive transaction failure.
 var ErrArchive = errors.New("tftp_archive_failed")
 var capabilities = []string{"target_lock", "preserve_previous", "stable_sha256", "binary_delivery", "confirmed_cleanup", "daily_latest", "stage_timeouts"}
 var archiveBatchPattern = regexp.MustCompile(`^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}(?:_[0-9]{2,})*|[0-9_-]+-ssh-[a-f0-9]{16})$`)

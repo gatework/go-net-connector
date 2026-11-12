@@ -365,8 +365,10 @@ type AuditStage struct {
 	Options  topology.FormatOptions
 }
 
+// Name returns "audit".
 func (AuditStage) Name() string { return "audit" }
 
+// Admit skips platforms that do not support the topology mode.
 func (a AuditStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	if !supportsTopologyMode(platform, a.Mode) {
 		return "unsupported_operation"
@@ -374,6 +376,8 @@ func (a AuditStage) Admit(_ fleet.Record, platform dialect.Platform) string {
 	return ""
 }
 
+// Run collects neighbors and interface descriptions and records the audit in
+// e.
 func (a AuditStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	device, err := s.Device(ctx)
 	if err != nil {
@@ -416,10 +420,14 @@ func (a AuditStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 // confirms the readback and the save. It never rolls back or replays.
 type ApplyStage struct{ Registry dialect.Registry }
 
+// Name returns "apply".
 func (ApplyStage) Name() string { return "apply" }
 
+// Admit accepts every device; the reviewed plan decides what applies.
 func (ApplyStage) Admit(fleet.Record, dialect.Platform) string { return "" }
 
+// Run applies the reviewed changes for the device, then verifies the readback
+// and the save.
 func (a ApplyStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	evidence, _ := e.Artifacts.Topology.(*TopologyEvidence)
 	if evidence == nil || evidence.Plan == nil {

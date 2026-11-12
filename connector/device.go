@@ -97,24 +97,36 @@ func New(d Driver, cfg ConnectionConfig, opts ...Option) (*Device, error) {
 	device.log = &logWriter{target: cfg.Logger, level: cfg.LogLevel, host: cfg.Host, encoding: "auto", paused: true}
 	return device, nil
 }
+
+// PlatformName returns the name of the device's terminal grammar.
 func (d *Device) PlatformName() string { return d.terminal.Name }
-func (d *Device) Host() string         { return d.config.Host }
-func (d *Device) Connected() bool      { return d.connected.Load() }
+
+// Host returns the configured host address.
+func (d *Device) Host() string { return d.config.Host }
+
+// Connected reports whether a session is currently open.
+func (d *Device) Connected() bool { return d.connected.Load() }
 
 type promptState struct {
 	raw, text string
 	err       error
 }
 
+// RawPrompt returns the last prompt as received, before terminal rendering.
 func (d *Device) RawPrompt() string {
 	s, _ := d.prompt.Load().(promptState)
 	return s.raw
 }
 
+// Prompt returns the last rendered prompt, or ErrIncomplete before one was
+// verified.
 func (d *Device) Prompt() (string, error) {
 	s, _ := d.prompt.Load().(promptState)
 	return s.text, s.err
 }
+
+// Connect opens the session and logs in. It never reconnects an existing
+// session; Close it first.
 func (d *Device) Connect(ctx context.Context) (err error) {
 	if err = d.acquire(); err != nil {
 		return err
@@ -163,6 +175,9 @@ func (d *Device) Close() error {
 	}
 	return nil
 }
+
+// HAState returns the high-availability state found at login, or "" when
+// disconnected or unknown.
 func (d *Device) HAState() string {
 	if !d.connected.Load() {
 		return ""
