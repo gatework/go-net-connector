@@ -67,18 +67,25 @@ func (s *configurationStrategy) Finish(ctx context.Context, result connector.Res
 // BaseConfigPolicy keeps a valid prompt and returns visible output as-is.
 type BaseConfigPolicy struct{}
 
+// MatchPrompt expects the current prompt line.
 func (BaseConfigPolicy) MatchPrompt(_ string, current string) (expect.Pattern, error) {
 	return expect.Line(strings.Trim(current, " \t\x00\r\n")), nil
 }
+
+// Validate accepts every step.
 func (BaseConfigPolicy) Validate(context.Context, connector.Command, connector.StepResult, connector.Executor) error {
 	return nil
 }
+
+// SelectStep returns the last step.
 func (BaseConfigPolicy) SelectStep(steps []connector.StepResult) (connector.StepResult, error) {
 	if len(steps) == 0 {
 		return connector.StepResult{}, connector.ErrIncomplete
 	}
 	return steps[len(steps)-1], nil
 }
+
+// Clean returns the visible output unchanged.
 func (BaseConfigPolicy) Clean(_ connector.StepResult, visible, _ string) (string, error) {
 	return visible, nil
 }

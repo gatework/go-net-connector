@@ -16,6 +16,7 @@ import (
 	"github.com/gatework/go-net-connector/internal/terminal"
 )
 
+// Errors returned by template parsing.
 var (
 	ErrTemplateMissing = errors.New("textfsm: template missing")
 	ErrTemplateInvalid = errors.New("textfsm: invalid template")

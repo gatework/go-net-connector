@@ -34,6 +34,7 @@ func Field(row map[string]any, name string) string {
 	return value
 }
 
+// Neighbor is one discovered link.
 type Neighbor = dialect.Neighbor
 
 // Count returns the number of matches for a family-owned record expression.

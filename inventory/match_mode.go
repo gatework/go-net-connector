@@ -4,6 +4,7 @@ package inventory
 // values are part of the configuration and CLI contracts.
 type MatchMode string
 
+// Match modes.
 const (
 	MatchContains MatchMode = "contains"
 	MatchPrefix   MatchMode = "prefix"

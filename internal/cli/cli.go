@@ -22,6 +22,8 @@ import (
 	"github.com/gatework/go-net-connector/netdisco"
 )
 
+// Runtime is the CLI's process environment: arguments, streams, paths and
+// injectable inventory and device factories.
 type Runtime struct {
 	reporter           *progress.Reporter
 	Args               []string
@@ -35,6 +37,8 @@ type Runtime struct {
 }
 
 func integerString(n int) string { return strconv.Itoa(n) }
+
+// Run executes the command line and returns the process exit code.
 func (r Runtime) Run(ctx context.Context) int {
 	if r.Input == nil {
 		r.Input = os.Stdin

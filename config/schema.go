@@ -3,6 +3,7 @@ package config
 // FieldKind names how a configuration value is decoded and validated.
 type FieldKind string
 
+// Field kinds.
 const (
 	KindString          FieldKind = "string"
 	KindOptionalString  FieldKind = "optional_string"

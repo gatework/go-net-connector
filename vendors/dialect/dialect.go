@@ -11,6 +11,7 @@ import (
 	"github.com/gatework/go-net-connector/connector"
 )
 
+// Errors shared by vendor dialects.
 var (
 	ErrUnsupported = errors.New("vendor dialect: unsupported behavior")
 	ErrParse       = errors.New("vendor dialect: unrecognized output")
@@ -35,12 +36,16 @@ func (e *DiagnosticError) Unwrap() error {
 	}
 	return e.Cause
 }
+
+// DiagnosticCode returns the failure code.
 func (e *DiagnosticError) DiagnosticCode() string {
 	if e == nil {
 		return ""
 	}
 	return e.Code
 }
+
+// DiagnosticPhase returns the failure phase.
 func (e *DiagnosticError) DiagnosticPhase() string {
 	if e == nil {
 		return ""
@@ -58,6 +63,7 @@ type DiagnosticMetadata interface {
 	DiagnosticPhase() string
 }
 
+// NewDiagnosticError returns a DiagnosticError.
 func NewDiagnosticError(code, phase string, cause error) error {
 	return &DiagnosticError{Code: code, Phase: phase, Cause: cause}
 }
@@ -114,6 +120,7 @@ type TFTPOptions struct {
 	Timeout                                        time.Duration
 }
 
+// TFTPReceipt describes what a platform's TFTP upload contains.
 type TFTPReceipt struct {
 	ConfigurationKind, Format, SourceFile string
 	IncludeRequestedPath                  bool

@@ -14,13 +14,17 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+// ErrInvalid reports an invalid configuration file, value or environment.
 var ErrInvalid = errors.New("config: invalid configuration")
 
+// MaxBytes bounds a configuration or environment file.
 const MaxBytes = 16 << 20
 
 const maxDepth = 128
 const maxNodes = 100000
 
+// ParseYAML parses a bounded YAML mapping, rejecting duplicate keys, aliases
+// and excessive nesting.
 func ParseYAML(data []byte) (map[string]any, error) {
 	return parseYAML(data, false)
 }

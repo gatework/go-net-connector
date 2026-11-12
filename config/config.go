@@ -14,6 +14,8 @@ import (
 	"github.com/gatework/go-net-connector/internal/batchreport"
 )
 
+// Options locates the configuration and environment files and supplies the
+// process environment, overrides and defaults for Load.
 type Options struct {
 	Name, CWD, Home, Program, ConfigFile, EnvFile string
 	Directories                                   []string
@@ -21,6 +23,9 @@ type Options struct {
 	Overrides, Defaults                           map[string]any
 	AllowMissing                                  bool
 }
+
+// Snapshot is a loaded, validated configuration with its environment secrets
+// and the sources each field came from.
 type Snapshot struct {
 	data                map[string]any
 	environment         map[string]string
@@ -30,10 +35,14 @@ type Snapshot struct {
 	applicable          bool
 }
 
+// Public returns a copy of the non-secret configuration.
 func (s Snapshot) Public() map[string]any {
 	public, _ := cloneValue(s.data).(map[string]any) // cloneValue preserves the map type
 	return public
 }
+
+// Value returns a copy of the value at a dotted path such as
+// "netdisco.source", or nil.
 func (s Snapshot) Value(path string) any {
 	var v any = s.data
 	for key := range strings.SplitSeq(path, ".") {
@@ -45,20 +54,33 @@ func (s Snapshot) Value(path string) any {
 	}
 	return cloneValue(v)
 }
+
+// Secret returns the environment value for key.
 func (s Snapshot) Secret(key string) string { return s.environment[key] }
+
+// Environment returns a copy of the loaded environment values.
 func (s Snapshot) Environment() map[string]string {
 	m := map[string]string{}
 	maps.Copy(m, s.environment)
 	return m
 }
+
+// Sources returns the files read and the source of each field.
 func (s Snapshot) Sources() map[string]any {
 	fields := map[string]string{}
 	maps.Copy(fields, s.fields)
 	return map[string]any{"configuration_files": append([]string{}, s.files...), "environment_files": append([]string{}, s.envFiles...), "fields": fields}
 }
-func (s Snapshot) InitPaths() (string, string)  { return s.configPath, s.envPath }
-func (s Snapshot) String() string               { return "config.Snapshot" }
-func (s Snapshot) GoString() string             { return s.String() }
+
+// InitPaths returns the configuration and environment file paths that
+// initialization would create.
+func (s Snapshot) InitPaths() (string, string) { return s.configPath, s.envPath }
+func (s Snapshot) String() string              { return "config.Snapshot" }
+
+// GoString returns the same secret-free text as String.
+func (s Snapshot) GoString() string { return s.String() }
+
+// MarshalJSON encodes the non-secret configuration.
 func (s Snapshot) MarshalJSON() ([]byte, error) { return json.Marshal(s.data) }
 
 var pathFields = map[string]bool{"netdisco.cache_directory": true, "netdisco.db_sslrootcert": true, "backup.directory": true, "topology.directory": true, "ssh.known_hosts": true, "ssh.log_directory": true, "tftp.verification_root": true}

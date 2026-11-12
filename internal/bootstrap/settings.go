@@ -23,12 +23,17 @@ import (
 	"github.com/gatework/go-net-connector/vendors"
 )
 
+// ErrCredentials reports missing device or inventory credentials.
 var ErrCredentials = fleet.ErrMissingCredentials
 
+// Secret looks up a secret by environment variable name.
 type Secret func(string) string
 
 // DeviceFactory constructs an unconnected device for a platform driver.
 type DeviceFactory func(connector.Driver, connector.ConnectionConfig) (*connector.Device, error)
+
+// Services is the composition root: validated settings, rules, the vendor
+// registry and device construction.
 type Services struct {
 	observer   func(context.Context, connector.SessionEvent) error
 	policy     config.Snapshot
@@ -54,6 +59,8 @@ type resolvedSettings struct {
 	inventoryLimits netdisco.Limits
 }
 
+// New validates policy and builds the services. A nil secret reads from
+// policy.
 func New(policy config.Snapshot, secret Secret) (*Services, error) {
 	if secret == nil {
 		secret = policy.Secret
@@ -151,9 +158,17 @@ func (s *Services) WithSessionObserver(observer func(context.Context, connector.
 	clone.observer = observer
 	return &clone
 }
-func (s *Services) Policy() config.Snapshot     { return s.policy }
-func (s *Services) Rules() *fleet.Rules         { return s.rules }
+
+// Policy returns the configuration snapshot.
+func (s *Services) Policy() config.Snapshot { return s.policy }
+
+// Rules returns the inventory rules.
+func (s *Services) Rules() *fleet.Rules { return s.rules }
+
+// Registry returns the vendor registry.
 func (s *Services) Registry() *vendors.Registry { return s.registry }
+
+// WithDeviceFactory returns a copy that builds devices with factory.
 func (s *Services) WithDeviceFactory(factory DeviceFactory) *Services {
 	clone := *s
 	clone.factory = factory
@@ -261,6 +276,9 @@ func ruleOptions(p config.Snapshot) (fleet.RuleOptions, error) {
 	}
 	return o, nil
 }
+
+// DeviceWithLogger builds an unconnected device for r with its credentials,
+// logging to logger.
 func (s *Services) DeviceWithLogger(ctx context.Context, r fleet.Record, logger io.Writer) (*connector.Device, error) {
 	if e := ctx.Err(); e != nil {
 		return nil, e
@@ -329,15 +347,20 @@ func (s *Services) Inventory(ctx context.Context, mode netdisco.CacheMode) (netd
 	}
 }
 
+// Workers returns the configured parallelism.
 func (s *Services) Workers() int { return s.settings.parallel }
 
+// Limit returns the per-vendor sample limit.
 func (s *Services) Limit() int { return s.settings.limitPerVendor }
 
+// Directory returns the backup directory.
 func (s *Services) Directory() string { return s.settings.backupDirectory }
 func (s *Services) String() string    { return "bootstrap.Services" }
 func quoteDSNValue(s string) string {
 	return "'" + strings.ReplaceAll(strings.ReplaceAll(s, "\\", "\\\\"), "'", "\\'") + "'"
 }
+
+// GoString returns the same text as String.
 func (s *Services) GoString() string { return s.String() }
 
 // LogDirectory resolves the frozen command-mode policy once at the composition

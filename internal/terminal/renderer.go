@@ -13,9 +13,14 @@ import (
 	"github.com/gatework/go-net-connector/internal/textcodec"
 )
 
+// ErrLimit reports a line or escape sequence over the limit.
 var ErrLimit = errors.New("terminal: line or escape sequence exceeds limit")
+
+// ErrEncoding reports invalid UTF-8 in strict mode.
 var ErrEncoding = errors.New("terminal: invalid UTF-8")
 
+// Renderer applies backspace, carriage return, cursor and erase sequences to
+// a byte stream and writes the resulting lines.
 type Renderer struct {
 	// Encoding selects decoding after a complete terminal line is assembled.
 	// Empty preserves the original UTF-8 behavior.
@@ -28,9 +33,13 @@ type Renderer struct {
 	strict        bool
 }
 
+// New returns a renderer writing lines of at most limit bytes to w. Strict
+// rejects invalid UTF-8 instead of escaping it.
 func New(w io.Writer, limit int, strict bool) *Renderer {
 	return &Renderer{target: w, limit: limit, strict: strict}
 }
+
+// Render renders input as UTF-8 text.
 func Render(input []byte, strict bool) (string, error) {
 	return RenderEncoded(input, strict, "")
 }
@@ -87,6 +96,8 @@ func (r *Renderer) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
+
+// Finish writes the last line when it has no newline.
 func (r *Renderer) Finish() error {
 	if len(r.line) > 0 {
 		return r.emit(false)

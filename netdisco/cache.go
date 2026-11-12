@@ -29,6 +29,7 @@ type cacheOptions struct {
 	Now         func() time.Time
 }
 
+// Cache result statuses.
 const (
 	CacheStatusRefreshed = "refreshed"
 	CacheStatusFresh     = "fresh_cache"

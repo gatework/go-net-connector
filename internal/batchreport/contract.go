@@ -16,6 +16,8 @@ const SchemaVersion = 3
 // MaxArtifactBytes bounds one exported artifact.
 const MaxArtifactBytes int64 = 64 << 20
 
+// ErrInvalidEvidence reports a report whose artifact evidence cannot be
+// trusted.
 var ErrInvalidEvidence = errors.New("batchreport: invalid artifact evidence")
 
 // Device status values. Plan skip reasons (filtered, duplicate_host, …) are
@@ -117,6 +119,7 @@ type Artifacts struct {
 	Topology any `json:"topology,omitempty"`
 }
 
+// FileReceipt is a storage receipt in the report.
 type FileReceipt struct {
 	Path  string `json:"path"`
 	State string `json:"state"`
@@ -140,12 +143,14 @@ type Backup struct {
 	Complete bool `json:"complete"`
 }
 
+// SourceSegment locates one command's output in the raw source file.
 type SourceSegment struct {
 	Step   int `json:"step"`
 	Offset int `json:"offset"`
 	Bytes  int `json:"bytes"`
 }
 
+// BackupSource is the raw configuration kept beside a text backup.
 type BackupSource struct {
 	Path            string          `json:"path"`
 	Bytes           int             `json:"bytes"`
@@ -155,12 +160,15 @@ type BackupSource struct {
 	Segments        []SourceSegment `json:"segments"`
 }
 
+// TextPosition locates an invalid byte sequence: zero-based offset, one-based
+// line and column.
 type TextPosition struct {
 	Offset int `json:"offset"`
 	Line   int `json:"line"`
 	Column int `json:"column"`
 }
 
+// TextWarning counts the invalid byte sequences preserved in a backup.
 type TextWarning struct {
 	Count     int            `json:"count"`
 	Positions []TextPosition `json:"positions"`
@@ -176,6 +184,7 @@ type Transfer struct {
 	Verification      string `json:"verification"`
 }
 
+// ArchiveProof is the archive server's account of an upload.
 type ArchiveProof struct {
 	Bytes       int64  `json:"bytes"`
 	SHA256      string `json:"sha256"`
@@ -198,6 +207,7 @@ type Remote struct {
 	Reported    bool   `json:"reported"`
 }
 
+// Attempt is the progress of one script command.
 type Attempt struct {
 	Line     int  `json:"line"`
 	Written  int  `json:"written"`
@@ -240,6 +250,8 @@ type Artifact struct {
 	Status       string
 }
 
+// NormalizeHost returns the canonical form of an exact IP address without a
+// zone.
 func NormalizeHost(host string) (string, error) {
 	address, err := netip.ParseAddr(host)
 	if err != nil || address.Zone() != "" {

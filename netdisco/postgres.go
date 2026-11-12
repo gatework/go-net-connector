@@ -15,11 +15,15 @@ import (
 	"github.com/gatework/go-net-connector/inventory"
 )
 
+// PostgresOptions configures the Netdisco database source.
 type PostgresOptions struct {
 	Connection, Query string
 	Parameters        []any
 	Limits            Limits
 }
+
+// Postgres reads the inventory from the Netdisco database with a read-only
+// query.
 type Postgres struct {
 	connection *pgx.ConnConfig
 	query      string
@@ -29,6 +33,8 @@ type Postgres struct {
 
 const postgresProtocolOverhead int64 = 1 << 20
 
+// NewPostgres validates the connection string, query and parameters and
+// returns the source.
 func NewPostgres(o PostgresOptions) (*Postgres, error) {
 	if strings.TrimSpace(o.Query) == "" || strings.ContainsRune(o.Query, 0) {
 		return nil, newInventoryError("invalid_query", nil)
@@ -73,7 +79,9 @@ func postgresProtocolBodyLimit(limits Limits) int {
 	return int(budget + postgresProtocolOverhead)
 }
 
-func (p *Postgres) String() string   { return "netdisco.Postgres" }
+func (p *Postgres) String() string { return "netdisco.Postgres" }
+
+// GoString returns the same credential-free text as String.
 func (p *Postgres) GoString() string { return p.String() }
 
 // Devices reads the configured query through a read-only cursor, one page
@@ -253,4 +261,6 @@ func (o PostgresOptions) String() string {
 	b, _ := o.MarshalJSON()
 	return "PostgresOptions" + string(b)
 }
+
+// GoString returns the same credential-free text as String.
 func (o PostgresOptions) GoString() string { return o.String() }

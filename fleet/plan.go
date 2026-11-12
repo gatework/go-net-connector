@@ -18,15 +18,22 @@ import (
 // ErrInvalidPlan identifies invalid rules, task plans, or report inputs.
 var ErrInvalidPlan = errors.New("netdisco: invalid plan")
 
+// Mapping assigns a connector to devices of a normalized vendor, optionally
+// narrowed by OS and model prefix.
 type Mapping struct {
 	Vendor, Connector string
 	OS, ModelPrefix   *string
 }
+
+// RuleOptions configures inventory selection and how devices map to
+// connectors.
 type RuleOptions struct {
 	Selection                      inventory.SelectionOptions
 	VendorOverrides, HostOverrides map[string]string
 	Mappings                       []Mapping
 }
+
+// Rules select inventory devices and resolve each one's connector.
 type Rules struct {
 	selection        inventory.Selection
 	vendors, hosts   map[string]string
@@ -92,6 +99,8 @@ func NewRules(o RuleOptions, registry dialect.Registry) (*Rules, error) {
 	return r, nil
 }
 
+// Resolve returns the connector for d: a host override, then a mapping, a
+// vendor override, and finally platform recognition, or "" when none applies.
 func (r *Rules) Resolve(d inventory.Device) string {
 	if a, e := netip.ParseAddr(d.IP); e == nil {
 		if v := r.hosts[a.String()]; v != "" {
@@ -120,6 +129,8 @@ func (r *Rules) Resolve(d inventory.Device) string {
 	return platform
 }
 
+// Record normalizes d, resolves its connector and records why it is skipped,
+// if it is.
 func (r *Rules) Record(d inventory.Device) Record {
 	v := Record{SourceIP: d.IP, Name: strings.TrimSpace(d.Name), Vendor: r.Resolve(d), SourceVendor: d.Vendor, Model: d.Model, OS: d.OS, OSVersion: d.OSVersion, Serial: d.Serial}
 	if v.Name == "" {
@@ -194,6 +205,8 @@ func (r *Rules) addHostOverrides(overrides map[string]string) error {
 	return nil
 }
 
+// Record is a normalized inventory device with its resolved connector in
+// Vendor and any skip reason in Issue.
 type Record struct{ Host, SourceIP, Name, Vendor, SourceVendor, Model, OS, OSVersion, Serial, Issue string }
 
 // addMappings records identity mappings with normalized fields.
@@ -209,6 +222,9 @@ func (r *Rules) addMappings(mappings []Mapping) error {
 	}
 	return nil
 }
+
+// BackupFilename returns "<IP>.txt" for style "ip" or "<name>-<IP>.txt" for
+// "hostname_ip", with the name made file-safe.
 func (r Record) BackupFilename(style string) (string, error) {
 	a, e := netip.ParseAddr(r.Host)
 	if e != nil || a.Zone() != "" {
@@ -247,21 +263,29 @@ func (r Record) BackupFilename(style string) (string, error) {
 	return label + "-" + base, nil
 }
 
+// Task is a ready plan entry with its transfer target.
 type Task struct {
 	Index  int
 	Device Record
 	Target transfer.Target
 }
+
+// PlanEntry is one inventory row and its plan status.
 type PlanEntry struct {
 	Device Record
 	Status string
 }
+
+// PlanOptions selects the plan mode, sample limit and TFTP target resolution.
 type PlanOptions struct {
 	Mode                string
 	LimitPerVendor      int
 	AllowFixedNameReuse bool
 	Target              func(Record) (transfer.Target, error)
 }
+
+// Plan is the classified inventory and the tasks to run, both in inventory
+// order.
 type Plan struct {
 	mode      mode
 	entries   []PlanEntry
@@ -438,9 +462,11 @@ func (b *planBuilder) schedule(order []int) {
 	}
 }
 
+// Entries returns a copy of every entry.
 func (p Plan) Entries() []PlanEntry { return append([]PlanEntry(nil), p.entries...) }
 
 // ErrMissingCredentials reports a device with no configured login credentials.
 var ErrMissingCredentials = errors.New("fleet: missing device credentials")
 
+// Tasks returns a copy of the ready tasks.
 func (p Plan) Tasks() []Task { return append([]Task(nil), p.tasks...) }

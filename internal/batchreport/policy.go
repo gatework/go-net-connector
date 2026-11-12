@@ -4,6 +4,7 @@ package batchreport
 // string values are part of the configuration, CLI and report contracts.
 type SuccessPolicy string
 
+// Success policies.
 const (
 	PolicyStrict   SuccessPolicy = "strict"
 	PolicySelected SuccessPolicy = "selected"
@@ -29,6 +30,7 @@ func (p SuccessPolicy) AllowedFor(tftp bool) bool {
 // Layout selects how a batch arranges its output directory.
 type Layout string
 
+// Output layouts.
 const (
 	LayoutBatch Layout = "batch"
 	LayoutFlat  Layout = "flat"

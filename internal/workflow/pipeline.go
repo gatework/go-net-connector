@@ -401,7 +401,7 @@ func (r *Runner) runDevice(ctx context.Context, runtime Runtime, op Operation, s
 	platform, _ := runtime.Registry.Lookup(record.Vendor)
 	session := &Session{Record: record, Target: task.Target, Platform: platform, runtime: runtime, logs: logs, observer: r.observe(), emit: r.emit}
 	previous := row.DurationMS
-	failed, failedStage := runStages(ctx, session, stages, evidence, &row)
+	failedStage, failed := runStages(ctx, session, stages, evidence, &row)
 	if cleanup := session.finish(); cleanup != nil && failed == nil {
 		failed, failedStage = cleanup, "disconnect"
 	}
@@ -420,7 +420,7 @@ func (r *Runner) runDevice(ctx context.Context, runtime Runtime, op Operation, s
 // runStages runs stages in order, recording each in row. After the first
 // failure, including authentication during a stage, the remaining stages
 // are recorded as skipped.
-func runStages(ctx context.Context, session *Session, stages []Stage, evidence *Evidence, row *batchreport.Device) (failed error, failedStage string) {
+func runStages(ctx context.Context, session *Session, stages []Stage, evidence *Evidence, row *batchreport.Device) (failedStage string, failed error) {
 	for _, stage := range stages {
 		if failed != nil {
 			row.Stages = append(row.Stages, batchreport.Stage{Name: stage.Name(), Status: "skipped"})
@@ -445,7 +445,7 @@ func runStages(ctx context.Context, session *Session, stages []Stage, evidence *
 		}
 		row.Stages = append(row.Stages, result)
 	}
-	return failed, failedStage
+	return failedStage, failed
 }
 
 // settle sets the device status, outcome and diagnostic from the first

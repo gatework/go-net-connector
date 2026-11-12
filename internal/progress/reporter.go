@@ -90,6 +90,8 @@ type Reporter struct {
 	archivePreflight                                      *ArchivePreflight
 }
 
+// New returns a reporter writing to out; on a terminal it redraws a live
+// status area.
 func New(out io.Writer, verbose bool) *Reporter {
 	p := &Reporter{out: out, verbose: verbose, interval: 5 * time.Second, started: time.Now(), active: make(map[string]task)}
 	if f, ok := out.(*os.File); ok {
@@ -153,6 +155,7 @@ func (p *Reporter) Pause() func() {
 	return func() { once.Do(func() { p.mu.Lock(); defer p.mu.Unlock(); p.paused--; p.renderLocked(true) }) }
 }
 
+// Phase announces a batch phase.
 func (p *Reporter) Phase(text string) error {
 	if p == nil {
 		return nil
@@ -169,6 +172,8 @@ func (p *Reporter) Phase(text string) error {
 	}
 	return p.writeLocked(p.phase)
 }
+
+// Plan records the batch size and mode.
 func (p *Reporter) Plan(total, selected, workers int, mode string) error {
 	if p == nil {
 		return nil
@@ -250,6 +255,8 @@ func (p *Reporter) BeginPhase(total, workers int) error {
 	p.renderLocked(true)
 	return p.err
 }
+
+// Start records that host began.
 func (p *Reporter) Start(host, vendor string) error {
 	if p == nil {
 		return nil
@@ -382,6 +389,7 @@ func (p *Reporter) Outcome(host, status, outcome, errorCode string, duration tim
 	return p.err
 }
 
+// Finish clears the live area and prints the elapsed time once.
 func (p *Reporter) Finish() error {
 	if p == nil {
 		return nil
@@ -401,6 +409,7 @@ func (p *Reporter) Finish() error {
 	return p.err
 }
 
+// Err returns the first write error.
 func (p *Reporter) Err() error {
 	if p == nil {
 		return nil

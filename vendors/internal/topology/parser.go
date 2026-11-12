@@ -30,6 +30,7 @@ type Parser struct {
 	DecodeDescription, StrictDescription  bool
 }
 
+// ParseNeighbors parses a neighbor table into links.
 func (p Parser) ParseNeighbors(output string) ([]dialect.Neighbor, error) {
 	if p.NeighborTemplate == "" || p.CountNeighbors == nil {
 		return nil, dialect.ErrUnsupported
@@ -63,6 +64,8 @@ func (p Parser) ParseNeighbors(output string) ([]dialect.Neighbor, error) {
 	return neighbors, nil
 }
 
+// ParseDescriptions parses interface descriptions keyed by canonical
+// interface.
 func (p Parser) ParseDescriptions(config string) (map[string]string, error) {
 	if p.DescriptionTemplate == "" {
 		return nil, dialect.ErrUnsupported

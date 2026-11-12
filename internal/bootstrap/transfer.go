@@ -6,6 +6,8 @@ import (
 	"github.com/gatework/go-net-connector/transfer"
 )
 
+// TFTPPolicy returns the TFTP transfer policy, built once from the
+// configuration.
 func (s *Services) TFTPPolicy() (*transfer.Policy, error) {
 	if s.tftpPolicy != nil {
 		return s.tftpPolicy, nil
@@ -52,6 +54,7 @@ func (s *Services) buildTFTPPolicy() (*transfer.Policy, error) {
 // ArchivePassword resolves the archive credential only during online preparation.
 func (s *Services) ArchivePassword() string { return s.secret("NC_TFTP_SSH_PASSWORD") }
 
+// ArchiveTimeouts returns the archive stage timeouts.
 func (s *Services) ArchiveTimeouts() archive.Timeouts { return s.settings.archiveTimeouts }
 
 // RemoteBackupPassword resolves the remote export credential only when a

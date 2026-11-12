@@ -11,8 +11,10 @@ import (
 	"unicode/utf8"
 )
 
+// ErrInvalid reports invalid selection options.
 var ErrInvalid = errors.New("inventory: invalid selection")
 
+// Device is one inventory record.
 type Device struct {
 	IP        string `json:"ip" yaml:"ip"`
 	Name      string `json:"name" yaml:"name"`
@@ -24,6 +26,8 @@ type Device struct {
 	Serial    string `json:"serial" yaml:"serial"`
 }
 type interval struct{ first, last netip.Addr }
+
+// AddressSet matches addresses against exact addresses and merged ranges.
 type AddressSet struct {
 	exact     map[netip.Addr]struct{}
 	intervals []interval
@@ -126,7 +130,10 @@ func mergeIntervals(intervals []interval) []interval {
 	return merged
 }
 
+// Empty reports whether the set has no entries.
 func (s AddressSet) Empty() bool { return len(s.exact) == 0 && len(s.intervals) == 0 }
+
+// Contains reports whether host is in the set; a zone is ignored for ranges.
 func (s AddressSet) Contains(host string) bool {
 	a, e := netip.ParseAddr(host)
 	if e != nil {
@@ -142,6 +149,7 @@ func (s AddressSet) Contains(host string) bool {
 	return i < len(s.intervals) && s.intervals[i].first.BitLen() == a.BitLen() && s.intervals[i].first.Compare(a) <= 0
 }
 
+// SelectionOptions configures host, name, vendor and model filters.
 type SelectionOptions struct {
 	IncludeHosts, ExcludeHosts, IncludeNames, ExcludeNames, IncludeVendors, ExcludeVendors, IncludeModels, ExcludeModels []string
 	NameMatch, ModelMatch                                                                                                string
@@ -151,15 +159,22 @@ type textRules struct {
 	mode             MatchMode
 	globs            map[string]string
 }
+
+// Selection decides whether a device is selected.
 type Selection struct {
 	includeHosts, excludeHosts AddressSet
 	names, models, vendors     textRules
 }
+
+// Decision lists why a device was not selected.
 type Decision struct {
 	Reasons []string `json:"reasons"`
 }
 
+// Selected reports whether no filter rejected the device.
 func (d Decision) Selected() bool { return len(d.Reasons) == 0 }
+
+// NewSelection validates o and returns the selection.
 func NewSelection(o SelectionOptions) (Selection, error) {
 	var s Selection
 	var e error

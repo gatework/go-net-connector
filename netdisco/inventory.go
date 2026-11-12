@@ -17,23 +17,31 @@ import (
 	"github.com/gatework/go-net-connector/inventory"
 )
 
+// Source returns the device inventory.
 type Source interface {
 	Devices(ctx context.Context) ([]inventory.Device, error)
 }
+
+// SourceFunc adapts a function to Source.
 type SourceFunc func(context.Context) ([]inventory.Device, error)
 
+// Devices calls f.
 func (f SourceFunc) Devices(ctx context.Context) ([]inventory.Device, error) { return f(ctx) }
 
+// InventoryError carries a stable inventory failure code.
 type InventoryError struct {
 	Code  string
 	cause error
 }
 
-func (e *InventoryError) Error() string            { return "netdisco: " + e.Code }
+func (e *InventoryError) Error() string { return "netdisco: " + e.Code }
+
+// GoString returns the same safe text as Error.
 func (e *InventoryError) GoString() string         { return e.Error() }
 func (e *InventoryError) Unwrap() error            { return e.cause }
 func newInventoryError(code string, e error) error { return &InventoryError{code, e} }
 
+// Limits bound an inventory download; zero fields take defaults.
 type Limits struct {
 	PageSize, MaxPages, MaxDevices      int
 	MaxResponseBytes, MaxInventoryBytes int64
@@ -65,12 +73,15 @@ func (l Limits) normalize() (Limits, error) {
 	return l, nil
 }
 
+// HTTPOptions configures the Netdisco HTTP API source.
 type HTTPOptions struct {
 	URL, Username, Password, APIKey string
 	RequireHTTPS                    bool
 	Client                          *http.Client
 	Limits                          Limits
 }
+
+// HTTP reads the inventory from the Netdisco HTTP API.
 type HTTP struct {
 	base                    *url.URL
 	username, password, key string
@@ -79,6 +90,7 @@ type HTTP struct {
 	ownedTransport          *http.Transport
 }
 
+// NewHTTP validates o and returns the source.
 func NewHTTP(o HTTPOptions) (*HTTP, error) {
 	u, limits, e := httpSettings(o, true)
 	if e != nil {
@@ -139,7 +151,9 @@ const httpInventoryEndpoint = "api/v1/search/device"
 const httpInventoryFields = "ip,name,dns,vendor,os,model,os_ver,serial"
 const httpFallbackQuery = "%"
 
-func (h *HTTP) String() string   { return "netdisco.HTTP" }
+func (h *HTTP) String() string { return "netdisco.HTTP" }
+
+// GoString returns the same credential-free text as String.
 func (h *HTTP) GoString() string { return h.String() }
 
 // Devices logs in when no API key is configured and pages through the
@@ -407,7 +421,9 @@ func (o HTTPOptions) MarshalJSON() ([]byte, error) {
 		Limits        Limits
 	}{safeOptionURL(o.URL), o.Username, o.RequireHTTPS, o.Limits})
 }
-func (o HTTPOptions) String() string   { b, _ := o.MarshalJSON(); return "HTTPOptions" + string(b) }
+func (o HTTPOptions) String() string { b, _ := o.MarshalJSON(); return "HTTPOptions" + string(b) }
+
+// GoString returns the same credential-free text as String.
 func (o HTTPOptions) GoString() string { return o.String() }
 
 func safeOptionURL(raw string) string {
