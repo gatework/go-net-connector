@@ -39,15 +39,15 @@ Driver 提供终端语法（Terminal）与需要代码的厂商行为（配置�
 
 `scripts/check-architecture.py` 从 `GOWORK=off go list -json ./...` 的实际生产包和传递依赖检查边界：公开库不依赖 cmd、bootstrap、CLI 或 workflow；通用 connector 不选择 vendors；bootstrap 不依赖 CLI；workflow 不反向依赖 bootstrap、CLI 或进度 Reporter。规则按完整包路径及其子包匹配，允许既有纯呈现、存储和厂商能力依赖，测试专用导入不计入生产边界。CI 同时运行临时 Go 模块负例，验证嵌套包、间接导入和解析失败不能绕过规则。
 
-## 厂商方言与能力
+## 厂商平台与能力
 
-`vendors.NewBuiltinRegistry()` 是唯一内建平台目录。目录项是 `vendors/<family>` 家族包中的具体平台对象；每个对象就是一个 `connector.Driver`，`Terminal()` 返回独立副本。`vendors/dialect` 只放 `Platform`、`Registry` 和跨包 DTO；`topology`、`transfer`、`fleet` 各自拥有消费端行为接口。家族对象只组合真实支持的接口，例如 Radware 提供描述读取和接口身份映射，不虚报邻居发现或描述写入。每个家族包集中组织 `dialect.go`、`inventory.go`、`configuration.go`、`topology.go` 和传输策略。H3C/H3C Wireless 与 Cisco IOS/NX-OS 共享家族实现，同时保留独立平台类型和平台覆盖。
+`vendors.NewBuiltinRegistry()` 是唯一内建平台目录。目录项是 `vendors/<family>` 家族包中的具体平台对象；每个对象就是一个 `connector.Driver`，`Terminal()` 返回独立副本。`platform` 包只放 `Platform`、`Registry`、`Identity` 和诊断错误；能力接口及其数据类型（`topology.Neighbor`、`transfer.TFTPOptions` 等）由消费包定义；`topology`、`transfer`、`fleet` 各自拥有消费端行为接口。家族对象只组合真实支持的接口，例如 Radware 提供描述读取和接口身份映射，不虚报邻居发现或描述写入。每个家族包集中组织 `platform.go`、`inventory.go`、`configuration.go`、`topology.go` 和传输策略。H3C/H3C Wireless 与 Cisco IOS/NX-OS 共享家族实现，同时保留独立平台类型和平台覆盖。
 
-登录/命令提示符、分页、错误签名、交互回复、配置命令、保存签名和身份匹配都由家族包拥有。共享 `vendors/internal/driver` 提供 `driver.Base`（Terminal 持有、配置采集工厂、正向保存确认）、拓扑委托、保存回执校验和 TFTP 骨架。配置采集策略负责平台模式切换、差异校验和文本清理；缺少已知正向签名时保存结果保持未确认。`vendors/internal/topology` 只执行通用 TextFSM 解析和结果校验；模板选择、记录计数和配置完整性规则与方言同包。接口名规范化由 `internal/ifname` 单一实现。TFTP 的命令、来源文件发现、完成证据及回执元数据也由家族包负责。`MatchInventory` 是 `dialect.Platform` 的一部分，Registry 从同一有序平台清单生成键查找表与匹配顺序，fleet 仅依赖自己的 resolver 接口，保留用户覆盖优先顺序。
+登录/命令提示符、分页、错误签名、交互回复、配置命令、保存签名和身份匹配都由家族包拥有。共享 `vendors/internal/driver` 提供 `driver.Base`（Terminal 持有、配置采集工厂、正向保存确认）、拓扑委托、保存回执校验和 TFTP 骨架。配置采集策略负责平台模式切换、差异校验和文本清理；缺少已知正向签名时保存结果保持未确认。`vendors/internal/topology` 只执行通用 TextFSM 解析和结果校验；模板选择、记录计数和配置完整性规则与平台同包。接口名规范化由 `internal/ifname` 单一实现。TFTP 的命令、来源文件发现、完成证据及回执元数据也由家族包负责。`MatchInventory` 是 `platform.Platform` 的一部分，Registry 从同一有序平台清单生成键查找表与匹配顺序，fleet 仅依赖自己的 resolver 接口，保留用户覆盖优先顺序。
 
-`fleet.NewRules`、Topology 构造与纯计划函数、transfer API（包括 TFTP 和远程配置导出）都接收显式 `dialect.Registry`。Bootstrap 只在组合根创建一次目录并注入调用方，避免包级平台/名称查询和全局运行时插件状态。扩展新平台时需同时声明能力、连接档案以及该平台实际支持的可选行为；没有证据的能力保持不支持。
+`fleet.NewRules`、Topology 构造与纯计划函数、transfer API（包括 TFTP 和远程配置导出）都接收显式 `platform.Registry`。Bootstrap 只在组合根创建一次目录并注入调用方，避免包级平台/名称查询和全局运行时插件状态。扩展新平台时需同时声明能力、连接档案以及该平台实际支持的可选行为；没有证据的能力保持不支持。
 
-解析错误通过 `dialect.DiagnosticError` 携带稳定 code/phase，再由消费者转换为自己的领域错误。通用解析失败映射为 `unrecognized_output`；平台有明确证据时保留更具体的错误码，例如 Fortinet VDOM 不一致。诊断文本只包含元数据，不包含设备原始输出。
+解析错误通过 `platform.DiagnosticError` 携带稳定 code/phase，再由消费者转换为自己的领域错误。通用解析失败映射为 `unrecognized_output`；平台有明确证据时保留更具体的错误码，例如 Fortinet VDOM 不一致。诊断文本只包含元数据，不包含设备原始输出。
 
 新增平台的业务流程、文件职责、内建识别顺序和验收清单见 [`vendors/README.md`](../vendors/README.md)。
 

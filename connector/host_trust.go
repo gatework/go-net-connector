@@ -124,7 +124,7 @@ func (t *hostTrust) commit(parent context.Context) (err error) {
 }
 
 func (t *hostTrust) persist(ctx context.Context) (err error) {
-	if t.policy == "strict" {
+	if t.policy == HostKeyStrict {
 		return nil
 	}
 	candidate, e := t.keys(ctx, t.snapshot)

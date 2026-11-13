@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -118,12 +118,8 @@ func clonePattern(r *regexp.Regexp) *regexp.Regexp {
 	//nolint:staticcheck // SA1019: independent Longest configuration is intentional.
 	return r.Copy()
 }
-func cloneInteractions(in []Interaction) []Interaction {
-	out := append([]Interaction(nil), in...)
-	return out
-}
 func (c Command) clone() Command {
-	c.Interactions = cloneInteractions(c.Interactions)
+	c.Interactions = slices.Clone(c.Interactions)
 	if c.Timeout != nil {
 		v := *c.Timeout
 		c.Timeout = &v
@@ -243,13 +239,10 @@ func (a Attempt) MarshalJSON() ([]byte, error) {
 
 // Attempts returns detached progress for main and hook-issued command attempts.
 // Steps and their JSON format continue to include only accepted main commands.
-func (r Result) Attempts() []Attempt { return append([]Attempt(nil), r.attempts...) }
+func (r Result) Attempts() []Attempt { return slices.Clone(r.attempts) }
 
 // Steps returns a copy of the accepted main-command step list.
-func (r Result) Steps() []StepResult {
-	out := append([]StepResult(nil), r.steps...)
-	return out
-}
+func (r Result) Steps() []StepResult { return slices.Clone(r.steps) }
 
 // JoinedOutput joins verified accepted command outputs, never configuration or raw bytes.
 func (r Result) JoinedOutput() (string, error) {
@@ -317,13 +310,20 @@ type Terminal struct {
 	LoginPrompt, CommandPrompt, UsernamePrompt, PasswordPrompt, PrivilegePrompt, Pager expect.Pattern
 	PagerResponse, PrivilegeCommand                                                    string
 	AuthenticationErrors, CommandErrors                                                []*regexp.Regexp
-	LoginInteractions, Interactions                                                    []Interaction
-	ConfigCommands, SaveCommands                                                       []string
-	CommandTimeout                                                                     time.Duration
+	// PrivilegedPrompt recognizes a login prompt that is already in the
+	// privileged mode, so PrivilegeCommand is not sent. Nil never matches.
+	PrivilegedPrompt                *regexp.Regexp
+	LoginInteractions, Interactions []Interaction
+	ConfigCommands, SaveCommands    []string
+	CommandTimeout                  time.Duration
 }
 
 // LoginState contains the device state discovered by AfterLogin.
-type LoginState struct{ HAState string }
+type LoginState struct {
+	// Labels are platform-defined facts read from the login banner, such as
+	// a high-availability role under "ha_state".
+	Labels map[string]string
+}
 
 // ConfigStrategy owns prompt selection, validation and final assembly for one collection.
 type ConfigStrategy interface {
@@ -334,25 +334,33 @@ type ConfigStrategy interface {
 	Finish(ctx context.Context, result Result) (string, error)
 }
 
-func (p Terminal) clone() (Terminal, error) {
-	if e := p.Validate(); e != nil {
-		return Terminal{}, e
-	}
-	p.LoginInteractions = cloneInteractions(p.LoginInteractions)
-	p.Interactions = cloneInteractions(p.Interactions)
-	for _, list := range []*[]*regexp.Regexp{&p.AuthenticationErrors, &p.CommandErrors} {
-		*list = append([]*regexp.Regexp(nil), (*list)...)
+// Clone returns a deep copy that shares no slice or compiled expression with t.
+// A nil LegacyCryptoArguments stays nil so the default still applies.
+func (t Terminal) Clone() Terminal {
+	t.LoginInteractions = slices.Clone(t.LoginInteractions)
+	t.Interactions = slices.Clone(t.Interactions)
+	for _, list := range []*[]*regexp.Regexp{&t.AuthenticationErrors, &t.CommandErrors} {
+		*list = slices.Clone(*list)
 		for i, r := range *list {
 			(*list)[i] = clonePattern(r)
 		}
 	}
+	t.PrivilegedPrompt = clonePattern(t.PrivilegedPrompt)
+	t.LegacyCryptoArguments = slices.Clone(t.LegacyCryptoArguments)
+	t.ConfigCommands = slices.Clone(t.ConfigCommands)
+	t.SaveCommands = slices.Clone(t.SaveCommands)
+	return t
+}
+
+// normalized validates the grammar and returns a detached copy with defaults applied.
+func (t Terminal) normalized() (Terminal, error) {
+	if e := t.Validate(); e != nil {
+		return Terminal{}, e
+	}
+	p := t.Clone()
 	if p.LegacyCryptoArguments == nil {
 		p.LegacyCryptoArguments = []string{"-1"}
-	} else {
-		p.LegacyCryptoArguments = append([]string{}, p.LegacyCryptoArguments...)
 	}
-	p.ConfigCommands = append([]string(nil), p.ConfigCommands...)
-	p.SaveCommands = append([]string(nil), p.SaveCommands...)
 	if p.CommandTimeout == 0 {
 		p.CommandTimeout = 25 * time.Second
 	}
@@ -429,7 +437,7 @@ type ConnectionConfig struct {
 	// info, warn and error exclude all response bodies. Sensitive exchanges are
 	// suppressed at every level. A blocked writer must cooperate with its owner.
 	Logger   io.Writer
-	LogLevel string
+	LogLevel LogLevel
 }
 
 func (c ConnectionConfig) String() string { return "connector.ConnectionConfig" }
@@ -448,9 +456,7 @@ func (c ConnectionConfig) MarshalJSON() ([]byte, error) {
 
 // TransportFactory transfers every non-nil transport to Device, even on error.
 // Close must interrupt concurrent I/O; failed cleanup may be retried. A transport
-// may implement Authenticated(context.Context) error to persist authentication
-// evidence after login. That hook receives the admitted login context and must
-// synchronize with Close.
+// may also implement LoginCommitter.
 type TransportFactory func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error)
 
 // Option configures Device construction before a transport is opened.
@@ -465,19 +471,6 @@ func WithTransportFactory(f TransportFactory) Option {
 		}
 		o.factory = f
 		return nil
-	}
-}
-
-func isNilValue(value any) bool {
-	if value == nil {
-		return true
-	}
-	v := reflect.ValueOf(value)
-	switch v.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return v.IsNil()
-	default:
-		return false
 	}
 }
 

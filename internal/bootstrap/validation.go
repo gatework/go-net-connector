@@ -50,6 +50,21 @@ func (s *Services) validatePolicy() error {
 
 func (s *Services) validateInventorySource() error {
 	p := s.policy
+	switch stringValue(p, "inventory.source") {
+	case "file":
+		// A file inventory must not be mixed with a Netdisco endpoint: the
+		// operator could not tell which one a run used.
+		if stringValue(p, "inventory.file") == "" {
+			return &config.FieldError{Field: "inventory.file", Problem: "required"}
+		}
+		if stringValue(p, "netdisco.url") != "" || p.Value("netdisco.query") != nil {
+			return &config.FieldError{Field: "inventory.source", Problem: "conflicts with netdisco settings"}
+		}
+		return nil
+	case "netdisco":
+	default:
+		return &config.FieldError{Field: "inventory.source", Problem: "invalid"}
+	}
 	switch stringValue(p, "netdisco.source") {
 	case "http":
 		if p.Value("netdisco.query") != nil || p.Value("netdisco.query_params") != nil {

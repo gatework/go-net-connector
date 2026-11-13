@@ -131,7 +131,7 @@ func BenchmarkCommandLogging(b *testing.B) {
 		b.Run(level, func(b *testing.B) {
 			cfg := ConnectionConfig{Host: "fixture", Password: "password", CommandTimeout: 30 * time.Second}
 			if level != "nil" {
-				cfg.Logger, cfg.LogLevel = io.Discard, level
+				cfg.Logger, cfg.LogLevel = io.Discard, LogLevel(level)
 			}
 			prompt := testPattern(`sw#\s*$`)
 			done := make(chan struct{})

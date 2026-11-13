@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/gatework/go-net-connector/connector"
-	dialectapi "github.com/gatework/go-net-connector/vendors/dialect"
+	"github.com/gatework/go-net-connector/transfer"
 	"github.com/gatework/go-net-connector/vendors/internal/driver"
 )
 
@@ -17,11 +17,11 @@ var (
 	remoteSavedPattern    = regexp.MustCompile(`^Wrote ([1-9][0-9]*) lines of output to '([^']+)'$`)
 )
 
-func (remoteBackupPolicy) Destination(o dialectapi.RemoteBackupOptions) string {
+func (remoteBackupPolicy) Destination(o transfer.RemoteBackupOptions) string {
 	return o.Protocol + "://" + o.Username + "@" + o.Server + "/" + o.Path
 }
 
-func (p remoteBackupPolicy) Command(o dialectapi.RemoteBackupOptions, password string) connector.Command {
+func (p remoteBackupPolicy) Command(o transfer.RemoteBackupOptions, password string) connector.Command {
 	timeout := 180 * time.Second
 	command := connector.Command{
 		Text:            "show configuration | save " + p.Destination(o),

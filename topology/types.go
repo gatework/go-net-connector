@@ -4,16 +4,19 @@ package topology
 import (
 	"errors"
 	"fmt"
+	"regexp"
+	"slices"
+	"strings"
 
 	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/vendors/dialect"
+	"github.com/gatework/go-net-connector/platform"
 )
 
 // Topology failure categories.
 var (
 	ErrInvalid      = errors.New("topology: invalid plan")
 	ErrUnsupported  = errors.New("topology: unsupported operation")
-	ErrParse        = dialect.ErrParse
+	ErrParse        = platform.ErrParse
 	ErrStale        = errors.New("topology: stale plan")
 	ErrConfirmation = errors.New("topology: confirmation required")
 	ErrVerification = errors.New("topology: description unconfirmed")
@@ -34,7 +37,30 @@ func (e *Error) Unwrap() error                       { return e.cause }
 func newError(code, phase string, cause error) error { return &Error{code, phase, cause} }
 
 // Neighbor is a vendor-neutral discovered adjacency.
-type Neighbor = dialect.Neighbor
+type Neighbor struct {
+	LocalInterface    string `json:"local_interface"`
+	NeighborName      string `json:"neighbor_name"`
+	NeighborInterface string `json:"neighbor_interface"`
+	ChassisID         string `json:"chassis_id"`
+	Protocol          string `json:"protocol"`
+}
+
+var unknownNeighbor = regexp.MustCompile(`(?i)^(?:-+|n/?a|unknown|none|null|not\s+(?:available|advertised))?$`)
+
+// IdentityIssue reports which advertised neighbor identity is unknown.
+func (n Neighbor) IdentityIssue() string {
+	if unknownNeighbor.MatchString(strings.TrimSpace(n.NeighborName)) {
+		return "unknown_neighbor_name"
+	}
+	if unknownNeighbor.MatchString(strings.TrimSpace(n.NeighborInterface)) {
+		return "unknown_neighbor_interface"
+	}
+	return ""
+}
+
+// WriteMode describes the mode transitions around a platform's interface
+// description commands.
+type WriteMode struct{ Enter, Leave, InterfaceExit string }
 
 // Change binds one proposed description to its prior value and neighbor.
 type Change struct {
@@ -51,7 +77,7 @@ type Evidence [3]string
 // Apply snapshots and validates all fields before performing any device I/O.
 type Plan struct {
 	Host     string                 `json:"host"`
-	Vendor   string                 `json:"vendor"`
+	Platform string                 `json:"platform"`
 	Evidence map[string]Evidence    `json:"evidence"`
 	Changes  []Change               `json:"changes"`
 	Commands []string               `json:"commands"`
@@ -130,7 +156,7 @@ type Result struct {
 
 // Steps returns a copy of the command receipt slice.
 func (r Result) Steps() []connector.StepResult {
-	return append([]connector.StepResult(nil), r.Receipts...)
+	return slices.Clone(r.Receipts)
 }
 func (r Result) String() string {
 	return fmt.Sprintf("topology.Result{steps:%d,verified:%t,persisted:%t}", len(r.Receipts), r.Verified, r.Persisted)

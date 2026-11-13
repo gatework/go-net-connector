@@ -86,7 +86,7 @@ func TestDeployPlanJSONNeverConstructsDevice(t *testing.T) {
 func TestDeployRunEndToEndWritesReport(t *testing.T) {
 	r, out, errout := fixtureRuntime(t)
 	writeScript(t, r.CWD, "ntp.txt", "ntp server 192.0.2.50\n")
-	r.Args = []string{"deploy", "run", "--script", "ntp.txt", "--json", "--quiet", "--non-interactive", "--username", "operator", "--password", "private-secret"}
+	r.Args = []string{"deploy", "run", "--script", "ntp.txt", "--no-snapshot", "--json", "--quiet", "--non-interactive", "--username", "operator", "--password", "private-secret"}
 	r.Source = netdisco.SourceFunc(func(context.Context) ([]inventory.Device, error) {
 		return []inventory.Device{{IP: "192.0.2.1", Vendor: "cisco", OS: "ios", Name: "core"}}, nil
 	})

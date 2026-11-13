@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -66,7 +67,7 @@ func closePipe(file io.Closer) error {
 // CommandLauncher starts one worker per transaction over ordinary pipes.
 // The caller supplies an installed executable; this never installs remote code.
 func CommandLauncher(executable string, arguments ...string) Launcher {
-	return commandLauncher(executable, append([]string(nil), arguments...), reapGroup)
+	return commandLauncher(executable, slices.Clone(arguments), reapGroup)
 }
 func commandLauncher(executable string, args []string, reap func(int, chan error) error) Launcher {
 	return func(ctx context.Context) (Channel, error) {

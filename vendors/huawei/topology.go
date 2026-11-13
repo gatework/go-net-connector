@@ -4,18 +4,18 @@ import (
 	"strings"
 
 	"github.com/gatework/go-net-connector/internal/ifname"
-	"github.com/gatework/go-net-connector/vendors/internal/topology"
+	"github.com/gatework/go-net-connector/vendors/internal/topoparse"
 )
 
-var headerPattern = topology.Pattern(`(?i)^[ \t]*Local Intf[ \t]+Neighbor Dev[ \t]+Neighbor Intf[ \t]+Exptime`)
+var headerPattern = topoparse.Pattern(`(?i)^[ \t]*Local Intf[ \t]+Neighbor Dev[ \t]+Neighbor Intf[ \t]+Exptime`)
 
-func topologyParser() topology.Parser {
-	return topology.Parser{
+func topologyParser() topoparse.Parser {
+	return topoparse.Parser{
 		NeighborTemplate:     "huawei/display_lldp_neighbor_brief.textfsm",
 		DescriptionTemplate:  "huawei/display_current_configuration.textfsm",
-		Protocol:             topology.ProtocolLLDP,
+		Protocol:             topoparse.ProtocolLLDP,
 		CountNeighbors:       neighborCount,
-		ValidateDescriptions: topology.ValidateInterfaceRows,
+		ValidateDescriptions: topoparse.ValidateInterfaceRows,
 		CanonicalInterface: func(name string) string {
 			return ifname.Key(strings.NewReplacer(" ", "", "\t", "").Replace(name))
 		},
@@ -23,6 +23,6 @@ func topologyParser() topology.Parser {
 }
 
 func neighborCount(text string) (int, bool) {
-	lines, seen := topology.TableLines(text, headerPattern)
+	lines, seen := topoparse.TableLines(text, headerPattern)
 	return len(lines), seen && len(lines) == 0
 }

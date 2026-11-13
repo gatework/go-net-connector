@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/vendors/dialect"
+	"github.com/gatework/go-net-connector/platform"
 )
 
 // ErrInvalid means transfer options are unsafe or invalid.
@@ -56,7 +56,7 @@ func (r Result) GoString() string { return r.String() }
 
 // TFTP runs the common transfer workflow through the resolved platform's
 // command, interaction and completion policy.
-func TFTP(ctx context.Context, registry dialect.Registry, d *connector.Device, options TFTPOptions) (result Result, err error) {
+func TFTP(ctx context.Context, registry platform.Registry, d *connector.Device, options TFTPOptions) (result Result, err error) {
 	if d == nil || registry == nil {
 		return result, ErrInvalid
 	}
@@ -91,9 +91,9 @@ func TFTP(ctx context.Context, registry dialect.Registry, d *connector.Device, o
 	return result, err
 }
 
-func prepareTFTP(ctx context.Context, op *connector.Operation, policy TFTPPolicy, registry dialect.Registry, vendor, host string, options *TFTPOptions, explicitPath bool, result *Result) error {
-	if command := policy.SourceFileCommand(); command != "" && options.SourceFile == "" {
-		r, executeErr := op.ExecuteCommand(ctx, connector.Command{Text: command}, connector.ExecuteOptions{})
+func prepareTFTP(ctx context.Context, op *connector.Operation, policy TFTPPolicy, registry platform.Registry, vendor, host string, options *TFTPOptions, explicitPath bool, result *Result) error {
+	if resolver, ok := policy.(SourceFileResolver); ok && options.SourceFile == "" {
+		r, executeErr := op.ExecuteCommand(ctx, connector.Command{Text: resolver.SourceFileCommand()}, connector.ExecuteOptions{})
 		result.Steps = append(result.Steps, r.Steps()...)
 		if executeErr != nil {
 			return executeErr
@@ -102,7 +102,7 @@ func prepareTFTP(ctx context.Context, op *connector.Operation, policy TFTPPolicy
 		if outputErr != nil {
 			return outputErr
 		}
-		options.SourceFile, outputErr = policy.ResolveSourceFile(output)
+		options.SourceFile, outputErr = resolver.ResolveSourceFile(output)
 		if outputErr != nil || ValidateSource(options.SourceFile) != nil {
 			return newError("startup_config_missing", errors.Join(ErrUnconfirmed, outputErr))
 		}
@@ -152,7 +152,7 @@ func finishTFTP(policy TFTPPolicy, options TFTPOptions, explicitSource, explicit
 	if ValidatePath(actualPath) != nil {
 		return newError("transfer_path_unconfirmed", errors.Join(ErrInvalid, executeErr))
 	}
-	metadata := policy.Receipt(options, explicitSource, explicitPath)
+	metadata := policy.Evidence(options, explicitSource, explicitPath)
 	result.Receipt = Receipt{ConfigurationKind: metadata.ConfigurationKind, Format: metadata.Format, Server: options.Server, Verification: VerificationDeviceReported, SourceFile: metadata.SourceFile, Path: actualPath, CompletedAt: time.Now().UTC()}
 	if metadata.IncludeRequestedPath {
 		requested := options.Path

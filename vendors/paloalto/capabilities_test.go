@@ -1,9 +1,10 @@
 package paloalto_test
 
 import (
+	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/platform"
 	"github.com/gatework/go-net-connector/topology"
 	"github.com/gatework/go-net-connector/transfer"
-	"github.com/gatework/go-net-connector/vendors/dialect"
 	"github.com/gatework/go-net-connector/vendors/paloalto"
 )
 
@@ -11,10 +12,11 @@ import (
 // mistyped method fails the build instead of silently dropping a capability.
 // Keep this list in step with the capability matrix in vendors/README.md.
 var (
-	_ dialect.Platform           = paloalto.Dialect{}
-	_ topology.NeighborDiscovery = paloalto.Dialect{}
-	_ topology.DescriptionReader = paloalto.Dialect{}
-	_ topology.InterfaceIdentity = paloalto.Dialect{}
-	_ topology.WriteRestriction  = paloalto.Dialect{}
-	_ transfer.TFTPPolicy        = paloalto.Dialect{}
+	_ platform.Platform          = paloalto.Platform{}
+	_ topology.NeighborDiscovery = paloalto.Platform{}
+	_ topology.DescriptionReader = paloalto.Platform{}
+	_ topology.InterfaceIdentity = paloalto.Platform{}
+	_ topology.WriteRestriction  = paloalto.Platform{}
+	_ transfer.TFTPPolicy        = paloalto.Platform{}
+	_ connector.Committer        = paloalto.Platform{}
 )

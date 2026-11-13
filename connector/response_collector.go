@@ -1,6 +1,9 @@
 package connector
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // responseCollector keeps detached receive fragments and bounds tiny-fragment
 // metadata. freeze discards the old fragments after its one exact-size join.
@@ -52,5 +55,5 @@ func (c *responseCollector) flush() {
 }
 func (c *responseCollector) clone() responseCollector {
 	c.flush()
-	return responseCollector{parts: append([]string(nil), c.parts...), size: c.size}
+	return responseCollector{parts: slices.Clone(c.parts), size: c.size}
 }

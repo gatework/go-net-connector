@@ -1,4 +1,4 @@
-package transfer
+package transfer_test
 
 import (
 	"encoding/json"
@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/gatework/go-net-connector/transfer"
 )
 
 func TestGoldenTransferCommandsAndReplies(t *testing.T) {
@@ -33,7 +35,7 @@ func TestGoldenTransferCommandsAndReplies(t *testing.T) {
 			if want.Source != nil {
 				source = *want.Source
 			}
-			command := tftpPolicyForTest(t, vendor).Command("192.0.2.1", TFTPOptions{Server: "192.0.2.9", Path: want.Path, SourceFile: source, Timeout: 180 * time.Second}, true)
+			command := tftpPolicyForTest(t, vendor).Command("192.0.2.1", transfer.TFTPOptions{Server: "192.0.2.9", Path: want.Path, SourceFile: source, Timeout: 180 * time.Second}, true)
 			if len(want.Commands) != 1 {
 				t.Fatal("command count changed")
 			}

@@ -1,7 +1,7 @@
 package topsec_test
 
 import (
-	"github.com/gatework/go-net-connector/vendors/dialect"
+	"github.com/gatework/go-net-connector/platform"
 	"github.com/gatework/go-net-connector/vendors/topsec"
 )
 
@@ -9,5 +9,5 @@ import (
 // mistyped method fails the build instead of silently dropping a capability.
 // Keep this list in step with the capability matrix in vendors/README.md.
 var (
-	_ dialect.Platform = topsec.Dialect{}
+	_ platform.Platform = topsec.Platform{}
 )

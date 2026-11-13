@@ -31,7 +31,7 @@ func TestSessionObserversAreBoundPerServicesCopy(t *testing.T) {
 	observed := 0
 	scoped := base.WithSessionObserver(func(context.Context, connector.SessionEvent) error { observed++; return nil })
 	for _, services := range []*Services{scoped, base} {
-		if _, err = services.DeviceWithLogger(t.Context(), fleet.Record{Host: "192.0.2.1", Vendor: "h3c"}, nil); err != nil {
+		if _, err = services.DeviceWithLogger(t.Context(), fleet.Record{Host: "192.0.2.1", Platform: "h3c"}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

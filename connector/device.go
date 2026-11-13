@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	expect "github.com/gatework/go-expect"
+	"github.com/gatework/go-net-connector/internal/nilcheck"
 	"github.com/gatework/go-net-connector/internal/terminal"
 	"github.com/gatework/go-net-connector/internal/textcodec"
 )
@@ -33,7 +36,7 @@ type Device struct {
 	lease      atomic.Bool
 	connected  atomic.Bool
 	privileged atomic.Bool
-	haState    atomic.Value
+	labels     atomic.Pointer[map[string]string]
 	prompt     atomic.Value
 	session    *expect.Session
 	transport  io.ReadWriteCloser
@@ -45,13 +48,13 @@ type Device struct {
 // New constructs an unconnected Device for driver d. It never opens a
 // connection; register Close, then call Connect explicitly.
 func New(d Driver, cfg ConnectionConfig, opts ...Option) (*Device, error) {
-	if isNilValue(d) {
+	if nilcheck.IsNil(d) {
 		return nil, ErrInvalid
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	p, e := d.Terminal().clone()
+	p, e := d.Terminal().normalized()
 	if e != nil {
 		return nil, e
 	}
@@ -79,8 +82,8 @@ func New(d Driver, cfg ConnectionConfig, opts ...Option) (*Device, error) {
 	if e = validateInteractions(cfg.Challenges); e != nil {
 		return nil, e
 	}
-	cfg.Challenges = cloneInteractions(cfg.Challenges)
-	cfg.LegacyCryptoArguments = append([]string(nil), cfg.LegacyCryptoArguments...)
+	cfg.Challenges = slices.Clone(cfg.Challenges)
+	cfg.LegacyCryptoArguments = slices.Clone(cfg.LegacyCryptoArguments)
 	o := options{factory: openProcess}
 	for _, opt := range opts {
 		if opt == nil {
@@ -93,13 +96,18 @@ func New(d Driver, cfg ConnectionConfig, opts ...Option) (*Device, error) {
 	device := &Device{terminal: p, driver: d, config: cfg, factory: o.factory}
 	device.preparer, device.observer, device.inspector = driverHooks(d)
 	device.prompt.Store(promptState{err: ErrIncomplete})
-	device.haState.Store("")
 	device.log = &logWriter{target: cfg.Logger, level: cfg.LogLevel, host: cfg.Host, encoding: "auto", paused: true}
 	return device, nil
 }
 
 // PlatformName returns the terminal declaration name.
 func (d *Device) PlatformName() string { return d.terminal.Name }
+
+// ConfigCommands returns a copy of the exact running-configuration sequence.
+func (d *Device) ConfigCommands() []string { return slices.Clone(d.terminal.ConfigCommands) }
+
+// SaveCommands returns a copy of the platform's persistence sequence.
+func (d *Device) SaveCommands() []string { return slices.Clone(d.terminal.SaveCommands) }
 
 // Host returns the configured device host.
 func (d *Device) Host() string { return d.config.Host }
@@ -174,13 +182,14 @@ func (d *Device) Close() error {
 	return nil
 }
 
-// HAState returns the inspected HA state while the device is connected.
-func (d *Device) HAState() string {
-	if !d.connected.Load() {
+// LoginLabel returns a fact the platform read from the login banner, such as
+// "ha_state", while the device is connected.
+func (d *Device) LoginLabel(name string) string {
+	labels := d.labels.Load()
+	if labels == nil || !d.connected.Load() {
 		return ""
 	}
-	state, _ := d.haState.Load().(string)
-	return state
+	return (*labels)[name]
 }
 
 func (d *Device) setPrompt(response Response) {
@@ -251,7 +260,7 @@ func (d *Device) connect(parent context.Context) error {
 		if err == nil || !unreachable(err) || attempt >= d.config.ConnectRetries || d.connected.Load() {
 			return err
 		}
-		if e := d.sessionEvent(parent, "connect_retry", "warn", Command{}, ""); e != nil {
+		if e := d.sessionEvent(parent, "connect_retry", LogWarn, Command{}, ""); e != nil {
 			return joinFailures(err, e)
 		}
 		timer := time.NewTimer(time.Duration(attempt+1) * connectRetryDelay)
@@ -289,17 +298,17 @@ func (d *Device) connectWithRecovery(parent context.Context) error {
 	cfg.LegacyCryptoArguments = nil
 	cfg.replaceHostKey = false
 	err := d.connectOnce(ctx, cfg)
-	if err == nil || cfg.Protocol != "ssh" || errors.Is(err, errCleanup) || d.transport != nil || ctx.Err() != nil {
+	if err == nil || cfg.Protocol != ProtocolSSH || errors.Is(err, errCleanup) || d.transport != nil || ctx.Err() != nil {
 		return err
 	}
 	switch {
 	case d.config.AllowTelnetFallback && errors.Is(err, errConnectionRefused):
-		cfg.Protocol = "telnet"
+		cfg.Protocol = ProtocolTelnet
 		cfg.Port = 0
-	case d.config.HostKeyPolicy == "replace" && errors.Is(err, errHostKeyChanged):
+	case d.config.HostKeyPolicy == HostKeyReplace && errors.Is(err, errHostKeyChanged):
 		cfg.replaceHostKey = true
 	case d.config.AllowLegacyCrypto && errors.Is(err, errRSATooSmall) && len(d.terminal.LegacyCryptoArguments) > 0:
-		cfg.LegacyCryptoArguments = append([]string(nil), d.terminal.LegacyCryptoArguments...)
+		cfg.LegacyCryptoArguments = slices.Clone(d.terminal.LegacyCryptoArguments)
 	case d.config.AllowLegacyCrypto && errors.Is(err, errUnsupportedCipher):
 		cfg.LegacyCryptoArguments = []string{"-c", "des"}
 	default:
@@ -322,12 +331,12 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 	if e := d.log.scope(d.baseSecrets(), true); e != nil {
 		return newError("log_error", "logging", Command{}, e)
 	}
-	if e := d.sessionEvent(ctx, "connect", "info", Command{}, ""); e != nil {
+	if e := d.sessionEvent(ctx, "connect", LogInfo, Command{}, ""); e != nil {
 		return e
 	}
 	defer func() {
 		if err != nil {
-			err = joinFailures(err, d.sessionEvent(ctx, "connect_failed", "error", Command{}, "failed"))
+			err = joinFailures(err, d.sessionEvent(ctx, "connect_failed", LogError, Command{}, "failed"))
 		}
 	}()
 	t, session, e := d.openSession(ctx, cfg)
@@ -370,25 +379,25 @@ func (d *Device) connectOnce(ctx context.Context, cfg ConnectionConfig) (err err
 	d.connected.Store(true)
 	d.lifeMu.Unlock()
 	d.retired.Store(false)
-	d.privileged.Store(strings.Contains(response.Response().RawPrompt(), "]"))
+	d.privileged.Store(d.terminal.PrivilegedPrompt != nil && d.terminal.PrivilegedPrompt.MatchString(response.Response().RawPrompt()))
 	return d.finishLogin(ctx, t, response)
 }
 
 // openSession transfers every partial factory result into owned cleanup before
 // constructing the matching session.
 func (d *Device) openSession(ctx context.Context, cfg ConnectionConfig) (io.ReadWriteCloser, *expect.Session, error) {
-	cfg.Challenges = cloneInteractions(cfg.Challenges)
-	cfg.LegacyCryptoArguments = append([]string(nil), cfg.LegacyCryptoArguments...)
+	cfg.Challenges = slices.Clone(cfg.Challenges)
+	cfg.LegacyCryptoArguments = slices.Clone(cfg.LegacyCryptoArguments)
 	t, e := d.factory(ctx, cfg)
 	// A partial factory return still transfers cleanup responsibility.
-	if !isNilValue(t) {
+	if !nilcheck.IsNil(t) {
 		d.transport = t
 		d.owner = &closeOwner{ReadWriteCloser: t}
 	}
 	if e != nil {
 		return nil, nil, joinCleanup(newError("connection_failed", "connect", Command{}, e), d.closeResources())
 	}
-	if isNilValue(t) {
+	if nilcheck.IsNil(t) {
 		return nil, nil, ErrConnection
 	}
 	var owned io.ReadWriteCloser = d.owner
@@ -416,14 +425,13 @@ func (d *Device) finishLogin(ctx context.Context, t io.ReadWriteCloser, response
 		if err != nil {
 			return newError("after_login_failed", "login", Command{}, err)
 		}
-		d.haState.Store(state.HAState)
+		labels := maps.Clone(state.Labels)
+		d.labels.Store(&labels)
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if c, ok := t.(interface {
-		Authenticated(ctx context.Context) error
-	}); ok {
+	if c, ok := t.(LoginCommitter); ok {
 		if e := c.Authenticated(ctx); e != nil {
 			return newError("host_key_commit_failed", "login", Command{}, e)
 		}
@@ -431,7 +439,7 @@ func (d *Device) finishLogin(ctx context.Context, t io.ReadWriteCloser, response
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return d.sessionEvent(ctx, "login_complete", "info", Command{}, "ok")
+	return d.sessionEvent(ctx, "login_complete", LogInfo, Command{}, "ok")
 }
 
 func (d *Device) baseSecrets() []string {
@@ -446,7 +454,7 @@ func (d *Device) baseSecrets() []string {
 
 func (d *Device) loginInteractions(secret string) []Interaction {
 	hostkey := Interaction{Pattern: hostKeyQuestion, Limit: 1, Respond: func(context.Context, string) (string, error) {
-		if d.config.HostKeyPolicy == "strict" {
+		if d.config.HostKeyPolicy == HostKeyStrict {
 			return "", ErrAuthentication
 		}
 		return "yes\n", nil
@@ -490,7 +498,7 @@ func (d *Device) closeOwnedResources() error {
 	d.retired.Store(true)
 	d.connected.Store(false)
 	d.privileged.Store(false)
-	d.haState.Store("")
+	d.labels.Store(nil)
 	d.prompt.Store(promptState{err: ErrIncomplete})
 	var failure error
 	d.lifeMu.Lock()

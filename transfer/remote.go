@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/vendors/dialect"
+	"github.com/gatework/go-net-connector/platform"
 )
 
 // RemoteOptions describes a remote configuration destination. Password is used
@@ -31,7 +31,7 @@ func ValidateRemote(o RemoteOptions) error {
 
 // RemoteBackup runs a platform-provided remote export capability. The receipt
 // establishes device-reported completion only.
-func RemoteBackup(ctx context.Context, registry dialect.Registry, d *connector.Device, o RemoteOptions) (result Result, err error) {
+func RemoteBackup(ctx context.Context, registry platform.Registry, d *connector.Device, o RemoteOptions) (result Result, err error) {
 	if registry == nil || len(registry.Names()) == 0 || d == nil {
 		return result, ErrInvalid
 	}
@@ -49,7 +49,7 @@ func RemoteBackup(ctx context.Context, registry dialect.Registry, d *connector.D
 	if o.Protocol == "" {
 		o.Protocol = "scp"
 	}
-	options := o.dialectOptions()
+	options := o.policyOptions()
 	destination := policy.Destination(options)
 	command := policy.Command(options, o.Password)
 	err = d.WithOperation(ctx, func(ctx context.Context, op *connector.Operation) error {
@@ -90,6 +90,6 @@ func (o RemoteOptions) String() string { b, _ := o.MarshalJSON(); return "Remote
 
 // GoString formats remote options without the password.
 func (o RemoteOptions) GoString() string { return o.String() }
-func (o RemoteOptions) dialectOptions() dialect.RemoteBackupOptions {
-	return dialect.RemoteBackupOptions{Server: o.Server, Path: o.Path, Username: o.Username, Protocol: o.Protocol}
+func (o RemoteOptions) policyOptions() RemoteBackupOptions {
+	return RemoteBackupOptions{Server: o.Server, Path: o.Path, Username: o.Username, Protocol: o.Protocol}
 }

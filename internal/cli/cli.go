@@ -429,8 +429,6 @@ func (r Runtime) fail(program string, e error) int {
 	}
 	if field, ok := errors.AsType[*config.FieldError](e); ok {
 		switch field.Problem {
-		case "removed":
-			message = "配置 " + display.Text(field.Field) + " 已移除；请改用 " + display.Text(field.Replacement)
 		case "required":
 			message = "配置 " + display.Text(field.Field) + " 未设置；请通过配置文件、环境变量或对应选项设置"
 		default:

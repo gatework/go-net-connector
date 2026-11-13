@@ -15,7 +15,7 @@ func addExecCommands(root *cobra.Command, leaf commandBuilder) {
 	}
 	leaf(exec, "plan", "校验命令并预览采集目标，不连接设备", "exec", "plan", func(c *cobra.Command, o *options) {
 		bind(c, o, false)
-		c.Example = "  netman exec plan --command 'show version' --vendor cisco --json"
+		c.Example = "  netman exec plan --command 'show version' --platform cisco_ios --json"
 	})
 	leaf(exec, "run", "逐台执行只读命令并保存输出为设备名称-IP.txt", "exec", "run", func(c *cobra.Command, o *options) {
 		bind(c, o, true)

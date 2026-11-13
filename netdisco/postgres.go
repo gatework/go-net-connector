@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -37,7 +38,7 @@ func NewPostgres(o PostgresOptions) (*Postgres, error) {
 	if strings.TrimSpace(o.Query) == "" || strings.ContainsRune(o.Query, 0) {
 		return nil, newInventoryError("invalid_query", nil)
 	}
-	parameters := append([]any(nil), o.Parameters...)
+	parameters := slices.Clone(o.Parameters)
 	for _, p := range parameters {
 		switch v := p.(type) {
 		case nil, bool, int, int64, int32:

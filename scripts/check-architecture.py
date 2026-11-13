@@ -10,8 +10,8 @@ import sys
 
 
 LIBRARIES = (
-    "archive", "config", "connector", "fleet", "inventory", "netdisco",
-    "parallel", "storage", "textfsm", "topology", "transfer", "vendors",
+    "archive", "config", "connector", "facts", "fleet", "inventory", "inventoryfile", "netdisco",
+    "parallel", "platform", "storage", "textfsm", "topology", "transfer", "vendors",
 )
 APPLICATION = ("cmd", "internal/bootstrap", "internal/cli", "internal/workflow")
 RULES = (

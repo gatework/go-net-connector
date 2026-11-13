@@ -122,7 +122,7 @@ var (
 	publicFlags = map[string]string{"netdisco-url": "ND_URL", "source": "ND_SOURCE", "query": "ND_QUERY", "query-params": "ND_QUERY_PARAMS", "cache-mode": "ND_CACHE_MODE", "known-hosts": "NC_KNOWN_HOSTS", "jump-host": "NC_SSH_JUMP_HOST", "connect-retries": "NC_SSH_CONNECT_RETRIES", "host-key-policy": "NC_HOST_KEY_POLICY", "protocol": "NC_PROTOCOL", "max-script-output-bytes": "NC_MAX_SCRIPT_OUTPUT_BYTES", "tftp-root": "NC_TFTP_ROOT", "tftp-server": "NC_TFTP_HOST", "name-match": "NC_NAME_MATCH", "model-match": "NC_MODEL_MATCH", "layout": "NC_BACKUP_LAYOUT"}
 	secretFlags = map[string]string{ //nolint:gosec // maps flags to environment variable names, not secrets
 		"username": "NC_DEVICE_USERNAME", "password": "NC_DEVICE_PASSWORD", "enable-password": "NC_ENABLE_PASSWORD", "netdisco-username": "ND_USERNAME", "netdisco-password": "ND_PASSWORD"}
-	filterFlags = map[string]string{"hosts": "NC_INCLUDE_HOSTS", "host": "NC_INCLUDE_HOSTS", "exclude-hosts": "NC_EXCLUDE_HOSTS", "name": "NC_INCLUDE_NAMES", "exclude-name": "NC_EXCLUDE_NAMES", "vendor": "NC_INCLUDE_VENDORS", "exclude-vendor": "NC_EXCLUDE_VENDORS", "model": "NC_INCLUDE_MODELS", "exclude-model": "NC_EXCLUDE_MODELS"}
+	filterFlags = map[string]string{"hosts": "NC_INCLUDE_HOSTS", "host": "NC_INCLUDE_HOSTS", "exclude-hosts": "NC_EXCLUDE_HOSTS", "name": "NC_INCLUDE_NAMES", "exclude-name": "NC_EXCLUDE_NAMES", "platform": "NC_INCLUDE_PLATFORMS", "exclude-platform": "NC_EXCLUDE_PLATFORMS", "model": "NC_INCLUDE_MODELS", "exclude-model": "NC_EXCLUDE_MODELS"}
 )
 
 // collectOverrides records the changed public, secret and filter flags.
@@ -150,7 +150,7 @@ func deriveOverrides(f *pflag.FlagSet, o *options) {
 	if only, _ := f.GetBool("cache-only"); only {
 		o.public["ND_CACHE_MODE"] = string(netdisco.CacheOnly)
 	}
-	if o.directory != "" && o.mode != "deploy" && o.mode != "exec" {
+	if o.directory != "" && o.mode != "deploy" && o.mode != "exec" && o.mode != "facts" {
 		key := "NC_BACKUP_DIRECTORY"
 		if o.mode == "topology" {
 			key = "NC_TOPOLOGY_DIRECTORY"
@@ -165,10 +165,10 @@ func deriveOverrides(f *pflag.FlagSet, o *options) {
 		o.public[key] = integerString(o.parallel)
 	}
 	if o.sample > 0 {
-		o.public["NC_SAMPLE_PER_VENDOR"] = integerString(o.sample)
+		o.public["NC_SAMPLE_PER_PLATFORM"] = integerString(o.sample)
 	}
 	if o.all {
-		o.public["NC_SAMPLE_PER_VENDOR"] = "0"
+		o.public["NC_SAMPLE_PER_PLATFORM"] = "0"
 	}
 	if f.Changed("success-policy") {
 		o.public["NC_BACKUP_SUCCESS_POLICY"] = o.policy

@@ -3,6 +3,7 @@ package textcodec
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -18,7 +19,7 @@ var ErrEncoding = errors.New("textcodec: invalid or unsupported output encoding"
 // before logging. Auto decoding must not make a secret visible under a different
 // interpretation of an otherwise ambiguous byte sequence.
 func SecretVariants(secrets []string, name string) []string {
-	out := append([]string(nil), secrets...)
+	out := slices.Clone(secrets)
 	var codecs []encoding.Encoding
 	switch name {
 	case "gbk":

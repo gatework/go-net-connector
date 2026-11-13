@@ -7,7 +7,7 @@ func bindBackup(c *cobra.Command, o *options) {
 	f.StringVar(&o.directory, "directory", "", "备份输出`目录`")
 	f.StringVar(&o.layout, "layout", "batch", "输出目录`布局`：batch（批次）或 flat（平铺）")
 	f.BoolVar(&o.all, "all", false, "选择全部就绪设备并取消配置中的抽样限制")
-	f.IntVar(&o.sample, "sample", 0, "每厂商抽样`数量`，范围 1 至 5；未指定时使用配置")
+	f.IntVar(&o.sample, "sample", 0, "每平台抽样`数量`，范围 1 至 5；未指定时使用配置")
 	f.BoolVar(&o.save, "save", false, "采集前先保存配置；仅以设备的正向保存回执为成功")
 	f.StringVar(&o.policy, "success-policy", "", "成功`策略`：strict、selected 或 verified；默认 CLI 为 selected，TFTP 为 verified")
 }
@@ -35,7 +35,7 @@ func bindOperation(c *cobra.Command, o *options, progress bool) {
 	}
 	f.Bool("ask-password", false, "在终端隐藏输入设备密码")
 	f.Bool("ask-netdisco-password", false, "在终端隐藏输入清单服务密码")
-	for _, flag := range []struct{ name, description string }{{"host", "精确设备 IP `地址`；可重复"}, {"hosts", "设备 IP、CIDR 或地址`范围`；可重复"}, {"exclude-hosts", "排除的设备地址或`范围`；可重复"}, {"name", "设备名称筛选`条件`；可重复"}, {"exclude-name", "排除设备名称`条件`；可重复"}, {"vendor", "厂商筛选`名称`；可重复"}, {"exclude-vendor", "排除厂商`名称`；可重复"}, {"model", "设备型号筛选`条件`；可重复"}, {"exclude-model", "排除设备型号`条件`；可重复"}} {
+	for _, flag := range []struct{ name, description string }{{"host", "精确设备 IP `地址`；可重复"}, {"hosts", "设备 IP、CIDR 或地址`范围`；可重复"}, {"exclude-hosts", "排除的设备地址或`范围`；可重复"}, {"name", "设备名称筛选`条件`；可重复"}, {"exclude-name", "排除设备名称`条件`；可重复"}, {"platform", "平台筛选`键`（如 cisco_ios）；可重复"}, {"exclude-platform", "排除平台`键`；可重复"}, {"model", "设备型号筛选`条件`；可重复"}, {"exclude-model", "排除设备型号`条件`；可重复"}} {
 		f.StringArray(flag.name, nil, flag.description)
 	}
 }

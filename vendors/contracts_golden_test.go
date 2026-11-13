@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestGoldenProfileCommands(t *testing.T) {
+func TestGoldenPlatformCommands(t *testing.T) {
 	var fixture struct {
 		Profiles map[string]struct {
 			Config, Save []string
@@ -29,7 +29,7 @@ func TestGoldenProfileCommands(t *testing.T) {
 	}
 	for name, want := range fixture.Profiles {
 		t.Run(name, func(t *testing.T) {
-			p := profileForTest(t, name)
+			p := lookupPlatform(t, name)
 			config := []string{}
 			config = append(config, p.Terminal().ConfigCommands...)
 			save := []string{}

@@ -3,7 +3,7 @@ package fortinet
 import (
 	"regexp"
 
-	dialectapi "github.com/gatework/go-net-connector/vendors/dialect"
+	"github.com/gatework/go-net-connector/platform"
 )
 
 var (
@@ -13,7 +13,7 @@ var (
 )
 
 // MatchInventory reports whether an inventory identity belongs to this platform.
-func (Dialect) MatchInventory(identity dialectapi.InventoryIdentity) bool {
+func (Platform) MatchInventory(identity platform.Identity) bool {
 	return labelPattern.MatchString(identity.Vendor) &&
 		(identity.OS == "fortios" || fortigateLabel.MatchString(identity.Vendor) || fortigateModel.MatchString(identity.Model))
 }

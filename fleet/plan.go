@@ -3,8 +3,7 @@ package fleet
 import (
 	"errors"
 	"net/netip"
-	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -12,23 +11,23 @@ import (
 	"github.com/gatework/go-net-connector/transfer"
 
 	"github.com/gatework/go-net-connector/inventory"
-	"github.com/gatework/go-net-connector/vendors/dialect"
+	"github.com/gatework/go-net-connector/platform"
 )
 
 // ErrInvalidPlan identifies invalid rules, task plans, or report inputs.
-var ErrInvalidPlan = errors.New("netdisco: invalid plan")
+var ErrInvalidPlan = errors.New("fleet: invalid plan")
 
 // Mapping matches normalized inventory identity to a connector platform.
 type Mapping struct {
-	Vendor, Connector string
-	OS, ModelPrefix   *string
+	Vendor, Platform string
+	OS, ModelPrefix  *string
 }
 
 // RuleOptions defines inventory filtering and explicit platform overrides.
 type RuleOptions struct {
-	Selection                      inventory.SelectionOptions
-	VendorOverrides, HostOverrides map[string]string
-	Mappings                       []Mapping
+	Selection                        inventory.SelectionOptions
+	PlatformOverrides, HostOverrides map[string]string
+	Mappings                         []Mapping
 }
 
 // Rules owns validated selection and platform resolution rules.
@@ -38,22 +37,16 @@ type Rules struct {
 	mappings         []Mapping
 	registered       map[string]struct{}
 	platformResolver PlatformResolver
-	registry         dialect.Registry
+	registry         platform.Registry
 }
 
 // PlatformResolver belongs to Fleet, which consumes platform recognition.
 type PlatformResolver interface {
-	ResolvePlatform(identity dialect.InventoryIdentity) (platform string, found bool)
-}
-
-var labelChars = regexp.MustCompile(`[^a-z0-9]+`)
-
-func normalizeIdentityField(s string) string {
-	return strings.TrimSpace(labelChars.ReplaceAllString(strings.ToLower(s), " "))
+	ResolvePlatform(identity platform.Identity) (platform string, found bool)
 }
 
 // NewRules validates and owns rules against an explicit platform registry.
-func NewRules(o RuleOptions, registry dialect.Registry) (*Rules, error) {
+func NewRules(o RuleOptions, registry platform.Registry) (*Rules, error) {
 	if registry == nil {
 		return nil, ErrInvalidPlan
 	}
@@ -83,7 +76,7 @@ func NewRules(o RuleOptions, registry dialect.Registry) (*Rules, error) {
 	return r, nil
 }
 
-func platformResolver(registry dialect.Registry) PlatformResolver {
+func platformResolver(registry platform.Registry) PlatformResolver {
 	resolver, _ := registry.(PlatformResolver)
 	return resolver
 }
@@ -95,10 +88,10 @@ func (r *Rules) Resolve(d inventory.Device) string {
 			return v
 		}
 	}
-	label, os, model := normalizeIdentityField(d.Vendor), normalizeIdentityField(d.OS), normalizeIdentityField(d.Model)
+	label, os, model := platform.NormalizeLabel(d.Vendor), platform.NormalizeLabel(d.OS), platform.NormalizeLabel(d.Model)
 	for _, m := range r.mappings {
 		if m.Vendor == label && (m.OS == nil || *m.OS == os) && (m.ModelPrefix == nil || strings.HasPrefix(model, *m.ModelPrefix)) {
-			return m.Connector
+			return m.Platform
 		}
 	}
 	if v := r.vendors[label]; v != "" {
@@ -107,22 +100,22 @@ func (r *Rules) Resolve(d inventory.Device) string {
 	if r.platformResolver == nil {
 		return ""
 	}
-	platform, found := r.platformResolver.ResolvePlatform(dialect.InventoryIdentity{Vendor: d.Vendor, OS: d.OS, Model: d.Model})
+	name, found := r.platformResolver.ResolvePlatform(platform.Identity{Vendor: d.Vendor, OS: d.OS, Model: d.Model})
 	if !found {
 		return ""
 	}
-	if _, registered := r.registered[platform]; !registered {
+	if _, registered := r.registered[name]; !registered {
 		return ""
 	}
-	return platform
+	return name
 }
 
 // Record contains normalized device identity and any planning issue.
-type Record struct{ Host, SourceIP, Name, Vendor, SourceVendor, Model, OS, OSVersion, Serial, Issue string }
+type Record struct{ Host, SourceIP, Name, Platform, SourceVendor, Model, OS, OSVersion, Serial, Issue string }
 
 // Record normalizes a device and records any reason it cannot be selected.
 func (r *Rules) Record(d inventory.Device) Record {
-	v := Record{SourceIP: d.IP, Name: strings.TrimSpace(d.Name), Vendor: r.Resolve(d), SourceVendor: d.Vendor, Model: d.Model, OS: d.OS, OSVersion: d.OSVersion, Serial: d.Serial}
+	v := Record{SourceIP: d.IP, Name: strings.TrimSpace(d.Name), Platform: r.Resolve(d), SourceVendor: d.Vendor, Model: d.Model, OS: d.OS, OSVersion: d.OSVersion, Serial: d.Serial}
 	if v.Name == "" {
 		v.Name = strings.TrimSpace(d.DNS)
 	}
@@ -132,26 +125,26 @@ func (r *Rules) Record(d inventory.Device) Record {
 	} else {
 		v.Host = a.String()
 	}
-	d.IP, d.Name, d.Vendor = v.Host, v.Name, v.Vendor
+	d.IP, d.Name, d.Vendor = v.Host, v.Name, v.Platform
 	if v.Issue == "" && !r.selection.Evaluate(d).Selected() {
 		v.Issue = string(planStatusFiltered)
 	}
-	if v.Issue == "" && v.Vendor == "" {
+	if v.Issue == "" && v.Platform == "" {
 		v.Issue = string(planStatusUnsupportedVendor)
 	}
 	return v
 }
 func (r *Rules) configure(o RuleOptions) error {
 	valid := func(v string) bool { _, ok := r.registered[v]; return ok }
-	for _, list := range [][]string{o.Selection.IncludeVendors, o.Selection.ExcludeVendors} {
+	for _, list := range [][]string{o.Selection.IncludePlatforms, o.Selection.ExcludePlatforms} {
 		for _, v := range list {
 			if !valid(v) {
 				return ErrInvalidPlan
 			}
 		}
 	}
-	for k, v := range o.VendorOverrides {
-		k = normalizeIdentityField(k)
+	for k, v := range o.PlatformOverrides {
+		k = platform.NormalizeLabel(k)
 		if k == "" || !valid(v) {
 			return ErrInvalidPlan
 		}
@@ -185,16 +178,16 @@ func (r *Rules) configureHosts(overrides map[string]string) error {
 func (r *Rules) configureMappings(mappings []Mapping) error {
 	valid := func(v string) bool { _, ok := r.registered[v]; return ok }
 	for _, m := range mappings {
-		m.Vendor = normalizeIdentityField(m.Vendor)
-		if m.Vendor == "" || !valid(m.Connector) {
+		m.Vendor = platform.NormalizeLabel(m.Vendor)
+		if m.Vendor == "" || !valid(m.Platform) {
 			return ErrInvalidPlan
 		}
 		if m.OS != nil {
-			v := normalizeIdentityField(*m.OS)
+			v := platform.NormalizeLabel(*m.OS)
 			m.OS = &v
 		}
 		if m.ModelPrefix != nil {
-			v := normalizeIdentityField(*m.ModelPrefix)
+			v := platform.NormalizeLabel(*m.ModelPrefix)
 			m.ModelPrefix = &v
 		}
 		r.mappings = append(r.mappings, m)
@@ -202,19 +195,13 @@ func (r *Rules) configureMappings(mappings []Mapping) error {
 	return nil
 }
 
-// BackupFilename returns a safe filename using the configured naming style.
-func (r Record) BackupFilename(style string) (string, error) {
+// Filename returns the safe "<name>-<address>.txt" artifact name of the device.
+func (r Record) Filename() (string, error) {
 	a, e := netip.ParseAddr(r.Host)
 	if e != nil || a.Zone() != "" {
 		return "", ErrInvalidPlan
 	}
 	base := strings.ReplaceAll(a.String(), ":", "_") + ".txt"
-	if style == "" || style == "ip" {
-		return base, nil
-	}
-	if style != "hostname_ip" {
-		return "", ErrInvalidPlan
-	}
 	var b strings.Builder
 	dash := false
 	for _, c := range strings.ToValidUTF8(r.Name, "-") {
@@ -254,28 +241,36 @@ type PlanEntry struct {
 	Status string
 }
 
-// PlanOptions defines operation, sampling and transfer arbitration policy.
+// PlanOptions defines admission, sampling and transfer arbitration policy.
 type PlanOptions struct {
-	Mode                string
-	LimitPerVendor      int
-	AllowFixedNameReuse bool
-	Target              func(Record) (transfer.Target, error)
+	// LimitPerPlatform samples at most this many admitted devices per platform
+	// (0 to 5); zero admits all.
+	LimitPerPlatform int
+	// Admit decides, without I/O, whether the operation supports a device. A
+	// non-empty result is the device's skip status. Nil admits every device.
+	Admit func(record Record, p platform.Platform) (skip string)
+	// Target resolves the transfer destination of an admitted device. When set,
+	// devices that would overwrite one another's remote file are arbitrated.
+	Target func(Record) (transfer.Target, error)
+	// ReuseDestination reports whether a platform may share one fixed remote
+	// file name between devices. Nil never allows it.
+	ReuseDestination func(p platform.Platform) bool
 }
 
 // Plan owns inventory outcomes and the ready tasks derived from them.
 type Plan struct {
-	mode      mode
 	entries   []PlanEntry
 	tasks     []Task
 	transfers map[int]transfer.Target
 }
 
-// NewPlan validates operation capabilities and arbitrates duplicate hosts and destinations.
+// NewPlan classifies the inventory, admits devices for one operation, samples
+// them per platform and arbitrates duplicate hosts and destinations.
 func NewPlan(rows []inventory.Device, rules *Rules, o PlanOptions) (Plan, error) {
-	if rules == nil || (o.Mode != "backup" && o.Mode != "tftp") || o.LimitPerVendor < 0 || o.LimitPerVendor > 5 || (o.Mode == "tftp" && o.Target == nil) {
+	if rules == nil || o.LimitPerPlatform < 0 || o.LimitPerPlatform > 5 {
 		return Plan{}, ErrInvalidPlan
 	}
-	p := Plan{mode: mode(o.Mode), transfers: map[int]transfer.Target{}}
+	p := Plan{transfers: map[int]transfer.Target{}}
 	counts := map[string]int{}
 	for _, d := range rows {
 		r := rules.Record(d)
@@ -284,42 +279,28 @@ func NewPlan(rows []inventory.Device, rules *Rules, o PlanOptions) (Plan, error)
 			counts[r.Host]++
 		}
 	}
-	capabilities, groups, groupOrder, err := preparePlanEntries(&p, counts, rules, o)
+	platforms, groups, groupOrder, err := preparePlanEntries(&p, counts, rules, o)
 	if err != nil {
 		return Plan{}, err
 	}
-	arbitration := arbitratePlan(&p, groups, groupOrder, o.LimitPerVendor)
-	preparePlanTasks(&p, arbitration, capabilities, o)
+	arbitration := arbitratePlan(&p, groups, groupOrder, o.LimitPerPlatform)
+	preparePlanTasks(&p, arbitration, platforms, o)
 	return p, nil
 }
 
 // Entries returns a copy of the inventory outcomes in inventory order.
-func (p Plan) Entries() []PlanEntry { return append([]PlanEntry(nil), p.entries...) }
+func (p Plan) Entries() []PlanEntry { return slices.Clone(p.entries) }
 
 // ErrMissingCredentials reports a device with no configured login credentials.
 var ErrMissingCredentials = errors.New("fleet: missing device credentials")
 
 // Tasks returns a copy of the ready tasks in inventory order.
-func (p Plan) Tasks() []Task { return append([]Task(nil), p.tasks...) }
+func (p Plan) Tasks() []Task { return slices.Clone(p.tasks) }
 
-type capability struct {
-	backup, tftp, allowDestinationReuse bool
-}
-
-func (r *Rules) capability(vendor string, planMode mode) (capability, error) {
-	declaration, err := r.registry.Lookup(vendor)
-	if err != nil {
-		return capability{}, ErrInvalidPlan
-	}
-	if planMode == modeBackup {
-		return capability{backup: len(declaration.Terminal().ConfigCommands) > 0}, nil
-	}
-	tftpPolicy, hasTransfer := declaration.(transfer.TFTPPolicy)
-	return capability{tftp: hasTransfer, allowDestinationReuse: hasTransfer && tftpPolicy.AllowsConcurrentDestinationReuse()}, nil
-}
-
-func preparePlanEntries(p *Plan, counts map[string]int, rules *Rules, o PlanOptions) (map[string]capability, map[string][]int, []string, error) {
-	capabilities := make(map[string]capability)
+// preparePlanEntries admits each classified device and groups the admitted
+// ones by platform. Every platform is looked up once per plan.
+func preparePlanEntries(p *Plan, counts map[string]int, rules *Rules, o PlanOptions) (map[string]platform.Platform, map[string][]int, []string, error) {
+	platforms := make(map[string]platform.Platform)
 	groups := map[string][]int{}
 	groupOrder := []string{}
 	for i := range p.entries {
@@ -328,23 +309,25 @@ func preparePlanEntries(p *Plan, counts map[string]int, rules *Rules, o PlanOpti
 		if counts[r.Host] > 1 && r.Host != "" {
 			entry.Status = string(planStatusDuplicateHost)
 		}
-		if planStatus(entry.Status) != "" {
+		if entry.Status != "" {
 			continue
 		}
-		supported, ok := capabilities[r.Vendor]
+		declared, ok := platforms[r.Platform]
 		if !ok {
 			var err error
-			supported, err = rules.capability(r.Vendor, p.mode)
+			declared, err = rules.registry.Lookup(r.Platform)
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, ErrInvalidPlan
 			}
-			capabilities[r.Vendor] = supported
+			platforms[r.Platform] = declared
 		}
-		if (p.mode == modeBackup && !supported.backup) || (p.mode == modeTFTP && !supported.tftp) {
-			entry.Status = string(planStatusUnsupportedOperation)
-			continue
+		if o.Admit != nil {
+			if skip := o.Admit(r, declared); skip != "" {
+				entry.Status = skip
+				continue
+			}
 		}
-		if p.mode == modeTFTP {
+		if o.Target != nil {
 			target, e := o.Target(r)
 			if e != nil {
 				return nil, nil, nil, e
@@ -354,12 +337,12 @@ func preparePlanEntries(p *Plan, counts map[string]int, rules *Rules, o PlanOpti
 			}
 			p.transfers[i] = target
 		}
-		if _, exists := groups[r.Vendor]; !exists {
-			groupOrder = append(groupOrder, r.Vendor)
+		if _, exists := groups[r.Platform]; !exists {
+			groupOrder = append(groupOrder, r.Platform)
 		}
-		groups[r.Vendor] = append(groups[r.Vendor], i)
+		groups[r.Platform] = append(groups[r.Platform], i)
 	}
-	return capabilities, groups, groupOrder, nil
+	return platforms, groups, groupOrder, nil
 }
 
 // arbitratePlan uses sampling order; tasks and outcomes retain inventory order.
@@ -368,7 +351,7 @@ func arbitratePlan(p *Plan, groups map[string][]int, groupOrder []string, limit 
 	if limit > 0 {
 		for _, vendor := range groupOrder {
 			indices := groups[vendor]
-			sort.SliceStable(indices, func(i, j int) bool { return p.entries[indices[i]].Device.Host < p.entries[indices[j]].Device.Host })
+			slices.SortStableFunc(indices, func(a, b int) int { return strings.Compare(p.entries[a].Device.Host, p.entries[b].Device.Host) })
 			for n, i := range indices {
 				if n >= limit {
 					p.entries[i].Status = string(planStatusSampleLimit)
@@ -380,7 +363,7 @@ func arbitratePlan(p *Plan, groups map[string][]int, groupOrder []string, limit 
 	}
 	if limit == 0 {
 		for i, e := range p.entries {
-			if planStatus(e.Status) == "" {
+			if e.Status == "" {
 				arbitration = append(arbitration, i)
 			}
 		}
@@ -388,24 +371,26 @@ func arbitratePlan(p *Plan, groups map[string][]int, groupOrder []string, limit 
 	return arbitration
 }
 
-func preparePlanTasks(p *Plan, arbitration []int, capabilities map[string]capability, o PlanOptions) {
-	targets := map[[2]string]int{}
-	if p.mode == modeTFTP {
+func preparePlanTasks(p *Plan, arbitration []int, platforms map[string]platform.Platform, o PlanOptions) {
+	type destination [2]string
+	owners := map[destination]int{}
+	if o.Target != nil {
 		for _, i := range arbitration {
 			target := p.transfers[i]
-			if _, exists := targets[[2]string{target.Server, target.Path}]; !exists {
-				targets[[2]string{target.Server, target.Path}] = i
+			key := destination{target.Server, target.Path}
+			if _, exists := owners[key]; !exists {
+				owners[key] = i
 			}
 		}
 	}
 	for i := range p.entries {
 		e := &p.entries[i]
-		if planStatus(e.Status) != "" {
+		if e.Status != "" {
 			continue
 		}
 		target := p.transfers[i]
-		reuseDestination := o.AllowFixedNameReuse && capabilities[e.Device.Vendor].allowDestinationReuse
-		if p.mode == modeTFTP && targets[[2]string{target.Server, target.Path}] != i && !reuseDestination {
+		reuse := o.ReuseDestination != nil && o.ReuseDestination(platforms[e.Device.Platform])
+		if o.Target != nil && owners[destination{target.Server, target.Path}] != i && !reuse {
 			e.Status = string(planStatusRemoteFilenameCollision)
 			continue
 		}

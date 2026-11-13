@@ -1,13 +1,11 @@
 package topology
 
-import "github.com/gatework/go-net-connector/vendors/dialect"
-
 // NeighborDiscovery is the part of a platform policy needed to collect and
 // parse neighbor evidence. It is asserted by the topology workflow.
 type NeighborDiscovery interface {
 	NeighborStatusCommand() string
 	NeighborCommand(status, prompt string) (string, error)
-	ParseNeighbors(output string) ([]dialect.Neighbor, error)
+	ParseNeighbors(output string) ([]Neighbor, error)
 }
 
 // DescriptionReader parses the platform's running configuration.
@@ -25,7 +23,7 @@ type InterfaceIdentity interface {
 // DescriptionWriter owns vendor command syntax for one description
 // change. The shared topology package still controls ordering and verification.
 type DescriptionWriter interface {
-	WriteMode() dialect.WriteMode
+	WriteMode() WriteMode
 	ChangeCommands(interfaceName, description string) ([]string, error)
 }
 

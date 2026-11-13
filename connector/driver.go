@@ -16,6 +16,13 @@ type Driver interface {
 	ValidateSave(ctx context.Context, result Result) error
 }
 
+// CanCollectConfig reports whether d declares a configuration collection sequence.
+func CanCollectConfig(d Driver) bool { return len(d.Terminal().ConfigCommands) > 0 }
+
+// CanSave reports whether d declares a save sequence. A successful save still
+// needs the affirmative evidence checked by ValidateSave.
+func CanSave(d Driver) bool { return len(d.Terminal().SaveCommands) > 0 }
+
 // CommandPreparer is an optional Driver hook that may rewrite or skip a
 // command before it is sent, for example to substitute a device-assigned id.
 type CommandPreparer interface {
@@ -31,6 +38,14 @@ type CommandObserver interface {
 // login banner, such as a high-availability role.
 type LoginInspector interface {
 	AfterLogin(ctx context.Context, step StepResult) (LoginState, error)
+}
+
+// LoginCommitter is an optional transport capability that persists
+// authentication evidence, such as a newly trusted host key, once login
+// completed. It receives the admitted login context and must synchronize with
+// Close.
+type LoginCommitter interface {
+	Authenticated(ctx context.Context) error
 }
 
 // StaticDriver adapts a Terminal and optional functions into a Driver. Nil
@@ -64,7 +79,7 @@ func (s StaticDriver) ValidateSave(ctx context.Context, result Result) error {
 	return s.Save(ctx, result)
 }
 
-// staticHooks exposes StaticDriver functions as optional hooks only when set,
+// hooks exposes StaticDriver functions as optional hooks only when set,
 // so an unset hook behaves exactly like a driver without that interface.
 func (s StaticDriver) hooks() (CommandPreparer, CommandObserver, LoginInspector) {
 	var p CommandPreparer
@@ -113,13 +128,20 @@ type terminalOverride struct {
 
 func (o terminalOverride) Terminal() Terminal { return o.grammar }
 
+// hookSource lets an adapter report its own hooks instead of exposing them
+// as methods it may not actually provide.
+type hookSource interface {
+	hooks() (CommandPreparer, CommandObserver, LoginInspector)
+}
+
+func (o terminalOverride) hooks() (CommandPreparer, CommandObserver, LoginInspector) {
+	return driverHooks(o.Driver)
+}
+
 // driverHooks resolves the optional hooks once, at Device construction.
 func driverHooks(d Driver) (CommandPreparer, CommandObserver, LoginInspector) {
-	switch v := d.(type) {
-	case StaticDriver:
-		return v.hooks()
-	case terminalOverride:
-		return driverHooks(v.Driver)
+	if source, ok := d.(hookSource); ok {
+		return source.hooks()
 	}
 	p, _ := d.(CommandPreparer)
 	o, _ := d.(CommandObserver)

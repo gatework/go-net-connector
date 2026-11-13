@@ -16,8 +16,10 @@
   config             打印默认值、初始化、查看和检查本地配置
   deploy             批量下发命令脚本：执行 → 保存 → 备份，任一阶段失败即停止该设备
   exec               只读命令批量采集；仅允许平台声明的只读命令
+  facts              采集设备自报的型号、序列号与版本，并与清单比对
   help               显示指定命令的中文帮助
   inventory          查看设备清单，不连接设备
+  platform           查看内建平台及其声明的能力，不读取配置或凭据
   topology           发现、规划和重新核验后应用拓扑变更
   version            显示版本与源码修订号
 
@@ -133,15 +135,15 @@
   --exclude-hosts <范围>       排除的设备地址或范围；可重复
   --exclude-model <条件>       排除设备型号条件；可重复
   --exclude-name <条件>        排除设备名称条件；可重复
-  --exclude-vendor <名称>      排除厂商名称；可重复
+  --exclude-platform <键>     排除平台键；可重复
   --host <地址>                精确设备 IP 地址；可重复
   --hosts <范围>               设备 IP、CIDR 或地址范围；可重复
   --model <条件>               设备型号筛选条件；可重复
   --model-match <方式>         设备型号匹配方式：contains、prefix 或 glob
   --name <条件>                设备名称筛选条件；可重复
   --name-match <方式>          设备名称匹配方式：contains、prefix 或 glob
-  --sample <数量>              每厂商抽样数量，范围 1 至 5；未指定时使用配置
-  --vendor <名称>              厂商筛选名称；可重复
+  --platform <键>             平台筛选键（如 cisco_ios）；可重复
+  --sample <数量>              每平台抽样数量，范围 1 至 5；未指定时使用配置
 
 连接与认证：
   --ask-netdisco-password    在终端隐藏输入清单服务密码
@@ -207,15 +209,15 @@
   --exclude-hosts <范围>       排除的设备地址或范围；可重复
   --exclude-model <条件>       排除设备型号条件；可重复
   --exclude-name <条件>        排除设备名称条件；可重复
-  --exclude-vendor <名称>      排除厂商名称；可重复
+  --exclude-platform <键>     排除平台键；可重复
   --host <地址>                精确设备 IP 地址；可重复
   --hosts <范围>               设备 IP、CIDR 或地址范围；可重复
   --model <条件>               设备型号筛选条件；可重复
   --model-match <方式>         设备型号匹配方式：contains、prefix 或 glob
   --name <条件>                设备名称筛选条件；可重复
   --name-match <方式>          设备名称匹配方式：contains、prefix 或 glob
-  --sample <数量>              每厂商抽样数量，范围 1 至 5；未指定时使用配置
-  --vendor <名称>              厂商筛选名称；可重复
+  --platform <键>             平台筛选键（如 cisco_ios）；可重复
+  --sample <数量>              每平台抽样数量，范围 1 至 5；未指定时使用配置
 
 连接与认证：
   --ask-netdisco-password    在终端隐藏输入清单服务密码
@@ -250,7 +252,7 @@
   --env-file <文件>            最后加载的环境文件；不修改进程环境
 
 示例：
-  netman backup remote --vendor juniper --remote-server 192.0.2.9 --remote-path backups --remote-username backup
+  netman backup remote --platform juniper --remote-server 192.0.2.9 --remote-path backups --remote-username backup
 
 使用 netman help <命令路径> 查看详细帮助。
 ```
@@ -277,15 +279,15 @@
   --exclude-hosts <范围>       排除的设备地址或范围；可重复
   --exclude-model <条件>       排除设备型号条件；可重复
   --exclude-name <条件>        排除设备名称条件；可重复
-  --exclude-vendor <名称>      排除厂商名称；可重复
+  --exclude-platform <键>     排除平台键；可重复
   --host <地址>                精确设备 IP 地址；可重复
   --hosts <范围>               设备 IP、CIDR 或地址范围；可重复
   --model <条件>               设备型号筛选条件；可重复
   --model-match <方式>         设备型号匹配方式：contains、prefix 或 glob
   --name <条件>                设备名称筛选条件；可重复
   --name-match <方式>          设备名称匹配方式：contains、prefix 或 glob
-  --sample <数量>              每厂商抽样数量，范围 1 至 5；未指定时使用配置
-  --vendor <名称>              厂商筛选名称；可重复
+  --platform <键>             平台筛选键（如 cisco_ios）；可重复
+  --sample <数量>              每平台抽样数量，范围 1 至 5；未指定时使用配置
 
 连接与认证：
   --ask-netdisco-password    在终端隐藏输入清单服务密码
@@ -350,15 +352,15 @@
   --exclude-hosts <范围>       排除的设备地址或范围；可重复
   --exclude-model <条件>       排除设备型号条件；可重复
   --exclude-name <条件>        排除设备名称条件；可重复
-  --exclude-vendor <名称>      排除厂商名称；可重复
+  --exclude-platform <键>     排除平台键；可重复
   --host <地址>                精确设备 IP 地址；可重复
   --hosts <范围>               设备 IP、CIDR 或地址范围；可重复
   --model <条件>               设备型号筛选条件；可重复
   --model-match <方式>         设备型号匹配方式：contains、prefix 或 glob
   --name <条件>                设备名称筛选条件；可重复
   --name-match <方式>          设备名称匹配方式：contains、prefix 或 glob
-  --sample <数量>              每厂商抽样数量，范围 1 至 5；未指定时使用配置
-  --vendor <名称>              厂商筛选名称；可重复
+  --platform <键>             平台筛选键（如 cisco_ios）；可重复
+  --sample <数量>              每平台抽样数量，范围 1 至 5；未指定时使用配置
 
 连接与认证：
   --ask-netdisco-password    在终端隐藏输入清单服务密码
@@ -633,7 +635,6 @@
   netman deploy plan [选项]
 
 常用选项：
-  --backup                   下发（及保存）成功后采集一份配置备份
   --directory <目录>           下发批次与报告输出目录（默认：./deploys）
   -h, --help                 显示当前命令的中文帮助
   --json                     以 JSON 输出结果
@@ -649,14 +650,14 @@
   --exclude-hosts <范围>       排除的设备地址或范围；可重复
   --exclude-model <条件>       排除设备型号条件；可重复
   --exclude-name <条件>        排除设备名称条件；可重复
-  --exclude-vendor <名称>      排除厂商名称；可重复
+  --exclude-platform <键>     排除平台键；可重复
   --host <地址>                精确设备 IP 地址；可重复
   --hosts <范围>               设备 IP、CIDR 或地址范围；可重复
   --model <条件>               设备型号筛选条件；可重复
   --model-match <方式>         设备型号匹配方式：contains、prefix 或 glob
   --name <条件>                设备名称筛选条件；可重复
   --name-match <方式>          设备名称匹配方式：contains、prefix 或 glob
-  --vendor <名称>              厂商筛选名称；可重复
+  --platform <键>             平台筛选键（如 cisco_ios）；可重复
 
 连接与认证：
   --ask-netdisco-password    在终端隐藏输入清单服务密码
@@ -676,8 +677,10 @@
 高级选项：
   --cache-mode <模式>          清单缓存模式：prefer、only 或 refresh
   --cache-only               仅使用已校验的清单缓存
+  --commit-confirm <分钟>      提交模型平台使用带自动回滚的提交并随后确认，回滚等待分钟数（1 至 60）；不支持的平台在计划阶段跳过
   --max-script-output-bytes <上限> 脚本响应累计字节上限
   --netdisco-url <地址>        清单 HTTP 服务地址
+  --no-snapshot              不采集变更前后的配置快照与差异
   --query <语句>               PostgreSQL 清单查询语句
   --query-params <数组>        查询参数 JSON 数组
   --refresh-inventory        刷新设备清单
@@ -702,7 +705,6 @@
   netman deploy run [选项]
 
 常用选项：
-  --backup                   下发（及保存）成功后采集一份配置备份
   --directory <目录>           下发批次与报告输出目录（默认：./deploys）
   -h, --help                 显示当前命令的中文帮助
   --json                     以 JSON 输出结果
@@ -718,14 +720,14 @@
   --exclude-hosts <范围>       排除的设备地址或范围；可重复
   --exclude-model <条件>       排除设备型号条件；可重复
   --exclude-name <条件>        排除设备名称条件；可重复
-  --exclude-vendor <名称>      排除厂商名称；可重复
+  --exclude-platform <键>     排除平台键；可重复
   --host <地址>                精确设备 IP 地址；可重复
   --hosts <范围>               设备 IP、CIDR 或地址范围；可重复
   --model <条件>               设备型号筛选条件；可重复
   --model-match <方式>         设备型号匹配方式：contains、prefix 或 glob
   --name <条件>                设备名称筛选条件；可重复
   --name-match <方式>          设备名称匹配方式：contains、prefix 或 glob
-  --vendor <名称>              厂商筛选名称；可重复
+  --platform <键>             平台筛选键（如 cisco_ios）；可重复
 
 连接与认证：
   --ask-netdisco-password    在终端隐藏输入清单服务密码
@@ -745,8 +747,10 @@
 高级选项：
   --cache-mode <模式>          清单缓存模式：prefer、only 或 refresh
   --cache-only               仅使用已校验的清单缓存
+  --commit-confirm <分钟>      提交模型平台使用带自动回滚的提交并随后确认，回滚等待分钟数（1 至 60）；不支持的平台在计划阶段跳过
   --max-script-output-bytes <上限> 脚本响应累计字节上限
   --netdisco-url <地址>        清单 HTTP 服务地址
+  --no-snapshot              不采集变更前后的配置快照与差异
   --query <语句>               PostgreSQL 清单查询语句
   --query-params <数组>        查询参数 JSON 数组
   --refresh-inventory        刷新设备清单
@@ -758,7 +762,7 @@
   --env-file <文件>            最后加载的环境文件；不修改进程环境
 
 示例：
-  netman deploy run --script ntp.txt --vendor cisco --save --backup --stop-after-failures 1
+  netman deploy run --script ntp.txt --platform cisco_ios --save --stop-after-failures 1
 
 使用 netman help <命令路径> 查看详细帮助。
 ```
@@ -807,14 +811,14 @@
   --exclude-hosts <范围>       排除的设备地址或范围；可重复
   --exclude-model <条件>       排除设备型号条件；可重复
   --exclude-name <条件>        排除设备名称条件；可重复
-  --exclude-vendor <名称>      排除厂商名称；可重复
+  --exclude-platform <键>     排除平台键；可重复
   --host <地址>                精确设备 IP 地址；可重复
   --hosts <范围>               设备 IP、CIDR 或地址范围；可重复
   --model <条件>               设备型号筛选条件；可重复
   --model-match <方式>         设备型号匹配方式：contains、prefix 或 glob
   --name <条件>                设备名称筛选条件；可重复
   --name-match <方式>          设备名称匹配方式：contains、prefix 或 glob
-  --vendor <名称>              厂商筛选名称；可重复
+  --platform <键>             平台筛选键（如 cisco_ios）；可重复
 
 连接与认证：
   --ask-netdisco-password    在终端隐藏输入清单服务密码
@@ -846,7 +850,7 @@
   --env-file <文件>            最后加载的环境文件；不修改进程环境
 
 示例：
-  netman exec plan --command 'show version' --vendor cisco --json
+  netman exec plan --command 'show version' --platform cisco_ios --json
 
 使用 netman help <命令路径> 查看详细帮助。
 ```
@@ -873,14 +877,14 @@
   --exclude-hosts <范围>       排除的设备地址或范围；可重复
   --exclude-model <条件>       排除设备型号条件；可重复
   --exclude-name <条件>        排除设备名称条件；可重复
-  --exclude-vendor <名称>      排除厂商名称；可重复
+  --exclude-platform <键>     排除平台键；可重复
   --host <地址>                精确设备 IP 地址；可重复
   --hosts <范围>               设备 IP、CIDR 或地址范围；可重复
   --model <条件>               设备型号筛选条件；可重复
   --model-match <方式>         设备型号匹配方式：contains、prefix 或 glob
   --name <条件>                设备名称筛选条件；可重复
   --name-match <方式>          设备名称匹配方式：contains、prefix 或 glob
-  --vendor <名称>              厂商筛选名称；可重复
+  --platform <键>             平台筛选键（如 cisco_ios）；可重复
 
 连接与认证：
   --ask-netdisco-password    在终端隐藏输入清单服务密码
@@ -914,6 +918,157 @@
 
 示例：
   netman exec run --command 'display interface brief' --hosts 192.0.2.0/24
+
+使用 netman help <命令路径> 查看详细帮助。
+```
+
+## netman facts
+
+```text
+采集设备自报的型号、序列号与版本，并与清单比对
+
+用法：
+  netman facts [子命令] [选项]
+
+子命令：
+  plan               预览支持事实采集的设备，不连接设备
+  run                逐台执行平台声明的只读命令并报告与清单不一致的字段
+
+常用选项：
+  -h, --help                 显示当前命令的中文帮助
+
+全局选项：
+  --config <文件>              最后加载的配置文件；相对路径从启动目录解析
+  --env-file <文件>            最后加载的环境文件；不修改进程环境
+
+使用 netman help <命令路径> 查看详细帮助。
+```
+
+## netman facts plan
+
+```text
+预览支持事实采集的设备，不连接设备
+
+用法：
+  netman facts plan [选项]
+
+常用选项：
+  --directory <目录>           报告目录（默认：./facts）
+  -h, --help                 显示当前命令的中文帮助
+  --json                     以 JSON 输出结果
+  --non-interactive          禁止读取交互输入
+  -p, --parallel <数量>        设备并发数量，范围 1 至 500；未指定时使用配置
+  --quiet                    隐藏进度提示
+
+设备筛选：
+  --exclude-hosts <范围>       排除的设备地址或范围；可重复
+  --exclude-model <条件>       排除设备型号条件；可重复
+  --exclude-name <条件>        排除设备名称条件；可重复
+  --exclude-platform <键>     排除平台键；可重复
+  --host <地址>                精确设备 IP 地址；可重复
+  --hosts <范围>               设备 IP、CIDR 或地址范围；可重复
+  --model <条件>               设备型号筛选条件；可重复
+  --model-match <方式>         设备型号匹配方式：contains、prefix 或 glob
+  --name <条件>                设备名称筛选条件；可重复
+  --name-match <方式>          设备名称匹配方式：contains、prefix 或 glob
+  --platform <键>             平台筛选键（如 cisco_ios）；可重复
+
+连接与认证：
+  --ask-netdisco-password    在终端隐藏输入清单服务密码
+  --ask-password             在终端隐藏输入设备密码
+  --connect-retries <次数>     连接被拒、无路由或超时时的重试次数（0-5，登录提示前才重试）
+  --enable-password <密码>     设备权限提升密码
+  --host-key-policy <策略>     主机密钥策略：strict、accept_new 或 replace
+  --jump-host <[用户@]主机[:端口]> SSH 跳板机 [用户@]主机[:端口]；跳板机自身密钥按本机 SSH 配置校验
+  --known-hosts <文件>         SSH 主机密钥信任文件
+  --netdisco-password <密码>   清单服务登录密码
+  --netdisco-username <用户名>  清单服务登录用户名
+  --password <密码>            显式设备登录密码，优先于环境变量
+  --protocol <协议>            设备连接协议：ssh 或 telnet
+  --stdin-credentials        先读取一行凭据 JSON；备份执行或拓扑应用前再读取 RUN
+  --username <用户名>           显式设备登录用户名
+
+高级选项：
+  --cache-mode <模式>          清单缓存模式：prefer、only 或 refresh
+  --cache-only               仅使用已校验的清单缓存
+  --max-script-output-bytes <上限> 脚本响应累计字节上限
+  --netdisco-url <地址>        清单 HTTP 服务地址
+  --query <语句>               PostgreSQL 清单查询语句
+  --query-params <数组>        查询参数 JSON 数组
+  --refresh-inventory        刷新设备清单
+  --source <类型>              清单来源类型：http 或 postgres
+
+全局选项：
+  --config <文件>              最后加载的配置文件；相对路径从启动目录解析
+  --env-file <文件>            最后加载的环境文件；不修改进程环境
+
+示例：
+  netman facts plan --platform cisco_ios --json
+
+使用 netman help <命令路径> 查看详细帮助。
+```
+
+## netman facts run
+
+```text
+逐台执行平台声明的只读命令并报告与清单不一致的字段
+
+用法：
+  netman facts run [选项]
+
+常用选项：
+  --directory <目录>           报告目录（默认：./facts）
+  -h, --help                 显示当前命令的中文帮助
+  --json                     以 JSON 输出结果
+  --non-interactive          禁止读取交互输入
+  -p, --parallel <数量>        设备并发数量，范围 1 至 500；未指定时使用配置
+  --quiet                    隐藏进度提示
+
+设备筛选：
+  --exclude-hosts <范围>       排除的设备地址或范围；可重复
+  --exclude-model <条件>       排除设备型号条件；可重复
+  --exclude-name <条件>        排除设备名称条件；可重复
+  --exclude-platform <键>     排除平台键；可重复
+  --host <地址>                精确设备 IP 地址；可重复
+  --hosts <范围>               设备 IP、CIDR 或地址范围；可重复
+  --model <条件>               设备型号筛选条件；可重复
+  --model-match <方式>         设备型号匹配方式：contains、prefix 或 glob
+  --name <条件>                设备名称筛选条件；可重复
+  --name-match <方式>          设备名称匹配方式：contains、prefix 或 glob
+  --platform <键>             平台筛选键（如 cisco_ios）；可重复
+
+连接与认证：
+  --ask-netdisco-password    在终端隐藏输入清单服务密码
+  --ask-password             在终端隐藏输入设备密码
+  --connect-retries <次数>     连接被拒、无路由或超时时的重试次数（0-5，登录提示前才重试）
+  --enable-password <密码>     设备权限提升密码
+  --host-key-policy <策略>     主机密钥策略：strict、accept_new 或 replace
+  --jump-host <[用户@]主机[:端口]> SSH 跳板机 [用户@]主机[:端口]；跳板机自身密钥按本机 SSH 配置校验
+  --known-hosts <文件>         SSH 主机密钥信任文件
+  --netdisco-password <密码>   清单服务登录密码
+  --netdisco-username <用户名>  清单服务登录用户名
+  --password <密码>            显式设备登录密码，优先于环境变量
+  --protocol <协议>            设备连接协议：ssh 或 telnet
+  --stdin-credentials        先读取一行凭据 JSON；备份执行或拓扑应用前再读取 RUN
+  --username <用户名>           显式设备登录用户名
+
+高级选项：
+  --cache-mode <模式>          清单缓存模式：prefer、only 或 refresh
+  --cache-only               仅使用已校验的清单缓存
+  --max-script-output-bytes <上限> 脚本响应累计字节上限
+  --netdisco-url <地址>        清单 HTTP 服务地址
+  --query <语句>               PostgreSQL 清单查询语句
+  --query-params <数组>        查询参数 JSON 数组
+  --refresh-inventory        刷新设备清单
+  --source <类型>              清单来源类型：http 或 postgres
+  --verbose                  在原地进度面板中显示连接和采集详情，不显示设备原始回显
+
+全局选项：
+  --config <文件>              最后加载的配置文件；相对路径从启动目录解析
+  --env-file <文件>            最后加载的环境文件；不修改进程环境
+
+示例：
+  netman facts run --hosts 192.0.2.0/24 --json
 
 使用 netman help <命令路径> 查看详细帮助。
 ```
@@ -977,14 +1132,14 @@
   --exclude-hosts <范围>       排除的设备地址或范围；可重复
   --exclude-model <条件>       排除设备型号条件；可重复
   --exclude-name <条件>        排除设备名称条件；可重复
-  --exclude-vendor <名称>      排除厂商名称；可重复
+  --exclude-platform <键>     排除平台键；可重复
   --host <地址>                精确设备 IP 地址；可重复
   --hosts <范围>               设备 IP、CIDR 或地址范围；可重复
   --model <条件>               设备型号筛选条件；可重复
   --model-match <方式>         设备型号匹配方式：contains、prefix 或 glob
   --name <条件>                设备名称筛选条件；可重复
   --name-match <方式>          设备名称匹配方式：contains、prefix 或 glob
-  --vendor <名称>              厂商筛选名称；可重复
+  --platform <键>             平台筛选键（如 cisco_ios）；可重复
 
 连接与认证：
   --ask-netdisco-password    在终端隐藏输入清单服务密码
@@ -1017,6 +1172,49 @@
 
 示例：
   netman inventory list --for topology --hosts 192.0.2.0/24 --json
+
+使用 netman help <命令路径> 查看详细帮助。
+```
+
+## netman platform
+
+```text
+查看内建平台及其声明的能力，不读取配置或凭据
+
+用法：
+  netman platform [子命令] [选项]
+
+子命令：
+  list               列出内建平台键与能力矩阵
+
+常用选项：
+  -h, --help                 显示当前命令的中文帮助
+
+全局选项：
+  --config <文件>              最后加载的配置文件；相对路径从启动目录解析
+  --env-file <文件>            最后加载的环境文件；不修改进程环境
+
+使用 netman help <命令路径> 查看详细帮助。
+```
+
+## netman platform list
+
+```text
+列出内建平台键与源码声明的能力；声明不代表实机兼容性，不读取配置或凭据。
+
+用法：
+  netman platform list [选项]
+
+常用选项：
+  -h, --help                 显示当前命令的中文帮助
+  --json                     输出 JSON
+
+全局选项：
+  --config <文件>              最后加载的配置文件；相对路径从启动目录解析
+  --env-file <文件>            最后加载的环境文件；不修改进程环境
+
+示例：
+  netman platform list --json
 
 使用 netman help <命令路径> 查看详细帮助。
 ```
@@ -1064,7 +1262,7 @@
   --exclude-hosts <范围>       排除的设备地址或范围；可重复
   --exclude-model <条件>       排除设备型号条件；可重复
   --exclude-name <条件>        排除设备名称条件；可重复
-  --exclude-vendor <名称>      排除厂商名称；可重复
+  --exclude-platform <键>     排除平台键；可重复
   --host <地址>                精确设备 IP 地址；可重复
   --hosts <范围>               设备 IP、CIDR 或地址范围；可重复
   --limit <上限>               拓扑设备数量上限，未指定时使用配置
@@ -1072,7 +1270,7 @@
   --model-match <方式>         设备型号匹配方式：contains、prefix 或 glob
   --name <条件>                设备名称筛选条件；可重复
   --name-match <方式>          设备名称匹配方式：contains、prefix 或 glob
-  --vendor <名称>              厂商筛选名称；可重复
+  --platform <键>             平台筛选键（如 cisco_ios）；可重复
 
 连接与认证：
   --ask-netdisco-password    在终端隐藏输入清单服务密码
@@ -1133,7 +1331,7 @@
   --exclude-hosts <范围>       排除的设备地址或范围；可重复
   --exclude-model <条件>       排除设备型号条件；可重复
   --exclude-name <条件>        排除设备名称条件；可重复
-  --exclude-vendor <名称>      排除厂商名称；可重复
+  --exclude-platform <键>     排除平台键；可重复
   --host <地址>                精确设备 IP 地址；可重复
   --hosts <范围>               设备 IP、CIDR 或地址范围；可重复
   --limit <上限>               拓扑设备数量上限，未指定时使用配置
@@ -1141,7 +1339,7 @@
   --model-match <方式>         设备型号匹配方式：contains、prefix 或 glob
   --name <条件>                设备名称筛选条件；可重复
   --name-match <方式>          设备名称匹配方式：contains、prefix 或 glob
-  --vendor <名称>              厂商筛选名称；可重复
+  --platform <键>             平台筛选键（如 cisco_ios）；可重复
 
 连接与认证：
   --ask-netdisco-password    在终端隐藏输入清单服务密码
@@ -1202,7 +1400,7 @@
   --exclude-hosts <范围>       排除的设备地址或范围；可重复
   --exclude-model <条件>       排除设备型号条件；可重复
   --exclude-name <条件>        排除设备名称条件；可重复
-  --exclude-vendor <名称>      排除厂商名称；可重复
+  --exclude-platform <键>     排除平台键；可重复
   --host <地址>                精确设备 IP 地址；可重复
   --hosts <范围>               设备 IP、CIDR 或地址范围；可重复
   --limit <上限>               拓扑设备数量上限，未指定时使用配置
@@ -1210,7 +1408,7 @@
   --model-match <方式>         设备型号匹配方式：contains、prefix 或 glob
   --name <条件>                设备名称筛选条件；可重复
   --name-match <方式>          设备名称匹配方式：contains、prefix 或 glob
-  --vendor <名称>              厂商筛选名称；可重复
+  --platform <键>             平台筛选键（如 cisco_ios）；可重复
 
 连接与认证：
   --ask-netdisco-password    在终端隐藏输入清单服务密码

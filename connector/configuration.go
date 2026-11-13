@@ -128,7 +128,7 @@ func finishConfiguration(ctx context.Context, result Result, strategy ConfigStra
 	return config, nil
 }
 
-// SaveConfig distinguishes command completion from profile-confirmed persistence.
+// SaveConfig distinguishes command completion from platform-confirmed persistence.
 func (d *Device) SaveConfig(ctx context.Context, opts ExecuteOptions) (Result, error) {
 	if len(d.terminal.SaveCommands) == 0 {
 		return Result{}, ErrUnsupported

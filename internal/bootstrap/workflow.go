@@ -34,7 +34,7 @@ func (s *Services) WorkflowTFTPSettings() (workflow.TFTPSettings, error) {
 	return workflow.TFTPSettings{
 		ArchiveTimeouts:   s.ArchiveTimeouts(),
 		Policy:            policy,
-		LimitPerVendor:    s.Limit(),
+		LimitPerPlatform:  s.Limit(),
 		ArchiveWorkerPath: workerPath,
 		ArchivePassword:   s.ArchivePassword,
 	}, nil

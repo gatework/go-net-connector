@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,10 +19,10 @@ import (
 	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/internal/batchreport"
 	"github.com/gatework/go-net-connector/inventory"
+	"github.com/gatework/go-net-connector/platform"
 	"github.com/gatework/go-net-connector/storage"
 	"github.com/gatework/go-net-connector/topology"
 	"github.com/gatework/go-net-connector/transfer"
-	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
 // ErrTFTPArchivePreflight identifies preparation failures before any device upload.
@@ -30,6 +31,8 @@ var ErrTFTPArchivePreflight = errors.New("TFTP archive preflight failed")
 // BackupOptions selects the success policy and output layout of a batch.
 type BackupOptions struct {
 	Policy, Layout string
+	// LimitPerPlatform samples at most this many devices per platform; zero runs all.
+	LimitPerPlatform int
 	// Save persists the running configuration before collecting it.
 	Save bool
 }
@@ -47,11 +50,15 @@ func BackupOperation(directory string, save bool) Operation {
 	if save {
 		stages = append(stages, SaveStage{})
 	}
-	return Operation{Name: "backup", Outcome: "backed_up", Stages: append(stages, BackupStage{Directory: directory})}
+	return Operation{Name: "backup", Outcome: batchreport.OutcomeBackedUp, Stages: append(stages, BackupStage{Directory: directory})}
 }
 
 // Backup collects every planned device's configuration into a batch directory.
-func (r *Runner) Backup(ctx context.Context, runtime Runtime, plan fleet.Plan, o BackupOptions, preview bool) (Result, error) {
+func (r *Runner) Backup(ctx context.Context, runtime Runtime, rows []inventory.Device, o BackupOptions, preview bool) (Result, error) {
+	plan, err := planFor(runtime, rows, BackupOperation("", o.Save), fleet.PlanOptions{LimitPerPlatform: o.LimitPerPlatform})
+	if err != nil {
+		return Result{}, err
+	}
 	if preview {
 		report := r.Plan(runtime, plan, BackupOperation("", o.Save), o.Policy)
 		return Result{Success: report.Success, Report: &report, Planned: true}, nil
@@ -86,16 +93,16 @@ func (r *Runner) TFTP(ctx context.Context, runtime Runtime, settings TFTPSetting
 	if settings.Policy == nil {
 		return Result{}, errors.New("workflow: TFTP policy is not configured")
 	}
-	plan, err := r.tftpPlan(runtime, settings, rows, o)
-	if err != nil {
-		return Result{}, err
-	}
 	stage := TFTPStage{Registry: runtime.Registry, Pools: map[string]*archive.Pool{}}
 	stages := []Stage{}
 	if o.Save {
 		stages = append(stages, SaveStage{})
 	}
-	op := Operation{Name: "tftp", Outcome: "uploaded", Stages: append(stages, stage)}
+	op := Operation{Name: "tftp", Outcome: batchreport.OutcomeUploaded, Stages: append(stages, stage)}
+	plan, err := r.tftpPlan(runtime, settings, rows, op, o)
+	if err != nil {
+		return Result{}, err
+	}
 	if o.Plan {
 		report := r.Plan(runtime, plan, op, o.Policy)
 		return Result{Success: report.Success, Report: &report, Planned: true}, nil
@@ -146,23 +153,27 @@ func (r *Runner) TFTP(ctx context.Context, runtime Runtime, settings TFTPSetting
 	return result, err
 }
 
-func (r *Runner) tftpPlan(runtime Runtime, settings TFTPSettings, rows []inventory.Device, o TFTPOptions) (fleet.Plan, error) {
+func (r *Runner) tftpPlan(runtime Runtime, settings TFTPSettings, rows []inventory.Device, op Operation, o TFTPOptions) (fleet.Plan, error) {
 	var nonce [8]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return fleet.Plan{}, err
 	}
 	suffix := time.Now().UTC().Format("20060102T150405") + "-" + hex.EncodeToString(nonce[:])
-	limit := settings.LimitPerVendor
+	limit := settings.LimitPerPlatform
 	if o.All {
 		limit = 0
 	}
-	return fleet.NewPlan(rows, runtime.Rules, fleet.PlanOptions{Mode: "tftp", LimitPerVendor: limit, AllowFixedNameReuse: true, Target: func(d fleet.Record) (transfer.Target, error) {
-		target, err := settings.Policy.For(d.Host, d.Vendor)
+	reuse := func(p platform.Platform) bool {
+		policy, ok := p.(transfer.TFTPPolicy)
+		return ok && policy.Traits().ReuseDestination
+	}
+	return planFor(runtime, rows, op, fleet.PlanOptions{LimitPerPlatform: limit, ReuseDestination: reuse, Target: func(d fleet.Record) (transfer.Target, error) {
+		target, err := settings.Policy.For(d.Host, d.Platform)
 		if err != nil {
 			return transfer.Target{}, err
 		}
 		target.Timeout = settings.ArchiveTimeouts.Upload
-		path, err := transfer.InventoryFilename(runtime.Registry, d.Vendor, d.Host, d.Name)
+		path, err := transfer.InventoryFilename(runtime.Registry, d.Platform, d.Host, d.Name)
 		if err != nil {
 			return transfer.Target{}, err
 		}
@@ -179,9 +190,9 @@ func (r *Runner) tftpPlan(runtime Runtime, settings TFTPSettings, rows []invento
 		if target.Server == "" {
 			return transfer.Target{}, &config.FieldError{Field: "tftp.server", Problem: "required"}
 		}
-		if err = transfer.Validate(runtime.Registry, d.Vendor, d.Host, target.TFTPOptions); err != nil {
+		if err = transfer.Validate(runtime.Registry, d.Platform, d.Host, target.TFTPOptions); err != nil {
 			if errors.Is(err, transfer.ErrSourceFileRequired) {
-				return transfer.Target{}, &config.FieldError{Field: "tftp.source_files." + d.Vendor, Problem: "required"}
+				return transfer.Target{}, &config.FieldError{Field: "tftp.source_files." + d.Platform, Problem: "required"}
 			}
 			return transfer.Target{}, err
 		}
@@ -194,31 +205,46 @@ type DeployOptions struct {
 	Scripts DeployScripts
 	// Save persists the configuration after every command was accepted.
 	Save bool
-	// Backup collects the configuration after a successful deployment.
-	Backup bool
+	// CommitConfirm commits with an automatic rollback after this many
+	// minutes on platforms that support it, then confirms the commit.
+	CommitConfirm int
+	// Snapshot collects the configuration before and after the change and
+	// records their diff.
+	Snapshot bool
 	// StopAfterFailures stops starting new devices once this many failed.
 	StopAfterFailures int
+	// LimitPerPlatform samples at most this many devices per platform; zero runs all.
+	LimitPerPlatform  int
 	Plan              bool
 	Directory, Policy string
 }
 
-// DeployOperation composes execute → save → backup for one session per device.
+// DeployOperation composes snapshot → execute → save → snapshot → diff in one
+// session per device.
 func DeployOperation(o DeployOptions, directory string) Operation {
-	stages := []Stage{ExecuteStage{Scripts: o.Scripts}}
+	stages := []Stage{}
+	if o.Snapshot {
+		stages = append(stages, SnapshotStage{Directory: directory})
+	}
+	stages = append(stages, ExecuteStage{Scripts: o.Scripts, CommitConfirm: o.CommitConfirm})
 	if o.Save {
 		stages = append(stages, SaveStage{})
 	}
-	if o.Backup {
-		stages = append(stages, BackupStage{Directory: directory})
+	if o.Snapshot {
+		stages = append(stages, SnapshotStage{Directory: directory, After: true}, DiffStage{Directory: directory})
 	}
-	return Operation{Name: "deploy", Outcome: "deployed", Stages: stages}
+	return Operation{Name: "deploy", Outcome: batchreport.OutcomeDeployed, Stages: stages}
 }
 
 // Deploy sends validated scripts to every planned device. A failed device is
 // never retried, so no write is replayed after an uncertain result.
-func (r *Runner) Deploy(ctx context.Context, runtime Runtime, plan fleet.Plan, o DeployOptions) (Result, error) {
-	if o.StopAfterFailures < 0 {
+func (r *Runner) Deploy(ctx context.Context, runtime Runtime, rows []inventory.Device, o DeployOptions) (Result, error) {
+	if o.StopAfterFailures < 0 || o.CommitConfirm < 0 || o.CommitConfirm > 60 {
 		return Result{}, ErrInvalidRequest
+	}
+	plan, err := planFor(runtime, rows, DeployOperation(o, ""), fleet.PlanOptions{LimitPerPlatform: o.LimitPerPlatform})
+	if err != nil {
+		return Result{}, err
 	}
 	if o.Plan {
 		report := r.Plan(runtime, plan, DeployOperation(o, ""), o.Policy)
@@ -255,11 +281,11 @@ func (r *Runner) Topology(ctx context.Context, runtime Runtime, settings Topolog
 	if mode != "plan" && mode != "discover" && mode != "apply" {
 		return Result{}, ErrInvalidRequest
 	}
-	plan, err := fleet.NewPlan(rows, runtime.Rules, fleet.PlanOptions{Mode: "backup"})
-	if err != nil {
-		return Result{}, err
-	}
 	if o.InventoryOnly {
+		plan, err := fleet.NewPlan(rows, runtime.Rules, fleet.PlanOptions{})
+		if err != nil {
+			return Result{}, err
+		}
 		return Result{Success: len(plan.Tasks()) > 0, Inventory: plan.Entries()}, nil
 	}
 	if settings.Workers > 0 {
@@ -274,11 +300,11 @@ func (r *Runner) Topology(ctx context.Context, runtime Runtime, settings Topolog
 		return Result{}, err
 	}
 	op := Operation{
-		Name: "topology", Outcome: "discovered", Limit: limit,
+		Name: "topology", Outcome: batchreport.OutcomeDiscovered, Limit: limit,
 		Stages:   []Stage{AuditStage{Mode: mode, Registry: runtime.Registry, Options: topologyFormat(settings)}},
-		Tolerate: []string{"unsupported_operation"},
-		Finish: func(report *batchreport.Report) {
-			if mode == "plan" && pendingChanges(report) {
+		Tolerate: []batchreport.Status{batchreport.StatusUnsupportedOperation},
+		Finish: func(report *batchreport.Report, evidence []*Evidence) {
+			if mode == "plan" && pendingChanges(evidence) {
 				report.Success, report.Status = false, batchreport.BatchIncomplete
 			}
 		},
@@ -291,17 +317,24 @@ func (r *Runner) Topology(ctx context.Context, runtime Runtime, settings Topolog
 				return saveTopologyReview(ctx, directory, rows, evidence, runtime.Registry)
 			},
 			Admit: func(_ batchreport.Device, e *Evidence) bool {
-				t, _ := e.Artifacts.Topology.(*TopologyEvidence)
-				return t != nil && t.Plan != nil && len(t.Plan.Changes) > 0 && (e.Outcome == "planned" || e.Outcome == "partial_planned")
+				t := e.Topology
+				return t != nil && t.Plan != nil && len(t.Plan.Changes) > 0 && (e.Outcome == batchreport.OutcomePlanned || e.Outcome == batchreport.OutcomePartialPlanned)
 			},
 		}
+	}
+	plan, err := planFor(runtime, rows, op, fleet.PlanOptions{})
+	if err != nil {
+		return Result{}, err
 	}
 	return r.run(ctx, runtime, plan, op, ExecuteOptions{Directory: directory, Policy: string(batchreport.PolicySelected)}, nil)
 }
 
-func pendingChanges(report *batchreport.Report) bool {
-	for _, device := range report.Devices {
-		if t, ok := device.Artifacts.Topology.(*TopologyEvidence); ok && t.Plan != nil && len(t.Plan.Changes) > 0 {
+func pendingChanges(evidence []*Evidence) bool {
+	for _, e := range evidence {
+		if e == nil {
+			continue
+		}
+		if t := e.Topology; t != nil && t.Plan != nil && len(t.Plan.Changes) > 0 {
 			return true
 		}
 	}
@@ -314,7 +347,7 @@ func topologyFormat(settings TopologySettings) topology.FormatOptions {
 		format = "To_%{neighbor}_%{port}"
 	}
 	abbreviate, lower := settings.AbbreviatePorts, settings.LowercasePorts
-	prefixes := append([]string(nil), settings.NeighborNamePrefixes...)
+	prefixes := slices.Clone(settings.NeighborNamePrefixes)
 	formatter := func(n topology.Neighbor) (string, error) {
 		port := n.NeighborInterface
 		if abbreviate {
@@ -340,7 +373,7 @@ func topologyFormat(settings TopologySettings) topology.FormatOptions {
 	}}
 }
 
-func supportsTopologyMode(platform dialect.Platform, mode string) bool {
+func supportsTopologyMode(platform platform.Platform, mode string) bool {
 	if _, ok := platform.(topology.NeighborDiscovery); !ok {
 		return false
 	}
@@ -361,7 +394,7 @@ func supportsTopologyMode(platform dialect.Platform, mode string) bool {
 // expected descriptions; outside discover mode it also plans the changes.
 type AuditStage struct {
 	Mode     string
-	Registry dialect.Registry
+	Registry platform.Registry
 	Options  topology.FormatOptions
 }
 
@@ -369,9 +402,9 @@ type AuditStage struct {
 func (AuditStage) Name() string { return "audit" }
 
 // Admit checks whether the device and platform support this stage before I/O.
-func (a AuditStage) Admit(_ fleet.Record, platform dialect.Platform) string {
+func (a AuditStage) Admit(_ fleet.Record, platform platform.Platform) batchreport.Status {
 	if !supportsTopologyMode(platform, a.Mode) {
-		return "unsupported_operation"
+		return batchreport.StatusUnsupportedOperation
 	}
 	return ""
 }
@@ -391,43 +424,43 @@ func (a AuditStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	if a.Mode == "discover" {
 		evidence.Plan = nil
 	}
-	e.Artifacts.Topology = evidence
+	e.Topology = evidence
 	if err != nil {
 		return err
 	}
 	switch {
 	case !audit.Complete() && evidence.Plan != nil && len(evidence.Plan.Changes) > 0:
-		e.Outcome = "partial_planned"
+		e.Outcome = batchreport.OutcomePartialPlanned
 		e.MarkReview()
 	case !audit.Complete():
-		e.Outcome = "unverified"
+		e.Outcome = batchreport.OutcomeUnverified
 		e.MarkReview()
 	case a.Mode == "discover":
-		e.Outcome = "discovered"
+		e.Outcome = batchreport.OutcomeDiscovered
 	case audit.ManualRequired:
-		e.Outcome = "manual_required"
+		e.Outcome = batchreport.OutcomeManualRequired
 		e.MarkReview()
 	case evidence.Plan != nil && len(evidence.Plan.Changes) == 0:
-		e.Outcome = "unchanged"
+		e.Outcome = batchreport.OutcomeUnchanged
 	default:
-		e.Outcome = "planned"
+		e.Outcome = batchreport.OutcomePlanned
 	}
 	return nil
 }
 
 // ApplyStage revalidates and applies a reviewed plan in a new session, then
 // confirms the readback and the save. It never rolls back or replays.
-type ApplyStage struct{ Registry dialect.Registry }
+type ApplyStage struct{ Registry platform.Registry }
 
 // Name returns the stable stage identifier recorded in reports.
 func (ApplyStage) Name() string { return "apply" }
 
 // Admit checks whether the device and platform support this stage before I/O.
-func (ApplyStage) Admit(fleet.Record, dialect.Platform) string { return "" }
+func (ApplyStage) Admit(fleet.Record, platform.Platform) batchreport.Status { return "" }
 
 // Run executes the stage and retains its evidence even on failure.
 func (a ApplyStage) Run(ctx context.Context, s *Session, e *Evidence) error {
-	evidence, _ := e.Artifacts.Topology.(*TopologyEvidence)
+	evidence := e.Topology
 	if evidence == nil || evidence.Plan == nil {
 		return ErrInvalidRequest
 	}
@@ -444,20 +477,20 @@ func (a ApplyStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	if len(result.Receipts) > 0 {
 		e.MarkPartial()
 	}
-	e.Outcome = "applied"
+	e.Outcome = batchreport.OutcomeApplied
 	if err == nil && len(evidence.Audit.Issues) > 0 {
-		e.Outcome = "partial_applied"
+		e.Outcome = batchreport.OutcomePartialApplied
 		e.MarkReview()
 	}
 	if err != nil && result.Persisted {
-		e.Outcome = "persisted_with_error"
+		e.Outcome = batchreport.OutcomePersistedWithError
 	}
 	return err
 }
 
 // saveTopologyReview validates every plan and writes the change scripts and
 // topology-plan.json before any device is admitted to the apply round.
-func saveTopologyReview(ctx context.Context, directory string, rows []batchreport.Device, evidence []*Evidence, registry dialect.Registry) error {
+func saveTopologyReview(ctx context.Context, directory string, rows []batchreport.Device, evidence []*Evidence, registry platform.Registry) error {
 	type planned struct {
 		Host         string            `json:"host"`
 		Name         string            `json:"name,omitempty"`
@@ -469,15 +502,15 @@ func saveTopologyReview(ctx context.Context, directory string, rows []batchrepor
 	}
 	plans := []planned{}
 	for i, row := range rows {
-		t, _ := evidence[i].Artifacts.Topology.(*TopologyEvidence)
+		t := evidence[i].Topology
 		if t == nil || t.Plan == nil {
 			continue
 		}
-		if err := topology.ValidatePlan(registry, *t.Plan, t.Plan.Host, t.Plan.Vendor); err != nil {
+		if err := topology.ValidatePlan(registry, *t.Plan, t.Plan.Host, t.Plan.Platform); err != nil {
 			return err
 		}
 		if len(t.Plan.Commands) > 0 {
-			name, err := (fleet.Record{Host: row.Host, Name: row.Name}).BackupFilename("hostname_ip")
+			name, err := (fleet.Record{Host: row.Host, Name: row.Name}).Filename()
 			if err != nil {
 				return err
 			}
@@ -507,18 +540,24 @@ func saveTopologyReview(ctx context.Context, directory string, rows []batchrepor
 
 // ExecOptions controls read-only command collection.
 type ExecOptions struct {
-	Commands          []string
+	Commands []string
+	// LimitPerPlatform samples at most this many devices per platform; zero runs all.
+	LimitPerPlatform  int
 	Plan              bool
 	Directory, Policy string
 }
 
 // Exec runs read-only commands on every planned device and saves the outputs.
-func (r *Runner) Exec(ctx context.Context, runtime Runtime, plan fleet.Plan, o ExecOptions) (Result, error) {
+func (r *Runner) Exec(ctx context.Context, runtime Runtime, rows []inventory.Device, o ExecOptions) (Result, error) {
 	if len(o.Commands) == 0 {
 		return Result{}, ErrInvalidRequest
 	}
 	op := func(directory string) Operation {
-		return Operation{Name: "exec", Outcome: "executed", Stages: []Stage{ExecStage{Commands: o.Commands, Directory: directory}}}
+		return Operation{Name: "exec", Outcome: batchreport.OutcomeExecuted, Stages: []Stage{ExecStage{Commands: o.Commands, Directory: directory}}}
+	}
+	plan, err := planFor(runtime, rows, op(""), fleet.PlanOptions{LimitPerPlatform: o.LimitPerPlatform})
+	if err != nil {
+		return Result{}, err
 	}
 	if o.Plan {
 		report := r.Plan(runtime, plan, op(""), o.Policy)
@@ -534,6 +573,8 @@ func (r *Runner) Exec(ctx context.Context, runtime Runtime, plan fleet.Plan, o E
 // RemoteBackupOptions controls a native remote configuration export.
 type RemoteBackupOptions struct {
 	transfer.RemoteOptions
+	// LimitPerPlatform samples at most this many devices per platform; zero runs all.
+	LimitPerPlatform  int
 	Plan              bool
 	Directory, Policy string
 }
@@ -541,7 +582,7 @@ type RemoteBackupOptions struct {
 // RemoteBackup makes every capable device export its configuration to a
 // remote server. Only device-reported completion is available, so the
 // verified policy is rejected.
-func (r *Runner) RemoteBackup(ctx context.Context, runtime Runtime, plan fleet.Plan, o RemoteBackupOptions) (Result, error) {
+func (r *Runner) RemoteBackup(ctx context.Context, runtime Runtime, rows []inventory.Device, o RemoteBackupOptions) (Result, error) {
 	if batchreport.SuccessPolicy(o.Policy) == batchreport.PolicyVerified {
 		return Result{}, ErrInvalidRequest
 	}
@@ -551,7 +592,11 @@ func (r *Runner) RemoteBackup(ctx context.Context, runtime Runtime, plan fleet.P
 	if err := transfer.ValidateRemote(probe); err != nil {
 		return Result{}, err
 	}
-	op := Operation{Name: "remote", Outcome: "exported", Stages: []Stage{RemoteStage{Registry: runtime.Registry, Options: o.RemoteOptions, Stamp: stamp}}}
+	op := Operation{Name: "remote", Outcome: batchreport.OutcomeExported, Stages: []Stage{RemoteStage{Registry: runtime.Registry, Options: o.RemoteOptions, Stamp: stamp}}}
+	plan, err := planFor(runtime, rows, op, fleet.PlanOptions{LimitPerPlatform: o.LimitPerPlatform})
+	if err != nil {
+		return Result{}, err
+	}
 	if o.Plan {
 		report := r.Plan(runtime, plan, op, o.Policy)
 		return Result{Success: report.Success, Report: &report, Planned: true}, nil

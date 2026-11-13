@@ -1,18 +1,17 @@
 // Package vendors exposes the immutable catalog of supported network device
-// dialects. Platform behavior lives in family-scoped internal packages.
+// platforms. Platform behavior lives in family-scoped internal packages.
 package vendors
 
 import (
 	"fmt"
-	"regexp"
-	"sort"
-	"strings"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/platform"
 	"github.com/gatework/go-net-connector/vendors/centec"
 	"github.com/gatework/go-net-connector/vendors/cisco"
-	"github.com/gatework/go-net-connector/vendors/dialect"
 	"github.com/gatework/go-net-connector/vendors/fortinet"
 	"github.com/gatework/go-net-connector/vendors/h3c"
 	"github.com/gatework/go-net-connector/vendors/hillstone"
@@ -23,10 +22,10 @@ import (
 	"github.com/gatework/go-net-connector/vendors/topsec"
 )
 
-// Registry is an immutable catalog of supported CLI dialects.
+// Registry is an immutable catalog of supported CLI platforms.
 type Registry struct {
-	entries        map[string]dialect.Platform
-	inventoryOrder []dialect.Platform
+	entries        map[string]platform.Platform
+	inventoryOrder []platform.Platform
 }
 
 // NewBuiltinRegistry returns the process-wide immutable catalog. Platforms
@@ -37,12 +36,12 @@ var builtinRegistry = sync.OnceValue(func() *Registry {
 	// This order preserves the former fleet first-match behavior for
 	// identities that satisfy more than one vendor rule. The lookup map is
 	// derived from the same declarations so canonical keys cannot drift.
-	ordered := []dialect.Platform{
+	ordered := []platform.Platform{
 		h3c.Wireless(), h3c.New(), cisco.NXOS(), cisco.IOS(), radware.New(),
 		paloalto.New(), huawei.New(), hillstone.New(), centec.New(), topsec.New(),
 		fortinet.New(), juniper.New(),
 	}
-	entries := make(map[string]dialect.Platform, len(ordered))
+	entries := make(map[string]platform.Platform, len(ordered))
 	for _, platform := range ordered {
 		name := platform.Name()
 		if name == "" {
@@ -61,16 +60,11 @@ func (r *Registry) Names() []string {
 	if r == nil {
 		return nil
 	}
-	names := make([]string, 0, len(r.entries))
-	for name := range r.entries {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return slices.Sorted(maps.Keys(r.entries))
 }
 
-// Lookup returns the immutable dialect object registered for name.
-func (r *Registry) Lookup(name string) (dialect.Platform, error) {
+// Lookup returns the immutable platform object registered for name.
+func (r *Registry) Lookup(name string) (platform.Platform, error) {
 	if r != nil {
 		if d, ok := r.entries[name]; ok {
 			return d, nil
@@ -81,28 +75,15 @@ func (r *Registry) Lookup(name string) (dialect.Platform, error) {
 
 // ResolvePlatform applies built-in vendor, OS and model recognition. User
 // overrides are applied by fleet before this fallback is consulted.
-func (r *Registry) ResolvePlatform(identity dialect.InventoryIdentity) (string, bool) {
+func (r *Registry) ResolvePlatform(identity platform.Identity) (string, bool) {
 	if r == nil {
 		return "", false
 	}
-	identity = normalizeInventoryIdentity(identity)
+	identity = identity.Normalized()
 	for _, platform := range r.inventoryOrder {
 		if platform.MatchInventory(identity) {
 			return platform.Name(), true
 		}
 	}
 	return "", false
-}
-
-var inventoryIdentitySeparators = regexp.MustCompile(`[^a-z0-9]+`)
-
-func normalizeInventoryIdentity(identity dialect.InventoryIdentity) dialect.InventoryIdentity {
-	identity.Vendor = normalizeInventoryText(identity.Vendor)
-	identity.OS = normalizeInventoryText(identity.OS)
-	identity.Model = normalizeInventoryText(identity.Model)
-	return identity
-}
-
-func normalizeInventoryText(value string) string {
-	return inventoryIdentitySeparators.ReplaceAllString(strings.ToLower(strings.TrimSpace(value)), " ")
 }

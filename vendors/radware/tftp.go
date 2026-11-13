@@ -5,7 +5,8 @@ import (
 	"strings"
 
 	"github.com/gatework/go-net-connector/connector"
-	dialectapi "github.com/gatework/go-net-connector/vendors/dialect"
+	"github.com/gatework/go-net-connector/platform"
+	"github.com/gatework/go-net-connector/transfer"
 	"github.com/gatework/go-net-connector/vendors/internal/driver"
 )
 
@@ -16,7 +17,7 @@ type tftpPolicy struct{ driver.TFTPBase }
 func newTFTPPolicy() tftpPolicy {
 	return tftpPolicy{driver.NewTFTPBase(driver.TFTPOptions{Extension: "tgz", Kind: "native_archive", Format: "tgz", ValidateSourceInterface: driver.ValidateManagementOrDataSource})}
 }
-func (r tftpPolicy) Command(_ string, o dialectapi.TFTPOptions, _ bool) connector.Command {
+func (r tftpPolicy) Command(_ string, o transfer.TFTPOptions, _ bool) connector.Command {
 	command := "/cfg/ptcfg " + o.Server + " -tftp"
 	switch o.SourceInterface {
 	case "management":
@@ -33,7 +34,7 @@ func (r tftpPolicy) Command(_ string, o dialectapi.TFTPOptions, _ bool) connecto
 	}
 	return connector.Command{Text: command, Interactions: commandInteractions, Timeout: driver.TimeoutPointer(o.Timeout)}
 }
-func (tftpPolicy) Completed(lines []string, o dialectapi.TFTPOptions) (string, bool, error) {
+func (tftpPolicy) Completed(lines []string, o transfer.TFTPOptions) (string, bool, error) {
 	found := map[string]bool{}
 	actual := ""
 	for _, line := range lines {
@@ -43,16 +44,16 @@ func (tftpPolicy) Completed(lines []string, o dialectapi.TFTPOptions) (string, b
 		}
 		found[strings.ToLower(match[1])+":"+match[2]] = true
 		if !strings.EqualFold(match[1], o.Server) {
-			return "", false, dialectapi.ErrParse
+			return "", false, platform.ErrParse
 		}
 		actual = match[2]
 	}
 	if len(found) > 1 {
-		return "", false, dialectapi.ErrParse
+		return "", false, platform.ErrParse
 	}
 	return actual, actual != "", nil
 }
 
-func (tftpPolicy) Receipt(_ dialectapi.TFTPOptions, _, explicitPath bool) dialectapi.TFTPReceipt {
-	return dialectapi.TFTPReceipt{ConfigurationKind: "native_archive", Format: "tgz", IncludeRequestedPath: true}
+func (tftpPolicy) Evidence(_ transfer.TFTPOptions, _, explicitPath bool) transfer.TFTPEvidence {
+	return transfer.TFTPEvidence{ConfigurationKind: "native_archive", Format: "tgz", IncludeRequestedPath: true}
 }

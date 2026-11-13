@@ -6,7 +6,7 @@ import (
 )
 
 func TestExplicitAllCanClearSampleLimit(t *testing.T) {
-	override, e := FromEnvironment(map[string]string{"NC_SAMPLE_PER_VENDOR": "0"})
+	override, e := FromEnvironment(map[string]string{"NC_SAMPLE_PER_PLATFORM": "0"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -14,7 +14,7 @@ func TestExplicitAllCanClearSampleLimit(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if got := s.Value("backup.limit_per_vendor"); got != 0 {
+	if got := s.Value("backup.limit_per_platform"); got != 0 {
 		t.Fatal(got)
 	}
 }

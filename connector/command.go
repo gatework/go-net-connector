@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -99,9 +100,9 @@ func (d *Device) execute(ctx context.Context, script Script, opts ExecuteOptions
 		if e := d.log.scope(d.baseSecrets(), true); e != nil {
 			err = joinFailures(err, newError("log_error", "logging", Command{}, e))
 		}
-		level, status := "info", "completed"
+		level, status := LogInfo, "completed"
 		if err != nil {
-			level, status = "error", "failed"
+			level, status = LogError, "failed"
 		}
 		if e := d.sessionEvent(ctx, "operation_complete", level, Command{}, status); e != nil {
 			err = joinFailures(err, e)
@@ -137,7 +138,7 @@ func (d *Device) runScript(ctx context.Context, script Script, opts ExecuteOptio
 	}
 	x := &execution{textMode: opts.textMode, device: d, values: make(map[string]string), limit: d.config.MaxScriptOutputBytes, strategy: strategy}
 	defer func() {
-		result.attempts = append([]Attempt(nil), x.attempts...)
+		result.attempts = slices.Clone(x.attempts)
 		if len(x.attempts) == 1 {
 			rejection = x.rejection
 		}
@@ -262,13 +263,13 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 			err = joinFailures(err, newError("log_error", "logging", c, e))
 		}
 	}()
-	if e := d.sessionEvent(ctx, "command_start", "info", c, ""); e != nil {
+	if e := d.sessionEvent(ctx, "command_start", LogInfo, c, ""); e != nil {
 		return step, e
 	}
 	defer func() {
-		level, status := "info", "response_received"
+		level, status := LogInfo, "response_received"
 		if err != nil {
-			level, status = "error", "failed"
+			level, status = LogError, "failed"
 		}
 		if e := d.sessionEvent(ctx, "command_complete", level, c, status); e != nil {
 			err = joinFailures(err, e)
@@ -294,7 +295,7 @@ func (x *execution) command(ctx context.Context, c Command) (step StepResult, er
 		return step, writeFailure("command", c, err)
 	}
 	written = len(c.Text) + len(d.config.LineEnding)
-	replies := append(cloneInteractions(c.Interactions), d.terminal.Interactions...)
+	replies := append(slices.Clone(c.Interactions), d.terminal.Interactions...)
 	replies = append(replies, Interaction{Pattern: d.terminal.Pager, Reply: d.terminal.PagerResponse, Unlimited: true})
 	step, err = d.readResponse(cc, c, prompt, replies, false, c.Poll)
 	response = step.Response()

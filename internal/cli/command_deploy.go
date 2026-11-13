@@ -13,7 +13,8 @@ func addDeployCommands(root *cobra.Command, leaf commandBuilder) {
 		f.StringArrayVar(&o.deployScriptFor, "script-for", nil, "指定平台的脚本，格式 `平台=文件`，优先于 --script；可重复")
 		f.StringVar(&o.directory, "directory", "", "下发批次与报告输出`目录`（默认：./deploys）")
 		f.BoolVar(&o.save, "save", false, "全部命令被接受后保存配置；仅以设备的保存确认为成功")
-		f.BoolVar(&o.deployBackup, "backup", false, "下发（及保存）成功后采集一份配置备份")
+		f.IntVar(&o.deployCommitConfirm, "commit-confirm", 0, "提交模型平台使用带自动回滚的提交并随后确认，回滚等待`分钟`数（1 至 60）；不支持的平台在计划阶段跳过")
+		f.BoolVar(&o.deployNoSnapshot, "no-snapshot", false, "不采集变更前后的配置快照与差异")
 		f.IntVar(&o.deployStopAfter, "stop-after-failures", 0, "失败设备达到该`数量`后不再启动新设备；0 表示不限制")
 	}
 	leaf(deploy, "plan", "校验脚本并预览下发目标，不连接设备", "deploy", "plan", func(c *cobra.Command, o *options) {
@@ -22,7 +23,7 @@ func addDeployCommands(root *cobra.Command, leaf commandBuilder) {
 	})
 	leaf(deploy, "run", "逐台下发脚本；失败设备不重试、不重放", "deploy", "run", func(c *cobra.Command, o *options) {
 		bind(c, o, true)
-		c.Example = "  netman deploy run --script ntp.txt --vendor cisco --save --backup --stop-after-failures 1"
+		c.Example = "  netman deploy run --script ntp.txt --platform cisco_ios --save --stop-after-failures 1"
 	})
 	root.AddCommand(deploy)
 }

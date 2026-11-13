@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory(prefix="nc-consumer-") as temporary:
     temporary = Path(temporary)
     package = temporary / "connector"
     package.mkdir()
-    for name in ("archive", "cmd", "config", "connector", "internal", "inventory", "fleet", "netdisco", "parallel", "storage", "textfsm", "topology", "transfer", "vendors", "testdata"):
+    for name in ("archive", "cmd", "config", "connector", "facts", "internal", "inventory", "inventoryfile", "fleet", "netdisco", "parallel", "platform", "storage", "textfsm", "topology", "transfer", "vendors", "testdata"):
         shutil.copytree(root / name, package / name)
     for name in ("go.mod", "go.sum"):
         shutil.copy2(root / name, package / name)
@@ -27,19 +27,19 @@ with tempfile.TemporaryDirectory(prefix="nc-consumer-") as temporary:
     consumer = package / "consumercheck"
     consumer.mkdir()
     (consumer / "main_test.go").write_text('''package consumercheck
-import("testing";"errors";"context";"os";"path/filepath";"time";"github.com/gatework/go-net-connector/archive";"github.com/gatework/go-net-connector/transfer";"github.com/gatework/go-net-connector/vendors";"github.com/gatework/go-net-connector/vendors/dialect";"github.com/gatework/go-net-connector/vendors/h3c";"github.com/gatework/go-net-connector/topology";"github.com/gatework/go-net-connector/textfsm";"github.com/gatework/go-net-connector/connector";"github.com/gatework/go-net-connector/fleet")
+import("testing";"errors";"context";"os";"path/filepath";"time";"github.com/gatework/go-net-connector/archive";"github.com/gatework/go-net-connector/transfer";"github.com/gatework/go-net-connector/vendors";"github.com/gatework/go-net-connector/platform";"github.com/gatework/go-net-connector/vendors/h3c";"github.com/gatework/go-net-connector/topology";"github.com/gatework/go-net-connector/textfsm";"github.com/gatework/go-net-connector/connector";"github.com/gatework/go-net-connector/fleet")
 func TestSourceConsumer(t *testing.T){
  registry:=vendors.NewBuiltinRegistry()
  declaration,e:=registry.Lookup("cisco_ios");if e!=nil{t.Fatal(e)}
- var platform dialect.Platform=declaration
- p:=platform.Terminal()
+ var selected platform.Platform=declaration
+ p:=selected.Terminal()
  if e=p.Validate();e!=nil{t.Fatal(e)}
  c:=connector.ConnectionConfig{Host:"192.0.2.1"};if e=c.Validate();e!=nil{t.Fatal(e)}
- d,e:=connector.New(platform,c);if e!=nil{t.Fatal(e)};defer d.Close()
+ d,e:=connector.New(selected,c);if e!=nil{t.Fatal(e)};defer d.Close()
  custom,e:=connector.New(connector.StaticDriver{Grammar:p},c);if e!=nil{t.Fatal(e)};defer custom.Close()
  if _,e=fleet.NewRules(fleet.RuleOptions{},registry);e!=nil{t.Fatal(e)}
  var _ fleet.PlatformResolver=registry
- if got,ok:=registry.ResolvePlatform(dialect.InventoryIdentity{Vendor:"h3c"});!ok||got!="h3c"{t.Fatal(got,ok)}
+ if got,ok:=registry.ResolvePlatform(platform.Identity{Vendor:"h3c"});!ok||got!="h3c"{t.Fatal(got,ok)}
  var _ topology.DescriptionReader=h3c.New()
  var _ topology.DescriptionWriter=h3c.New()
  var topologyClient *topology.Client

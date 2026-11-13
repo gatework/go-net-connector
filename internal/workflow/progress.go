@@ -24,17 +24,19 @@ type PlanEvent struct {
 }
 
 // StartEvent identifies a device that began execution.
-type StartEvent struct{ Host, Vendor string }
+type StartEvent struct{ Host, Platform string }
 
 // SessionEvent carries safe connector lifecycle metadata.
 type SessionEvent connector.SessionEvent
 
 // OutcomeEvent records a device result and retained source evidence.
 type OutcomeEvent struct {
-	Host, Status, Outcome, ErrorCode string
-	Duration                         time.Duration
-	TextWarningBytes                 int
-	SourceCommitted, SourceVerified  bool
+	Host, ErrorCode                 string
+	Status                          batchreport.Status
+	Outcome                         batchreport.Outcome
+	Duration                        time.Duration
+	TextWarningBytes                int
+	SourceCommitted, SourceVerified bool
 }
 
 // TransferStageEvent identifies the current transfer phase for a device.

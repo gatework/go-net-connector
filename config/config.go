@@ -81,7 +81,7 @@ func (s Snapshot) GoString() string { return s.String() }
 // MarshalJSON encodes public configuration without the credential environment.
 func (s Snapshot) MarshalJSON() ([]byte, error) { return json.Marshal(s.data) }
 
-var pathFields = map[string]bool{"netdisco.cache_directory": true, "netdisco.db_sslrootcert": true, "backup.directory": true, "topology.directory": true, "ssh.known_hosts": true, "ssh.log_directory": true, "tftp.verification_root": true}
+var pathFields = map[string]bool{"inventory.file": true, "netdisco.cache_directory": true, "netdisco.db_sslrootcert": true, "backup.directory": true, "topology.directory": true, "ssh.known_hosts": true, "ssh.log_directory": true, "tftp.verification_root": true}
 
 func absolutePath(path, base, home string) string {
 	if path == "~" {
@@ -225,9 +225,6 @@ func (l *loader) ownLayers() error {
 			return e
 		}
 		*layer, _ = owned.(map[string]any)
-		if e := rejectRemovedFields(*layer); e != nil {
-			return e
-		}
 	}
 	return l.ctx.Err()
 }
@@ -366,9 +363,6 @@ func (l *loader) readConfigurationFiles() error {
 func (l *loader) applyFile(m map[string]any, source string) error {
 	if err := l.ctx.Err(); err != nil {
 		return err
-	}
-	if e := rejectRemovedFields(m); e != nil {
-		return e
 	}
 	if e := resolvePaths(m, filepath.Dir(source), l.o.Home, ""); e != nil {
 		return e
@@ -569,7 +563,7 @@ func validField(section, key string, f Field, v any) (bool, error) {
 		return ok && (f.Kind == KindOptionalString || strings.TrimSpace(s) != ""), nil
 	case KindInteger, KindOptionalInteger:
 		n, ok := integerValue(v)
-		zeroAllowed := section == "backup" && key == "limit_per_vendor" || section == "ssh" && key == "connect_retries"
+		zeroAllowed := section == "backup" && key == "limit_per_platform" || section == "ssh" && key == "connect_retries"
 		return ok && (n > 0 || n == 0 && zeroAllowed) || v == nil && f.Kind == KindOptionalInteger, nil
 	case KindNumber:
 		n, ok := v.(float64)

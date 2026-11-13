@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gatework/go-net-connector/vendors/dialect"
+	"github.com/gatework/go-net-connector/platform"
 )
 
 // PolicyOptions declares default and per-device transfer destinations and vendor options.
@@ -90,7 +90,7 @@ func VerificationRoot(root string) (string, error) {
 }
 
 // NewPolicy validates and copies transfer policy values without device I/O.
-func NewPolicy(o PolicyOptions, registry dialect.Registry) (*Policy, error) {
+func NewPolicy(o PolicyOptions, registry platform.Registry) (*Policy, error) {
 	if registry == nil {
 		return nil, ErrInvalid
 	}
@@ -243,10 +243,10 @@ func (p *Policy) For(host, vendor string) (Target, error) {
 		return Target{}, ErrUnsupported
 	}
 	if vrf == "" {
-		vrf = platform.DefaultVRF()
+		vrf = platform.Traits().DefaultVRF
 	}
 	root := p.roots[server]
-	if platform.RequiresVerificationRoot() && server != "" && root == "" {
+	if platform.Traits().RequireVerificationRoot && server != "" && root == "" {
 		return Target{}, ErrInvalid
 	}
 	return Target{TFTPOptions: TFTPOptions{Server: server, SourceFile: get(p.files), SourceInterface: get(p.interfaces), VRF: vrf}, Root: root}, nil

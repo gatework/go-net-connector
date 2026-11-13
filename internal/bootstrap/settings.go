@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gatework/go-net-connector/internal/batchreport"
+	"github.com/gatework/go-net-connector/inventoryfile"
 
 	"github.com/gatework/go-net-connector/archive"
 	"github.com/gatework/go-net-connector/config"
@@ -49,13 +50,13 @@ type Services struct {
 // composition root. Policy remains available for provenance and less common
 // values, but runtime workflows do not repeatedly unpack these fields.
 type resolvedSettings struct {
-	parallel        int
-	limitPerVendor  int
-	backupDirectory string
-	backupLayout    string
-	logDirectory    string
-	archiveTimeouts archive.Timeouts
-	inventoryLimits netdisco.Limits
+	parallel         int
+	limitPerPlatform int
+	backupDirectory  string
+	backupLayout     string
+	logDirectory     string
+	archiveTimeouts  archive.Timeouts
+	inventoryLimits  netdisco.Limits
 }
 
 // New constructs validated services from the policy and credential resolver.
@@ -109,11 +110,11 @@ func New(policy config.Snapshot, secret Secret) (*Services, error) {
 
 func resolveSettings(policy config.Snapshot) (resolvedSettings, error) {
 	settings := resolvedSettings{
-		parallel:        integerValue(policy, "backup.parallel"),
-		limitPerVendor:  integerValue(policy, "backup.limit_per_vendor"),
-		backupDirectory: stringValue(policy, "backup.directory"),
-		backupLayout:    stringValue(policy, "backup.layout"),
-		logDirectory:    stringValue(policy, "ssh.log_directory"),
+		parallel:         integerValue(policy, "backup.parallel"),
+		limitPerPlatform: integerValue(policy, "backup.limit_per_platform"),
+		backupDirectory:  stringValue(policy, "backup.directory"),
+		backupLayout:     stringValue(policy, "backup.layout"),
+		logDirectory:     stringValue(policy, "ssh.log_directory"),
 		inventoryLimits: netdisco.Limits{
 			PageSize:          integerValue(policy, "netdisco.page_size"),
 			MaxPages:          integerValue(policy, "netdisco.max_pages"),
@@ -123,7 +124,7 @@ func resolveSettings(policy config.Snapshot) (resolvedSettings, error) {
 			Timeout:           durationValue(policy, "netdisco.inventory_timeout"),
 		},
 	}
-	if !batchreport.Layout(settings.backupLayout).Valid() || settings.parallel < 1 || settings.parallel > 500 || settings.limitPerVendor < 0 || settings.limitPerVendor > 5 {
+	if !batchreport.Layout(settings.backupLayout).Valid() || settings.parallel < 1 || settings.parallel > 500 || settings.limitPerPlatform < 0 || settings.limitPerPlatform > 5 {
 		return resolvedSettings{}, config.ErrInvalid
 	}
 	if policy.Value("tftp.upload_timeout") != nil {
@@ -231,9 +232,9 @@ func stringMap(snapshot config.Snapshot, path string) (map[string]string, error)
 	return out, nil
 }
 func ruleOptions(p config.Snapshot) (fleet.RuleOptions, error) {
-	o := fleet.RuleOptions{Selection: inventory.SelectionOptions{IncludeHosts: stringList(p, "inventory.include_hosts"), ExcludeHosts: stringList(p, "inventory.exclude_hosts"), IncludeNames: stringList(p, "inventory.include_names"), ExcludeNames: stringList(p, "inventory.exclude_names"), IncludeVendors: stringList(p, "inventory.include_vendors"), ExcludeVendors: stringList(p, "inventory.exclude_vendors"), IncludeModels: stringList(p, "inventory.include_models"), ExcludeModels: stringList(p, "inventory.exclude_models"), NameMatch: stringValue(p, "inventory.name_match"), ModelMatch: stringValue(p, "inventory.model_match")}}
+	o := fleet.RuleOptions{Selection: inventory.SelectionOptions{IncludeHosts: stringList(p, "inventory.include_hosts"), ExcludeHosts: stringList(p, "inventory.exclude_hosts"), IncludeNames: stringList(p, "inventory.include_names"), ExcludeNames: stringList(p, "inventory.exclude_names"), IncludePlatforms: stringList(p, "inventory.include_platforms"), ExcludePlatforms: stringList(p, "inventory.exclude_platforms"), IncludeModels: stringList(p, "inventory.include_models"), ExcludeModels: stringList(p, "inventory.exclude_models"), NameMatch: stringValue(p, "inventory.name_match"), ModelMatch: stringValue(p, "inventory.model_match")}}
 	var e error
-	o.VendorOverrides, e = stringMap(p, "inventory.vendor_overrides")
+	o.PlatformOverrides, e = stringMap(p, "inventory.platform_overrides")
 	if e != nil {
 		return o, e
 	}
@@ -259,8 +260,8 @@ func ruleOptions(p config.Snapshot) (fleet.RuleOptions, error) {
 				switch k {
 				case "vendor":
 					rule.Vendor = s
-				case "connector":
-					rule.Connector = s
+				case "platform":
+					rule.Platform = s
 				case "os":
 					rule.OS = &s
 				case "model_prefix":
@@ -280,18 +281,18 @@ func (s *Services) DeviceWithLogger(ctx context.Context, r fleet.Record, logger 
 	if e := ctx.Err(); e != nil {
 		return nil, e
 	}
-	d, e := s.registry.Lookup(r.Vendor)
+	d, e := s.registry.Lookup(r.Platform)
 	if e != nil {
 		return nil, e
 	}
-	c, ok := s.templates[r.Vendor]
+	c, ok := s.templates[r.Platform]
 	if !ok {
 		return nil, config.ErrInvalid
 	}
 	c.Host = r.Host
 	c.Logger = logger
 	c.OnSessionEvent = s.observer
-	keys := credentialKeys(r.Vendor)
+	keys := credentialKeys(r.Platform)
 	// A blank specific secret falls through; the shared fallback is returned
 	// as stored, so a deliberately blank-looking password is preserved.
 	get := func(names []string) string {
@@ -315,6 +316,11 @@ func (s *Services) DeviceWithLogger(ctx context.Context, r fleet.Record, logger 
 // Inventory fetches inventory under the selected cache policy omitting online passwords in cache-only mode.
 func (s *Services) Inventory(ctx context.Context, mode netdisco.CacheMode) (netdisco.CacheResult, error) {
 	p := s.policy
+	if stringValue(p, "inventory.source") == "file" {
+		// A local file is read on every run; it is never cached.
+		rows, err := inventoryfile.Read(ctx, stringValue(p, "inventory.file"))
+		return netdisco.CacheResult{Rows: rows, Status: netdisco.CacheStatusDisabled}, err
+	}
 	if mode == "" {
 		mode = netdisco.CacheMode(stringValue(p, "netdisco.cache_mode"))
 	}
@@ -340,7 +346,7 @@ func (s *Services) Inventory(ctx context.Context, mode netdisco.CacheMode) (netd
 func (s *Services) Workers() int { return s.settings.parallel }
 
 // Limit returns the configured per-vendor selection limit.
-func (s *Services) Limit() int { return s.settings.limitPerVendor }
+func (s *Services) Limit() int { return s.settings.limitPerPlatform }
 func quoteDSNValue(s string) string {
 	return "'" + strings.ReplaceAll(strings.ReplaceAll(s, "\\", "\\\\"), "'", "\\'") + "'"
 }
@@ -359,15 +365,15 @@ func (s *Services) LogDirectory(mode, directory string) string {
 	if explicit := s.settings.logDirectory; explicit != "" {
 		return explicit
 	}
-	if mode == "topology" || mode == "tftp" || mode == "deploy" || mode == "exec" {
+	if mode == "topology" || mode == "tftp" || mode == "deploy" || mode == "exec" || mode == "facts" {
 		return filepath.Join(directory, "logs")
 	}
 	return ""
 }
 func (s *Services) compileConnection(vendor string) (connector.ConnectionConfig, error) {
 	p := s.policy
-	c := connector.ConnectionConfig{LogLevel: stringValue(p, "ssh.log_level"), Protocol: connector.Protocol(stringValue(p, "ssh.protocol")), KnownHosts: stringValue(p, "ssh.known_hosts"), JumpHost: stringValue(p, "ssh.jump_host"), ConnectRetries: integerValue(p, "ssh.connect_retries"), HostKeyPolicy: connector.HostKeyPolicy(stringValue(p, "ssh.host_key_policy")), MaxScriptOutputBytes: int64(integerValue(p, "ssh.max_script_output_bytes"))}
-	protocols, e := stringMap(p, "ssh.vendor_protocols")
+	c := connector.ConnectionConfig{LogLevel: connector.LogLevel(stringValue(p, "ssh.log_level")), Protocol: connector.Protocol(stringValue(p, "ssh.protocol")), KnownHosts: stringValue(p, "ssh.known_hosts"), JumpHost: stringValue(p, "ssh.jump_host"), ConnectRetries: integerValue(p, "ssh.connect_retries"), HostKeyPolicy: connector.HostKeyPolicy(stringValue(p, "ssh.host_key_policy")), MaxScriptOutputBytes: int64(integerValue(p, "ssh.max_script_output_bytes"))}
+	protocols, e := stringMap(p, "ssh.platform_protocols")
 	if e != nil {
 		return c, e
 	}

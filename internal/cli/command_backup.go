@@ -23,7 +23,7 @@ func addBackupCommands(root *cobra.Command, leaf commandBuilder) {
 		bindOperation(c, o, true)
 		bindBackup(c, o)
 		bindRemoteFlags(c, o)
-		c.Example = "  netman backup remote --vendor juniper --remote-server 192.0.2.9 --remote-path backups --remote-username backup"
+		c.Example = "  netman backup remote --platform juniper --remote-server 192.0.2.9 --remote-path backups --remote-username backup"
 	})
 	leaf(backup, "plan", "预览备份目标，不连接设备或归档服务", "backup", "plan", func(c *cobra.Command, o *options) {
 		bindOperation(c, o, false)

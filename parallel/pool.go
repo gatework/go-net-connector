@@ -4,6 +4,7 @@ package parallel
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 )
@@ -28,7 +29,7 @@ func Map[T, R any](ctx context.Context, workers int, input []T, run func(context
 	}
 	workerCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
-	values := append([]T(nil), input...)
+	values := slices.Clone(input)
 	results := make([]Result[R], len(values))
 	next := 0
 	var mu sync.Mutex

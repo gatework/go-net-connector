@@ -11,7 +11,7 @@ import (
 	expect "github.com/gatework/go-expect"
 
 	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/vendors/dialect"
+	"github.com/gatework/go-net-connector/transfer"
 )
 
 // TFTPOptions declares a platform's fixed transfer rules.
@@ -60,7 +60,7 @@ func ParseDeviceInterface(value string) (kind, number string, ok bool) {
 // ValidateManagementOrDataSource accepts the two named source interfaces used
 // by platforms that distinguish management and data planes.
 func ValidateManagementOrDataSource(_ string, source string) error {
-	if source != dialect.SourceInterfaceManagement && source != dialect.SourceInterfaceData {
+	if source != transfer.SourceInterfaceManagement && source != transfer.SourceInterfaceData {
 		return invalidOption("source interface")
 	}
 	return nil
@@ -73,7 +73,7 @@ func invalidOption(name string) error {
 
 // ValidateOptions checks the source, VRF and destination constraints declared
 // by a platform before any device command is sent.
-func (b TFTPBase) ValidateOptions(deviceHost string, options dialect.TFTPOptions) error {
+func (b TFTPBase) ValidateOptions(deviceHost string, options transfer.TFTPOptions) error {
 	o := b.options
 	if options.SourceFile != "" && (!o.AcceptSourceFile || !deviceFilePattern.MatchString(options.SourceFile) || strings.Contains(options.SourceFile, "..")) {
 		return invalidOption("source file")
@@ -99,17 +99,15 @@ func (b TFTPBase) ValidateOptions(deviceHost string, options dialect.TFTPOptions
 	return o.ValidateSourceInterface(deviceHost, options.SourceInterface)
 }
 
-// DefaultVRF returns the platform's preferred transfer routing instance.
-func (b TFTPBase) DefaultVRF() string { return b.options.DefaultVRF }
-
-// AllowsConcurrentDestinationReuse reports whether a fixed remote filename is reusable.
-func (b TFTPBase) AllowsConcurrentDestinationReuse() bool { return b.options.AllowDestinationReuse }
-
-// RequiresSourceFile reports whether the source file must be resolved explicitly.
-func (b TFTPBase) RequiresSourceFile() bool { return b.options.RequireSourceFile }
-
-// RequiresVerificationRoot reports whether server-side archive verification is mandatory.
-func (b TFTPBase) RequiresVerificationRoot() bool { return b.options.RequireVerificationRoot }
+// Traits returns the platform's fixed transfer requirements.
+func (b TFTPBase) Traits() transfer.TFTPTraits {
+	return transfer.TFTPTraits{
+		DefaultVRF:              b.options.DefaultVRF,
+		ReuseDestination:        b.options.AllowDestinationReuse,
+		RequireSourceFile:       b.options.RequireSourceFile,
+		RequireVerificationRoot: b.options.RequireVerificationRoot,
+	}
+}
 
 // Filename returns a safe default remote filename for this platform.
 func (b TFTPBase) Filename(host, label string) (string, error) {
@@ -136,15 +134,9 @@ func (b TFTPBase) Filename(host, label string) (string, error) {
 	return name, nil
 }
 
-// SourceFileCommand is empty for platforms that do not discover a source file.
-func (b TFTPBase) SourceFileCommand() string { return "" }
-
-// ResolveSourceFile reports unsupported when no source-file discovery policy is set.
-func (b TFTPBase) ResolveSourceFile(string) (string, error) { return "", dialect.ErrUnsupported }
-
-// Receipt returns the common archive metadata for this platform.
-func (b TFTPBase) Receipt(options dialect.TFTPOptions, explicitSource, _ bool) dialect.TFTPReceipt {
-	receipt := dialect.TFTPReceipt{ConfigurationKind: b.options.Kind, Format: b.options.Format, SourceFile: options.SourceFile, IncludeRequestedPath: true}
+// Evidence returns the common archive metadata for this platform.
+func (b TFTPBase) Evidence(options transfer.TFTPOptions, explicitSource, _ bool) transfer.TFTPEvidence {
+	receipt := transfer.TFTPEvidence{ConfigurationKind: b.options.Kind, Format: b.options.Format, SourceFile: options.SourceFile, IncludeRequestedPath: true}
 	if explicitSource && b.options.AcceptSourceFile {
 		receipt.ConfigurationKind = "saved_file"
 	}

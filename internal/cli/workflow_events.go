@@ -19,11 +19,11 @@ func workflowObserver(p *progress.Reporter) workflow.Observer {
 		case workflow.PlanEvent:
 			return p.Plan(e.Total, e.Selected, e.Workers, e.Mode)
 		case workflow.StartEvent:
-			return p.Start(e.Host, e.Vendor)
+			return p.Start(e.Host, e.Platform)
 		case workflow.SessionEvent:
 			return p.Event(e.Host, e.Name, e.Status)
 		case workflow.OutcomeEvent:
-			err := p.Outcome(e.Host, e.Status, e.Outcome, e.ErrorCode, e.Duration)
+			err := p.Outcome(e.Host, string(e.Status), string(e.Outcome), e.ErrorCode, e.Duration)
 			if e.TextWarningBytes > 0 {
 				err = errors.Join(err, p.Warning(fmt.Sprintf("[%s] %s", e.Host, backupProgress(e))))
 			}
@@ -72,9 +72,9 @@ func archivePreflightLabel(stage archive.PrepareStage) string {
 }
 
 func backupProgress(out workflow.OutcomeEvent) string {
-	label := out.Status
+	label := string(out.Status)
 	if out.Outcome != "" {
-		label = out.Outcome
+		label = string(out.Outcome)
 	}
 	text := display.Status(label)
 	if out.TextWarningBytes > 0 {
