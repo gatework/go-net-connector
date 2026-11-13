@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -322,7 +323,7 @@ func TestRemotePoolPreparesClientsWithBoundedConcurrency(t *testing.T) {
 				response := frame{OK: true, Phase: "ready", Version: Version}
 				if request.Action == "probe" {
 					response.Version = Version
-					response.Capabilities = append([]string(nil), capabilities...)
+					response.Capabilities = slices.Clone(capabilities)
 				}
 				encoded, _ := json.Marshal(response)
 				if _, writeErr := output.Write(append(encoded, '\n')); writeErr == nil && request.Action == "preflight" && preparing.Swap(false) {

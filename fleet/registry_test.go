@@ -1,13 +1,13 @@
 package fleet
 
 import (
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/inventory"
+	"github.com/gatework/go-net-connector/platform"
 	"github.com/gatework/go-net-connector/vendors"
-	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
 type profileRegistry map[string]connector.Terminal
@@ -20,7 +20,7 @@ type changingRegistry struct {
 
 type inventoryResolvingRegistry struct{ profileRegistry }
 
-func (inventoryResolvingRegistry) ResolvePlatform(identity dialect.InventoryIdentity) (string, bool) {
+func (inventoryResolvingRegistry) ResolvePlatform(identity platform.Identity) (string, bool) {
 	if identity.Vendor == "Lab Platform" {
 		return "fixture", true
 	}
@@ -41,9 +41,9 @@ func TestRulesUseOptionalRegistryInventoryResolver(t *testing.T) {
 func TestRulesKeepConfiguredIdentityPrecedence(t *testing.T) {
 	operatingSystem := "ios"
 	rules, err := NewRules(RuleOptions{
-		HostOverrides:   map[string]string{"192.0.2.1": "fortinet"},
-		VendorOverrides: map[string]string{"cisco": "huawei", "arista": "juniper"},
-		Mappings:        []Mapping{{Vendor: "cisco", Connector: "hillstone", OS: &operatingSystem}, {Vendor: "arista", Connector: "centec"}},
+		HostOverrides:     map[string]string{"192.0.2.1": "fortinet"},
+		PlatformOverrides: map[string]string{"cisco": "huawei", "arista": "juniper"},
+		Mappings:          []Mapping{{Vendor: "cisco", Platform: "hillstone", OS: &operatingSystem}, {Vendor: "arista", Platform: "centec"}},
 	}, vendors.NewBuiltinRegistry())
 	if err != nil {
 		t.Fatal(err)
@@ -64,13 +64,13 @@ func TestRulesKeepConfiguredIdentityPrecedence(t *testing.T) {
 }
 
 func (r *changingRegistry) Names() []string { return r.profiles.Names() }
-func (r *changingRegistry) ResolvePlatform(identity dialect.InventoryIdentity) (string, bool) {
+func (r *changingRegistry) ResolvePlatform(identity platform.Identity) (string, bool) {
 	if r.resolver == nil {
 		return "", false
 	}
 	return r.resolver.ResolvePlatform(identity)
 }
-func (r *changingRegistry) Lookup(name string) (dialect.Platform, error) {
+func (r *changingRegistry) Lookup(name string) (platform.Platform, error) {
 	r.calls[name]++
 	return r.profiles.Lookup(name)
 }
@@ -80,19 +80,19 @@ func (r profileRegistry) Names() []string {
 	for name := range r {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names
 }
 
-func (r profileRegistry) Lookup(name string) (dialect.Platform, error) {
+func (r profileRegistry) Lookup(name string) (platform.Platform, error) {
 	profile, ok := r[name]
 	if !ok {
 		return nil, connector.ErrUnsupported
 	}
-	return testProfileDialect{connector.StaticDriver{Grammar: profile}}, nil
+	return testPlatform{connector.StaticDriver{Grammar: profile}}, nil
 }
 
-type testProfileDialect struct{ connector.StaticDriver }
+type testPlatform struct{ connector.StaticDriver }
 
-func (d testProfileDialect) Name() string                                { return d.Grammar.Name }
-func (testProfileDialect) MatchInventory(dialect.InventoryIdentity) bool { return false }
+func (d testPlatform) Name() string                        { return d.Grammar.Name }
+func (testPlatform) MatchInventory(platform.Identity) bool { return false }

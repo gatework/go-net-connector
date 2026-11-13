@@ -26,7 +26,7 @@ func (w *eventFailWriter) Write(p []byte) (int, error) {
 	}
 	return w.Buffer.Write(p)
 }
-func textLogDevice(t *testing.T, level string, sink io.Writer, response string) *Device {
+func textLogDevice(t *testing.T, level LogLevel, sink io.Writer, response string) *Device {
 	t.Helper()
 	d, err := New(fixtureDriver(), ConnectionConfig{Host: "fixture", LogLevel: level, Logger: sink}, WithTransportFactory(func(context.Context, ConnectionConfig) (io.ReadWriteCloser, error) {
 		a, b := net.Pipe()
@@ -65,8 +65,8 @@ func TestTextLogFailurePreservesPrimaryDeviceError(t *testing.T) {
 	}
 }
 func TestTextLogThresholdsRetainFailures(t *testing.T) {
-	for _, level := range []string{"warn", "error"} {
-		t.Run(level, func(t *testing.T) {
+	for _, level := range []LogLevel{LogWarn, LogError} {
+		t.Run(string(level), func(t *testing.T) {
 			var sink bytes.Buffer
 			d := textLogDevice(t, level, &sink, "% Invalid PRIVATE_RESPONSE\r\nsw#")
 			_, err := d.ExecuteCommand(t.Context(), Command{Text: "change"}, ExecuteOptions{})

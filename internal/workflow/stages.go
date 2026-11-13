@@ -15,29 +15,35 @@ import (
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/internal/batchreport"
+	"github.com/gatework/go-net-connector/internal/textdiff"
+	"github.com/gatework/go-net-connector/platform"
 	"github.com/gatework/go-net-connector/storage"
 	"github.com/gatework/go-net-connector/transfer"
 	"github.com/gatework/go-net-connector/vendors"
-	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
 // SaveStage persists the running configuration. Success requires the
-// platform's positive save confirmation; a prompt alone is unconfirmed.
+// platform's positive save confirmation; a prompt alone is unconfirmed. On a
+// commit-model platform the commit is the persistence step, so the stage
+// sends nothing.
 type SaveStage struct{}
 
 // Name returns the stable stage identifier recorded in reports.
 func (SaveStage) Name() string { return "save" }
 
 // Admit checks whether the device and platform support this stage before I/O.
-func (SaveStage) Admit(_ fleet.Record, platform dialect.Platform) string {
-	if len(platform.Terminal().SaveCommands) == 0 {
-		return "save_unsupported"
+func (SaveStage) Admit(_ fleet.Record, platform platform.Platform) batchreport.Status {
+	if _, commits := connector.AsCommitter(platform); !commits && !connector.CanSave(platform) {
+		return batchreport.StatusSaveUnsupported
 	}
 	return ""
 }
 
 // Run executes the stage and retains its evidence even on failure.
 func (SaveStage) Run(ctx context.Context, s *Session, e *Evidence) error {
+	if _, commits := connector.AsCommitter(s.Platform); commits {
+		return nil
+	}
 	device, err := s.Device(ctx)
 	if err != nil {
 		return err
@@ -54,35 +60,46 @@ type BackupStage struct{ Directory string }
 func (BackupStage) Name() string { return "backup" }
 
 // Admit checks whether the device and platform support this stage before I/O.
-func (BackupStage) Admit(_ fleet.Record, platform dialect.Platform) string {
-	if len(platform.Terminal().ConfigCommands) == 0 {
-		return "unsupported_operation"
+func (BackupStage) Admit(_ fleet.Record, platform platform.Platform) batchreport.Status {
+	if !connector.CanCollectConfig(platform) {
+		return batchreport.StatusUnsupportedOperation
 	}
 	return ""
 }
 
 // Plan adds the planned stage target without executing device operations.
-func (b BackupStage) Plan(task fleet.Task, _ dialect.Platform, target *batchreport.Target) {
-	target.File, _ = task.Device.BackupFilename("hostname_ip")
+func (b BackupStage) Plan(task fleet.Task, _ platform.Platform, target *batchreport.Target) {
+	target.File, _ = task.Device.Filename()
 }
 
 // Run executes the stage and retains its evidence even on failure.
 func (b BackupStage) Run(ctx context.Context, s *Session, e *Evidence) error {
-	name, err := s.Record.BackupFilename("hostname_ip")
+	name, err := s.Record.Filename()
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(b.Directory, name)
+	receipt, err := collectConfig(ctx, s, filepath.Join(b.Directory, name))
+	return recordBackup(receipt, err, e)
+}
+
+// collectConfig collects the device configuration into path. It refuses a
+// path that is not a regular file before opening the device.
+func collectConfig(ctx context.Context, s *Session, path string) (connector.BackupReceipt, error) {
 	if info, statErr := os.Lstat(path); statErr == nil && !info.Mode().IsRegular() {
-		return storage.ErrUnsafe
+		return connector.BackupReceipt{}, storage.ErrUnsafe
 	} else if statErr != nil && !os.IsNotExist(statErr) {
-		return statErr
+		return connector.BackupReceipt{}, statErr
 	}
 	device, err := s.Device(ctx)
 	if err != nil {
-		return err
+		return connector.BackupReceipt{}, err
 	}
-	receipt, err := device.Backup(ctx, connector.BackupOptions{TextOnly: true, PreserveInvalidEncoding: true, Path: path, RejectSymlink: true, LockTimeout: 5 * time.Second})
+	return device.Backup(ctx, connector.BackupOptions{TextOnly: true, PreserveInvalidEncoding: true, Path: path, RejectSymlink: true, LockTimeout: 5 * time.Second})
+}
+
+// recordBackup stores a collected configuration as the device's backup
+// artifact. A saved file makes a later failure partial.
+func recordBackup(receipt connector.BackupReceipt, err error, e *Evidence) error {
 	if receipt.Path != "" {
 		e.Artifacts.Backup = reportBackup(receipt)
 	}
@@ -93,6 +110,113 @@ func (b BackupStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 		}
 	}
 	return err
+}
+
+// SnapshotStage collects the configuration around a change. The snapshot
+// before the change is saved under "before/" and is the operator's reference
+// for a manual rollback; nothing has been written to the device when it
+// fails. The snapshot after the change is the batch's backup artifact.
+type SnapshotStage struct {
+	Directory string
+	After     bool
+}
+
+// Name returns the stable stage identifier recorded in reports.
+func (x SnapshotStage) Name() string {
+	if x.After {
+		return "snapshot_after"
+	}
+	return "snapshot_before"
+}
+
+// Admit checks whether the device and platform support this stage before I/O.
+func (SnapshotStage) Admit(_ fleet.Record, platform platform.Platform) batchreport.Status {
+	if !connector.CanCollectConfig(platform) {
+		return batchreport.StatusUnsupportedOperation
+	}
+	return ""
+}
+
+// Plan adds the planned stage target without executing device operations.
+func (SnapshotStage) Plan(task fleet.Task, _ platform.Platform, target *batchreport.Target) {
+	target.File, _ = task.Device.Filename()
+}
+
+// Run executes the stage and retains its evidence even on failure.
+func (x SnapshotStage) Run(ctx context.Context, s *Session, e *Evidence) error {
+	name, err := s.Record.Filename()
+	if err != nil {
+		return err
+	}
+	if e.Artifacts.Change == nil {
+		e.Artifacts.Change = &batchreport.Change{}
+	}
+	directory := x.Directory
+	if !x.After {
+		directory = filepath.Join(x.Directory, "before")
+		if err = storage.PrepareDirectory(directory); err != nil {
+			return err
+		}
+	}
+	receipt, err := collectConfig(ctx, s, filepath.Join(directory, name))
+	snapshot := &batchreport.Snapshot{Path: receipt.Path, Bytes: int64(receipt.Bytes), SHA256: receipt.SHA256}
+	if x.After {
+		if receipt.HasSavedEvidence() {
+			e.Artifacts.Change.After = snapshot
+		}
+		return recordBackup(receipt, err, e)
+	}
+	if err == nil && (!receipt.HasSavedEvidence() || receipt.HasUnverifiedPair()) {
+		err = connector.ErrIncomplete
+	}
+	if err == nil {
+		e.Artifacts.Change.Before = snapshot
+	}
+	return err
+}
+
+// DiffStage compares the snapshots taken before and after a change and writes
+// a unified diff under "diff/" when the configuration changed. It performs no
+// device I/O.
+type DiffStage struct{ Directory string }
+
+// Name returns the stable stage identifier recorded in reports.
+func (DiffStage) Name() string { return "diff" }
+
+// Admit checks whether the device and platform support this stage before I/O.
+func (DiffStage) Admit(fleet.Record, platform.Platform) batchreport.Status { return "" }
+
+// Run executes the stage and retains its evidence even on failure.
+func (x DiffStage) Run(ctx context.Context, _ *Session, e *Evidence) error {
+	change := e.Artifacts.Change
+	if change == nil || change.Before == nil || change.After == nil {
+		return connector.ErrIncomplete
+	}
+	before, err := os.ReadFile(change.Before.Path)
+	if err != nil {
+		return err
+	}
+	after, err := os.ReadFile(change.After.Path)
+	if err != nil {
+		return err
+	}
+	ops := textdiff.Diff(textdiff.Lines(string(before)), textdiff.Lines(string(after)))
+	change.Added, change.Removed = textdiff.Stats(ops)
+	unified := textdiff.Unified("before/"+filepath.Base(change.Before.Path), filepath.Base(change.After.Path), ops, 3)
+	change.Compared, change.Changed = true, unified != ""
+	if !change.Changed {
+		return nil
+	}
+	directory := filepath.Join(x.Directory, "diff")
+	if err = storage.PrepareDirectory(directory); err != nil {
+		return err
+	}
+	path := filepath.Join(directory, strings.TrimSuffix(filepath.Base(change.After.Path), ".txt")+".diff")
+	if _, err = storage.Write(ctx, path, []byte(unified)); err != nil {
+		return err
+	}
+	change.DiffFile = path
+	return nil
 }
 
 // TFTPStage makes the device upload its configuration file. With a
@@ -107,15 +231,15 @@ type TFTPStage struct {
 func (TFTPStage) Name() string { return "tftp" }
 
 // Admit checks whether the device and platform support this stage before I/O.
-func (TFTPStage) Admit(_ fleet.Record, platform dialect.Platform) string {
+func (TFTPStage) Admit(_ fleet.Record, platform platform.Platform) batchreport.Status {
 	if _, ok := platform.(transfer.TFTPPolicy); !ok {
-		return "unsupported_operation"
+		return batchreport.StatusUnsupportedOperation
 	}
 	return ""
 }
 
 // Plan adds the planned stage target without executing device operations.
-func (TFTPStage) Plan(task fleet.Task, _ dialect.Platform, target *batchreport.Target) {
+func (TFTPStage) Plan(task fleet.Task, _ platform.Platform, target *batchreport.Target) {
 	t := task.Target
 	target.File, target.Server, target.VerificationRoot = t.Path, t.Server, t.Root
 	target.SourceFile, target.SourceInterface, target.VRF = t.SourceFile, t.SourceInterface, t.VRF
@@ -142,7 +266,7 @@ func (t TFTPStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	var err error
 	var archived *archive.Receipt
 	if pool := t.Pools[target.Root]; pool != nil {
-		name, nameErr := s.Record.BackupFilename("hostname_ip")
+		name, nameErr := s.Record.Filename()
 		if nameErr != nil {
 			return nameErr
 		}
@@ -170,38 +294,67 @@ func (t TFTPStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 }
 
 // ExecuteStage sends one validated script per platform inside one operation
-// lease. The first rejected command stops the script; nothing is retried.
-type ExecuteStage struct{ Scripts DeployScripts }
+// lease. The first rejected command stops the script; nothing is retried. On a
+// commit-model platform the script is applied to the candidate configuration
+// and committed.
+type ExecuteStage struct {
+	Scripts DeployScripts
+	// CommitConfirm, when positive, commits with an automatic rollback after
+	// this many minutes and then confirms it. Platforms without a confirmed
+	// commit are skipped at plan time.
+	CommitConfirm int
+}
 
 // Name returns the stable stage identifier recorded in reports.
 func (ExecuteStage) Name() string { return "execute" }
 
 // Admit checks whether the device and platform support this stage before I/O.
-func (x ExecuteStage) Admit(record fleet.Record, _ dialect.Platform) string {
-	if script, ok := x.Scripts.For(record.Vendor); !ok || len(script.Commands) == 0 {
-		return "missing_script"
+func (x ExecuteStage) Admit(record fleet.Record, platform platform.Platform) batchreport.Status {
+	if script, ok := x.Scripts.For(record.Platform); !ok || len(script.Commands) == 0 {
+		return batchreport.StatusMissingScript
+	}
+	if x.CommitConfirm > 0 {
+		if committer, ok := connector.AsCommitter(platform); !ok || !committer.CommitTraits().ConfirmSupported {
+			return batchreport.StatusConfirmUnsupported
+		}
 	}
 	return ""
 }
 
 // Plan adds the planned stage target without executing device operations.
-func (x ExecuteStage) Plan(task fleet.Task, _ dialect.Platform, target *batchreport.Target) {
-	script, _ := x.Scripts.For(task.Device.Vendor)
+func (x ExecuteStage) Plan(task fleet.Task, _ platform.Platform, target *batchreport.Target) {
+	script, _ := x.Scripts.For(task.Device.Platform)
 	target.Script, target.Commands = script.Name, len(script.Commands)
 }
 
 // Run executes the stage and retains its evidence even on failure.
 func (x ExecuteStage) Run(ctx context.Context, s *Session, e *Evidence) error {
-	script, _ := x.Scripts.For(s.Record.Vendor)
+	script, _ := x.Scripts.For(s.Record.Platform)
 	device, err := s.Device(ctx)
 	if err != nil {
 		return err
 	}
 	evidence := &batchreport.Script{Name: script.Name, Commands: len(script.Commands), Attempts: []batchreport.Attempt{}}
 	e.Artifacts.Script = evidence
+	committer, commits := connector.AsCommitter(s.Platform)
+	if commits {
+		e.Artifacts.Commit = &batchreport.Commit{ConfirmMinutes: x.CommitConfirm}
+	}
 	return device.WithOperation(ctx, func(ctx context.Context, op *connector.Operation) error {
-		result, err := op.ExecuteScript(ctx, script, connector.ExecuteOptions{})
-		evidence.Accepted = len(result.Steps())
+		var result connector.Result
+		var err error
+		if commits {
+			result, err = op.Commit(ctx, script, connector.CommitOptions{ConfirmMinutes: x.CommitConfirm})
+			e.Artifacts.Commit.Confirmed = err == nil
+		} else {
+			result, err = op.ExecuteScript(ctx, script, connector.ExecuteOptions{})
+		}
+		// Commands that wrap a candidate change have no script line.
+		for _, step := range result.Steps() {
+			if step.Command().Line > 0 {
+				evidence.Accepted++
+			}
+		}
 		for _, attempt := range result.Attempts() {
 			failed := attempt.Err() != nil
 			evidence.Attempts = append(evidence.Attempts, batchreport.Attempt{Line: attempt.Command().Line, Written: attempt.Written(), Complete: attempt.Complete(), Failed: failed})
@@ -213,8 +366,14 @@ func (x ExecuteStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 				e.MarkPartial()
 			}
 		}
-		if err != nil && errors.Is(err, connector.ErrDevice) {
-			e.Outcome = "rejected"
+		switch {
+		case err == nil:
+		case commits && committer.CommitTraits().CandidateShared && len(result.Attempts()) > 1:
+			// The shared candidate keeps the uncommitted changes; the
+			// operator must revert them. Nothing is reverted automatically.
+			e.Outcome = batchreport.OutcomeCandidateDirty
+		case errors.Is(err, connector.ErrDevice):
+			e.Outcome = batchreport.OutcomeRejected
 		}
 		return err
 	})
@@ -299,28 +458,28 @@ func (ExecStage) Name() string { return "exec" }
 
 // Admit refuses a platform unless every command is read-only for it, so no
 // connection is opened for a command that could change the device.
-func (x ExecStage) Admit(_ fleet.Record, platform dialect.Platform) string {
+func (x ExecStage) Admit(_ fleet.Record, platform platform.Platform) batchreport.Status {
 	classifier, ok := platform.(ReadOnlyClassifier)
 	if !ok {
-		return "unsupported_operation"
+		return batchreport.StatusUnsupportedOperation
 	}
 	for _, command := range x.Commands {
 		if !classifier.IsReadOnly(command) {
-			return "not_read_only"
+			return batchreport.StatusNotReadOnly
 		}
 	}
 	return ""
 }
 
 // Plan adds the planned stage target without executing device operations.
-func (x ExecStage) Plan(task fleet.Task, _ dialect.Platform, target *batchreport.Target) {
-	target.File, _ = task.Device.BackupFilename("hostname_ip")
+func (x ExecStage) Plan(task fleet.Task, _ platform.Platform, target *batchreport.Target) {
+	target.File, _ = task.Device.Filename()
 	target.Commands = len(x.Commands)
 }
 
 // Run executes the stage and retains its evidence even on failure.
 func (x ExecStage) Run(ctx context.Context, s *Session, e *Evidence) error {
-	name, err := s.Record.BackupFilename("hostname_ip")
+	name, err := s.Record.Filename()
 	if err != nil {
 		return err
 	}
@@ -365,7 +524,7 @@ func (x ExecStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 // RemoteStage makes the device export its configuration to a remote server
 // with its native client (SCP or FTP). Completion is device-reported only.
 type RemoteStage struct {
-	Registry dialect.Registry
+	Registry platform.Registry
 	// Options carries server, protocol, username and password; Path is the
 	// remote directory, completed per device with "<host>-<stamp>.conf".
 	Options transfer.RemoteOptions
@@ -376,15 +535,15 @@ type RemoteStage struct {
 func (RemoteStage) Name() string { return "remote" }
 
 // Admit checks whether the device and platform support this stage before I/O.
-func (RemoteStage) Admit(_ fleet.Record, platform dialect.Platform) string {
+func (RemoteStage) Admit(_ fleet.Record, platform platform.Platform) batchreport.Status {
 	if _, ok := platform.(transfer.RemoteBackupPolicy); !ok {
-		return "unsupported_operation"
+		return batchreport.StatusUnsupportedOperation
 	}
 	return ""
 }
 
 // Plan adds the planned stage target without executing device operations.
-func (x RemoteStage) Plan(task fleet.Task, _ dialect.Platform, target *batchreport.Target) {
+func (x RemoteStage) Plan(task fleet.Task, _ platform.Platform, target *batchreport.Target) {
 	target.Server, target.File = x.Options.Server, x.path(task.Device.Host)
 }
 

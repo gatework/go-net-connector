@@ -20,7 +20,7 @@ func diffBatchFixture(t *testing.T, body string) string {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256([]byte(body))
-	data, _ := json.Marshal(map[string]any{"schema_version": 3, "operation": "backup", "devices": []any{map[string]any{"host": "192.0.2.1", "status": "succeeded", "artifacts": map[string]any{"backup": map[string]any{"path": filepath.Join(d, name), "bytes": len(body), "sha256": hex.EncodeToString(sum[:])}}}}})
+	data, _ := json.Marshal(map[string]any{"schema_version": 4, "operation": "backup", "devices": []any{map[string]any{"host": "192.0.2.1", "status": "succeeded", "artifacts": map[string]any{"backup": map[string]any{"path": filepath.Join(d, name), "bytes": len(body), "sha256": hex.EncodeToString(sum[:])}}}}})
 	if err := os.WriteFile(filepath.Join(d, "report.json"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}

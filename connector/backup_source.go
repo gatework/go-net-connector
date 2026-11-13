@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -47,12 +48,12 @@ type TextWarning struct {
 func (r BackupReceipt) Clone() BackupReceipt {
 	if r.Source != nil {
 		v := *r.Source
-		v.Segments = append([]SourceSegment(nil), v.Segments...)
+		v.Segments = slices.Clone(v.Segments)
 		r.Source = &v
 	}
 	if r.TextWarning != nil {
 		v := *r.TextWarning
-		v.Positions = append([]TextPosition(nil), v.Positions...)
+		v.Positions = slices.Clone(v.Positions)
 		r.TextWarning = &v
 	}
 	return r

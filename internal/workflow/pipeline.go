@@ -12,9 +12,10 @@ import (
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/internal/batchreport"
+	"github.com/gatework/go-net-connector/inventory"
+	"github.com/gatework/go-net-connector/platform"
 	"github.com/gatework/go-net-connector/storage"
 	"github.com/gatework/go-net-connector/transfer"
-	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
 // Stage is one step of the per-device business pipeline, such as executing a
@@ -24,7 +25,7 @@ type Stage interface {
 	Name() string
 	// Admit decides at plan time, without I/O, whether the platform supports
 	// this stage. A non-empty result is the skip status of the device.
-	Admit(record fleet.Record, platform dialect.Platform) (skip string)
+	Admit(record fleet.Record, platform platform.Platform) (skip batchreport.Status)
 	// Run performs the stage. It records evidence even when it fails, and calls
 	// Evidence.MarkPartial once the device or the local disk has been changed.
 	Run(ctx context.Context, s *Session, e *Evidence) error
@@ -33,7 +34,7 @@ type Stage interface {
 // Planner is an optional Stage method that describes the planned target of a
 // device in plan output, without I/O.
 type Planner interface {
-	Plan(task fleet.Task, platform dialect.Platform, target *batchreport.Target)
+	Plan(task fleet.Task, platform platform.Platform, target *batchreport.Target)
 }
 
 // Operation is a named composition of stages applied to every admitted device.
@@ -41,16 +42,16 @@ type Operation struct {
 	Name   string
 	Stages []Stage
 	// Outcome names a fully successful device result, such as "backed_up".
-	Outcome string
+	Outcome batchreport.Outcome
 	// Then is an optional second round that starts only after every device
 	// finished Stages, such as applying reviewed topology changes.
 	Then *Round
 	// Tolerate lists extra device statuses that do not fail the selected and
 	// verified policies for this operation.
-	Tolerate []string
+	Tolerate []batchreport.Status
 	// Finish may adjust the summarized report, for example to report pending
 	// changes as an incomplete batch.
-	Finish func(*batchreport.Report)
+	Finish func(report *batchreport.Report, evidence []*Evidence)
 	// Limit caps the number of admitted devices; the rest are sample_limit.
 	Limit int
 }
@@ -69,7 +70,10 @@ type Round struct {
 type Evidence struct {
 	Artifacts batchreport.Artifacts
 	// Outcome overrides Operation.Outcome for a successful device.
-	Outcome string
+	Outcome batchreport.Outcome
+	// Topology is the typed audit, plan and apply evidence of a topology run;
+	// the report carries it as Artifacts.Topology.
+	Topology *TopologyEvidence
 	// Verified marks server-side verification evidence (the verified policy).
 	Verified bool
 	partial  bool
@@ -90,7 +94,7 @@ func (e *Evidence) MarkPartial() { e.partial = true }
 type Session struct {
 	Record   fleet.Record
 	Target   transfer.Target
-	Platform dialect.Platform
+	Platform platform.Platform
 	runtime  Runtime
 	logs     string
 	observer SessionObserver
@@ -113,10 +117,10 @@ func (s *Session) Device(ctx context.Context) (*connector.Device, error) {
 		s.device, s.close = device, closeDevice
 		err = device.Connect(ctx)
 	}
-	stage := batchreport.Stage{Name: "authenticate", Status: "succeeded", DurationMS: milliseconds(time.Since(start))}
+	stage := batchreport.Stage{Name: "authenticate", Status: batchreport.StageSucceeded, DurationMS: milliseconds(time.Since(start))}
 	if err != nil {
 		diagnostic := classify(err, "authenticate")
-		stage.Status, stage.Diagnostic = "failed", &diagnostic
+		stage.Status, stage.Diagnostic = batchreport.StageFailed, &diagnostic
 		s.authErr = err
 	}
 	s.auth = &stage
@@ -146,7 +150,7 @@ type ExecuteOptions struct {
 
 // intentionalSkips are inventory entries the operator excluded on purpose;
 // they do not fail the selected or verified policies.
-var intentionalSkips = map[string]bool{"filtered": true, "sample_limit": true, "missing_script": true}
+var intentionalSkips = map[batchreport.Status]bool{batchreport.StatusFiltered: true, batchreport.StatusSampleLimit: true, batchreport.StatusMissingScript: true}
 
 type pipelineTask struct {
 	entry int
@@ -161,7 +165,7 @@ func (r *Runner) Execute(ctx context.Context, runtime Runtime, plan fleet.Plan, 
 	report := batchreport.Report{
 		SchemaVersion: batchreport.SchemaVersion, Operation: op.Name, Policy: o.Policy,
 		Directory: o.Directory, StartedAt: started.Format(time.RFC3339Nano), Workers: runtime.Workers,
-		Counts: map[string]int{}, SessionLogs: runtime.logDir(op.Name, o.Directory),
+		Counts: map[batchreport.Status]int{}, SessionLogs: runtime.logDir(op.Name, o.Directory),
 	}
 	if o.StopAfterFailures < 0 {
 		return report, ErrInvalidRequest
@@ -192,7 +196,7 @@ func (r *Runner) Execute(ctx context.Context, runtime Runtime, plan fleet.Plan, 
 	report.DurationMS = milliseconds(finished.Sub(started))
 	summarize(&report, len(tasks), op.Tolerate)
 	if op.Finish != nil {
-		op.Finish(&report)
+		op.Finish(&report, p.evidence)
 	}
 	if p.journalErr != nil {
 		report.Success, report.ReportError = false, "journal_failed"
@@ -209,14 +213,14 @@ func (r *Runner) Execute(ctx context.Context, runtime Runtime, plan fleet.Plan, 
 // Plan returns the planned report for op without any I/O: every inventory
 // entry with its skip status or not_started, and the planned target.
 func (r *Runner) Plan(runtime Runtime, plan fleet.Plan, op Operation, policy string) batchreport.Report {
-	report := batchreport.Report{SchemaVersion: batchreport.SchemaVersion, Operation: op.Name, Policy: policy, Workers: runtime.Workers, Counts: map[string]int{}}
+	report := batchreport.Report{SchemaVersion: batchreport.SchemaVersion, Operation: op.Name, Policy: policy, Workers: runtime.Workers, Counts: map[batchreport.Status]int{}}
 	tasks := r.admitTasks(runtime, plan, op, &report)
 	for _, device := range report.Devices {
 		report.Counts[device.Status]++
 	}
 	report.Status = batchreport.BatchNoDevices
 	if len(tasks) > 0 {
-		report.Status = "planned"
+		report.Status = batchreport.BatchPlanned
 	}
 	report.Success = len(tasks) > 0
 	return report
@@ -232,18 +236,14 @@ func (r *Runner) admitTasks(runtime Runtime, plan fleet.Plan, op Operation, repo
 	}
 	var tasks []pipelineTask
 	for i, entry := range entries {
-		report.Devices[i] = deviceRow(entry.Device, entry.Status)
+		report.Devices[i] = deviceRow(entry.Device, batchreport.Status(entry.Status))
 		task, ready := byIndex[i]
 		if !ready {
 			continue
 		}
-		platform, err := runtime.Registry.Lookup(entry.Device.Vendor)
+		platform, err := runtime.Registry.Lookup(entry.Device.Platform)
 		if err != nil {
-			report.Devices[i].Status = "unsupported_vendor"
-			continue
-		}
-		if skip := admit(op, entry.Device, platform); skip != "" {
-			report.Devices[i].Status = skip
+			report.Devices[i].Status = batchreport.StatusUnsupportedVendor
 			continue
 		}
 		target := &batchreport.Target{}
@@ -256,7 +256,7 @@ func (r *Runner) admitTasks(runtime Runtime, plan fleet.Plan, op Operation, repo
 			report.Devices[i].Target = target
 		}
 		if op.Limit > 0 && len(tasks) >= op.Limit {
-			report.Devices[i].Status = "sample_limit"
+			report.Devices[i].Status = batchreport.StatusSampleLimit
 			continue
 		}
 		report.Devices[i].Status = batchreport.StatusNotStarted
@@ -265,7 +265,14 @@ func (r *Runner) admitTasks(runtime Runtime, plan fleet.Plan, op Operation, repo
 	return tasks
 }
 
-func admit(op Operation, record fleet.Record, platform dialect.Platform) string {
+// planFor classifies rows for op. The operation's stages admit devices before
+// per-platform sampling, so a sample is never spent on an unsupported device.
+func planFor(runtime Runtime, rows []inventory.Device, op Operation, o fleet.PlanOptions) (fleet.Plan, error) {
+	o.Admit = func(record fleet.Record, p platform.Platform) string { return string(admit(op, record, p)) }
+	return fleet.NewPlan(rows, runtime.Rules, o)
+}
+
+func admit(op Operation, record fleet.Record, platform platform.Platform) batchreport.Status {
 	for _, stage := range op.Stages {
 		if skip := stage.Admit(record, platform); skip != "" {
 			return skip
@@ -278,9 +285,9 @@ func admit(op Operation, record fleet.Record, platform dialect.Platform) string 
 // stops the pipeline; later stages are recorded as skipped.
 func (r *Runner) runDevice(ctx context.Context, runtime Runtime, op Operation, stages []Stage, task fleet.Task, row batchreport.Device, evidence *Evidence, logs string) batchreport.Device {
 	record := task.Device
-	_ = r.emit(StartEvent{Host: record.Host, Vendor: record.Vendor})
+	_ = r.emit(StartEvent{Host: record.Host, Platform: record.Platform})
 	start := time.Now()
-	platform, _ := runtime.Registry.Lookup(record.Vendor)
+	platform, _ := runtime.Registry.Lookup(record.Platform)
 	session := &Session{Record: record, Target: task.Target, Platform: platform, runtime: runtime, logs: logs, observer: r.observe(), emit: r.emit}
 	previous := row.DurationMS
 	failedStage, failed := runStages(ctx, session, stages, evidence, &row)
@@ -288,6 +295,9 @@ func (r *Runner) runDevice(ctx context.Context, runtime Runtime, op Operation, s
 		failed, failedStage = cleanup, "disconnect"
 	}
 	row.Artifacts, row.Verified = evidence.Artifacts, evidence.Verified
+	if evidence.Topology != nil {
+		row.Artifacts.Topology = evidence.Topology
+	}
 	if row.StartedAt == "" {
 		row.StartedAt = start.UTC().Format(time.RFC3339Nano)
 	}
@@ -327,7 +337,7 @@ func (r *Runner) runDevice(ctx context.Context, runtime Runtime, op Operation, s
 //   - selected: at least one device succeeded and every other entry was an
 //     intentional skip (filtered, sample limit, no script for its platform).
 //   - verified: selected, and every succeeded device has verification evidence.
-func summarize(report *batchreport.Report, admitted int, tolerate []string) {
+func summarize(report *batchreport.Report, admitted int, tolerate []batchreport.Status) {
 	succeeded := 0
 	selected := true
 	allSucceeded := len(report.Devices) > 0
@@ -365,12 +375,12 @@ func summarize(report *batchreport.Report, admitted int, tolerate []string) {
 	}
 }
 
-func deviceRow(record fleet.Record, status string) batchreport.Device {
+func deviceRow(record fleet.Record, status batchreport.Status) batchreport.Device {
 	host := record.Host
 	if host == "" {
 		host = record.SourceIP
 	}
-	return batchreport.Device{Host: host, Name: record.Name, Platform: record.Vendor, SourceVendor: record.SourceVendor, Status: status}
+	return batchreport.Device{Host: host, Name: record.Name, Platform: record.Platform, SourceVendor: record.SourceVendor, Status: status}
 }
 
 func diagnosticCode(d *batchreport.Diagnostic) string {

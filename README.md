@@ -14,7 +14,7 @@ GOWORK=off go test ./...
 GOWORK=off go build -o bin/ ./cmd/...
 ```
 
-当前版本为 [v0.7.1](docs/releases/v0.7.1.md)：接入共享 Go 工程规范，整理内部执行步骤，并升级正式 go-expect 依赖。公开 Go API 的变更见 [迁移说明](docs/api-migration.md)。配置使用平铺的 `net-connector.yml`，归档协议为 v2。
+当前版本为 [v0.8.0](docs/releases/v0.8.0.md)：统一平台术语，新增提交模型平台下发、设备事实采集与本地静态清单。配置使用平铺的 `net-connector.yml`，归档协议为 v2。
 
 系统需要 `ssh`；Telnet 连接另需系统 `telnet`。SSH 归档服务器需要管理员安装 `tftp-archive`，默认路径 `/usr/local/bin/tftp-archive`。客户端只探测协议版本和能力，不上传或安装 worker。
 
@@ -31,12 +31,12 @@ bin/netman inventory list --hosts 192.0.2.0/24
 bin/netman backup plan --method cli --json
 bin/netman backup run --save --json
 bin/netman backup tftp --tftp-server 192.0.2.9 --tftp-root /srv/tftp --success-policy verified
-bin/netman backup remote --vendor juniper --remote-server 192.0.2.9 --remote-path backups --remote-username backup
+bin/netman backup remote --platform juniper --remote-server 192.0.2.9 --remote-path backups --remote-username backup
 bin/netman backup diff 192.0.2.1 --from ./backups/批次A --to ./backups/批次B
 bin/netman backup export 192.0.2.1 --batch ./backups/具体批次 --output ./saved.cfg
-bin/netman exec run --command 'show version' --vendor cisco
+bin/netman exec run --command 'show version' --platform cisco_ios
 bin/netman deploy plan --script-for h3c=vlan.txt --hosts 192.0.2.0/28
-bin/netman deploy run --script ntp.txt --vendor cisco --save --backup --stop-after-failures 1
+bin/netman deploy run --script ntp.txt --platform cisco_ios --save --stop-after-failures 1
 bin/netman topology plan --hosts 192.0.2.1 --json
 bin/netman topology apply --hosts 192.0.2.1
 bin/netman completion zsh
@@ -51,8 +51,9 @@ bin/netman completion zsh
 | `backup run` | [保存，`--save`] → 备份（CLI 采集为 `设备名称-IP.txt`） |
 | `backup tftp` | [保存] → TFTP 上传（有核验根目录时：服务器核验并取回） |
 | `backup remote` | 原生远程导出（SCP/FTP，目前 Juniper；仅设备回执，不支持 verified） |
-| `deploy run` | 执行脚本 → [保存，`--save`] → [备份，`--backup`] |
+| `deploy run` | 变更前快照 → 执行脚本 → [保存，`--save`] → 变更后快照 → 差异（`--no-snapshot` 关闭快照与差异） |
 | `exec run` | 只读命令采集（输出存为 `设备名称-IP.txt`） |
+| `facts run` | 事实采集（型号、序列号、版本）并与清单比对 |
 | `topology plan/discover/apply` | 审计；apply 在全部计划文件落盘后再逐台重新核验并应用 |
 
 `plan` 类命令只做无 I/O 的准入与目标预览，输出与运行报告同一格式（状态为 `not_started` 或跳过原因）。
@@ -95,6 +96,17 @@ bin/netman completion zsh
 netdisco:
   url: https://netdisco.example.invalid
 ```
+
+没有 Netdisco 时可以使用本地清单文件（YAML 的 `devices:` 列表，或带表头的 CSV；字段为 `ip`、`name`、`dns`、`vendor`、`os`、`model`、`os_ver`、`serial`，只有 `ip` 必填）。地址无效、重复或出现未知字段时整份文件被拒绝：
+
+```yaml
+# net-connector.yml
+inventory:
+  source: file
+  file: ./devices.csv
+```
+
+`deploy run` 默认在变更前后各采集一次配置并生成差异（`before/`、`diff/`）；在 Juniper 与 Palo Alto 上脚本经候选配置提交，`--commit-confirm 分钟` 使用 Junos 的带自动回滚提交。`netman platform list` 列出每个平台声明的能力。提交与事实采集目前只有模拟对端的测试证据，未经实机验证。
 
 起步配置只填写环境事实；并发、目录、筛选等按需覆盖。配置备份、TFTP 备份和拓扑任务共用 `backup.parallel`，需要时可用 `topology.parallel` 单独覆盖。初始化省略继承的默认值，明确设置的 false 和空筛选会保留。`config init --json` 返回实际创建的文件；`backup export --output 文件` 默认输出中文回执，可加 `--json` 获取元数据；直接导出到 stdout 始终只包含配置原文件。
 
@@ -140,16 +152,17 @@ _ = configuration
 _ = ok
 ```
 
-`connector.New` 不连接设备；先登记 `Close`，再显式调用 `Connect`，连接失败时仍由调用方持有清理责任。`vendors.Open` 已移除。`ExecuteScript` 先校验完整脚本，再取得设备操作租约，操作并发或重入返回忙错误。每条命令共享发送、分页和交互的绝对期限；默认响应上限 32 MiB，也支持脚本累计预算。
+`connector.New` 不连接设备；先登记 `Close`，再显式调用 `Connect`，连接失败时仍由调用方持有清理责任。`ExecuteScript` 先校验完整脚本，再取得设备操作租约，操作并发或重入返回忙错误。每条命令共享发送、分页和交互的绝对期限；默认响应上限 32 MiB，也支持脚本累计预算。
 
 常用包：
 
 - `connector`：设备生命周期、命令/脚本、租约、回执、原文与渲染输出、配置采集和本地备份。
-- `vendors` / `textfsm`：12 个厂商档案、19 个内嵌 TextFSM 模板、离线配置解析。
+- `platform` / `vendors` / `textfsm`：平台与目录接口、12 个内建平台、23 个内嵌 TextFSM 模板、离线配置解析。
 - `topology`：发现、描述审计、纯规划、确认后应用、读回验证和保存。
 - `transfer`：原生 TFTP、Junos FTP/SCP、目标策略及设备报告回执。
+- `facts`：只读的设备事实采集（型号、序列号、版本）。
 - `archive`：本地/SSH 归档池、worker 协议和服务器核验。常规归档使用 `NewPool`；`Client` 是低层协议组合接口。
-- `inventory` / `netdisco`：清单选择器、HTTP/PG 来源与缓存。
+- `inventory` / `netdisco` / `inventoryfile`：清单选择器、HTTP/PG 来源与缓存、本地 YAML/CSV 清单。
 - `fleet` / `parallel`：通用计划、批次、报告及有界并发。
 - `storage`：稳定路径锁、私有日志、原子写入与提交/持久化回执。
 - `config`：不可变配置快照；`internal/bootstrap` 是唯一显式依赖注入组合根。
@@ -160,7 +173,7 @@ Go API 直接注入 `ConnectionConfig.Logger` 且不设置 `LogLevel` 时，保�
 
 ## 验证与边界
 
-设计约束见 [设计约束](docs/design.md)，公开 API 变更见 [迁移说明](docs/api-migration.md)，实施证据见 [实施记录](docs/progress.md)。
+设计约束见 [设计约束](docs/design.md)，实施证据见 [实施记录](docs/progress.md)。
 
 发布流程与产物校验见 [发布说明](docs/releasing.md)。
 
@@ -172,7 +185,7 @@ python3 scripts/verify-consumer.py
 python3 scripts/verify-linux.py
 ```
 
-所有权与失败边界见 [架构](docs/architecture.md)，厂商能力矩阵见 [厂商方言](vendors/README.md)。本地假设备、PTY、HTTP/TLS、临时 PostgreSQL、localhost sshd 和安装后的 worker 是不同的证据层；这些结果不代表生产设备互通、远端 CI 或发布完成。
+所有权与失败边界见 [架构](docs/architecture.md)，厂商能力矩阵见 [厂商平台](vendors/README.md)。本地假设备、PTY、HTTP/TLS、临时 PostgreSQL、localhost sshd 和安装后的 worker 是不同的证据层；这些结果不代表生产设备互通、远端 CI 或发布完成。
 
 ### TFTP 等待上限与每日归档
 

@@ -86,7 +86,9 @@ func (r Runtime) commandTree(ctx context.Context, outputErr *error) *cobra.Comma
 	addTopologyCommands(root, leaf)
 	addDeployCommands(root, leaf)
 	addExecCommands(root, leaf)
+	addFactsCommands(root, leaf)
 	addConfigCommands(root, leaf)
+	addPlatformCommands(root)
 	addCompletionCommands(root)
 	root.AddCommand(&cobra.Command{Use: "version", Short: "显示版本与源码修订号", Long: "显示构建身份，不读取配置或凭据。", Example: "  netman version", Args: noArguments, RunE: func(c *cobra.Command, _ []string) error {
 		_, err := fmt.Fprintln(c.OutOrStdout(), "netman", buildinfo.Identity)

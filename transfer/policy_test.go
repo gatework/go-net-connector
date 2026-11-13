@@ -1,14 +1,16 @@
-package transfer
+package transfer_test
 
 import (
 	"errors"
 	"testing"
 
+	"github.com/gatework/go-net-connector/transfer"
+
 	"github.com/gatework/go-net-connector/vendors"
 )
 
 func TestPolicyHostOverridesAndNullableVendorValues(t *testing.T) {
-	p, e := NewPolicy(PolicyOptions{Server: "SERVER", Servers: map[string]string{"2001:db8::1": "other"}, SourceFiles: map[string]any{"huawei": map[string]any{"default": "flash:/startup.cfg", "hosts": map[string]any{"2001:db8::1": nil}}}, VRFs: map[string]any{"cisco_nxos": "blue"}}, vendors.NewBuiltinRegistry())
+	p, e := transfer.NewPolicy(transfer.PolicyOptions{Server: "SERVER", Servers: map[string]string{"2001:db8::1": "other"}, SourceFiles: map[string]any{"huawei": map[string]any{"default": "flash:/startup.cfg", "hosts": map[string]any{"2001:db8::1": nil}}}, VRFs: map[string]any{"cisco_nxos": "blue"}}, vendors.NewBuiltinRegistry())
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -28,7 +30,7 @@ func TestPolicyMaterializesCiscoNXOSDriverDefaultVRF(t *testing.T) {
 		want string
 	}{{name: "driver default", want: "management"}, {name: "configured override", vrfs: map[string]any{"cisco_nxos": "blue"}, want: "blue"}} {
 		t.Run(tc.name, func(t *testing.T) {
-			p, err := NewPolicy(PolicyOptions{Server: "192.0.2.9", VRFs: tc.vrfs}, vendors.NewBuiltinRegistry())
+			p, err := transfer.NewPolicy(transfer.PolicyOptions{Server: "192.0.2.9", VRFs: tc.vrfs}, vendors.NewBuiltinRegistry())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -40,23 +42,23 @@ func TestPolicyMaterializesCiscoNXOSDriverDefaultVRF(t *testing.T) {
 	}
 }
 
-func TestPolicyUsesDialectTransferRequirements(t *testing.T) {
+func TestPolicyUsesPlatformTransferRequirements(t *testing.T) {
 	registry := vendors.NewBuiltinRegistry()
-	withoutServer, err := NewPolicy(PolicyOptions{}, registry)
+	withoutServer, err := transfer.NewPolicy(transfer.PolicyOptions{}, registry)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if target, targetErr := withoutServer.For("192.0.2.1", "palo_alto"); targetErr != nil || target.Server != "" {
 		t.Fatalf("missing server should remain a caller validation error: %#v, %v", target, targetErr)
 	}
-	withoutRoot, err := NewPolicy(PolicyOptions{Server: "192.0.2.9"}, registry)
+	withoutRoot, err := transfer.NewPolicy(transfer.PolicyOptions{Server: "192.0.2.9"}, registry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = withoutRoot.For("192.0.2.1", "palo_alto"); !errors.Is(err, ErrInvalid) {
+	if _, err = withoutRoot.For("192.0.2.1", "palo_alto"); !errors.Is(err, transfer.ErrInvalid) {
 		t.Fatalf("Palo Alto target without a verification root: %v", err)
 	}
-	withRoot, err := NewPolicy(PolicyOptions{Server: "192.0.2.9", Root: "/tmp/archive"}, registry)
+	withRoot, err := transfer.NewPolicy(transfer.PolicyOptions{Server: "192.0.2.9", Root: "/tmp/archive"}, registry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,27 +66,27 @@ func TestPolicyUsesDialectTransferRequirements(t *testing.T) {
 	if err != nil || target.Root != "/tmp/archive" {
 		t.Fatalf("Palo Alto target = %#v, error = %v", target, err)
 	}
-	if err = Validate(registry, "huawei", "192.0.2.1", TFTPOptions{Server: "192.0.2.9", Path: "backup.cfg"}); !errors.Is(err, ErrSourceFileRequired) {
+	if err = transfer.Validate(registry, "huawei", "192.0.2.1", transfer.TFTPOptions{Server: "192.0.2.9", Path: "backup.cfg"}); !errors.Is(err, transfer.ErrSourceFileRequired) {
 		t.Fatalf("Huawei source file requirement: %v", err)
 	}
 }
 
 func TestPolicyRejectsNilConcreteRegistry(t *testing.T) {
 	var registry *vendors.Registry
-	if _, err := NewPolicy(PolicyOptions{}, registry); !errors.Is(err, ErrInvalid) {
+	if _, err := transfer.NewPolicy(transfer.PolicyOptions{}, registry); !errors.Is(err, transfer.ErrInvalid) {
 		t.Fatalf("nil concrete registry error = %v", err)
 	}
 }
 
 func TestPolicyRejectsSharedRootsAndUnsafeUnusedPolicies(t *testing.T) {
-	for _, o := range []PolicyOptions{
+	for _, o := range []transfer.PolicyOptions{
 		{Roots: map[string]string{"a": "/tmp/root", "b": "/tmp/root"}},
 		{Servers: map[string]string{"192.0.2.1/24": "a"}},
 		{VRFs: map[string]any{"cisco_ios": "default"}},
 		{SourceInterfaces: map[string]any{"radware": "bad"}},
 		{Root: "ssh://root:secret@server/path"},
 	} {
-		if _, e := NewPolicy(o, vendors.NewBuiltinRegistry()); e == nil {
+		if _, e := transfer.NewPolicy(o, vendors.NewBuiltinRegistry()); e == nil {
 			t.Fatal("accepted invalid policy")
 		}
 	}

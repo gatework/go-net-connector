@@ -5,10 +5,13 @@ declared:
   - ./cmd/tftp-archive
   - ./config
   - ./connector
+  - ./facts
   - ./fleet
   - ./inventory
+  - ./inventoryfile
   - ./netdisco
   - ./parallel
+  - ./platform
   - ./storage
   - ./textfsm
   - ./topology
@@ -20,6 +23,7 @@ declared:
   - ./internal/cli
   - ./internal/display
   - ./internal/ifname
+  - ./internal/nilcheck
   - ./internal/progress
   - ./internal/terminal
   - ./internal/textcodec
@@ -27,7 +31,7 @@ declared:
   - ./internal/workflow
 rules:
   - name: libraries do not depend on application orchestration
-    packages: [./archive, ./config, ./connector, ./fleet, ./inventory, ./netdisco, ./parallel, ./storage, ./textfsm, ./topology, ./transfer, ./vendors/...]
+    packages: [./archive, ./config, ./connector, ./facts, ./fleet, ./inventory, ./inventoryfile, ./netdisco, ./parallel, ./platform, ./storage, ./textfsm, ./topology, ./transfer, ./vendors/...]
     deny: [./cmd/..., ./internal/bootstrap, ./internal/cli, ./internal/workflow]
     transitive: true
   - name: generic device execution does not select vendors

@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestSaveRequiresProfileEvidenceAndPreservesCompletedStep(t *testing.T) {
+func TestSaveRequiresPlatformEvidenceAndPreservesCompletedStep(t *testing.T) {
 	for _, output := range []string{"saved\nsw#", "sw#"} {
 		t.Run(output, func(t *testing.T) {
 			p := fixtureDriver()

@@ -10,6 +10,7 @@ import (
 	"io"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -181,7 +182,7 @@ func (t *archiveTransaction) run() error {
 	return t.acceptVerification()
 }
 func (t *archiveTransaction) ready() error {
-	return writeFrame(t.output, frame{OK: true, Phase: "ready", Version: Version, Capabilities: append([]string(nil), capabilities...)})
+	return writeFrame(t.output, frame{OK: true, Phase: "ready", Version: Version, Capabilities: slices.Clone(capabilities)})
 }
 func (t *archiveTransaction) preflight() error {
 	if _, e := t.markerTime(); e != nil {

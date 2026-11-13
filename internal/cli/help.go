@@ -101,7 +101,7 @@ func writeFlagHelp(b *strings.Builder, title string, flags *pflag.FlagSet) {
 // Flag categories are presentation metadata; every flag remains available.
 var flagHelpGroups = map[string][]string{
 	"常用选项":  {"help", "version", "config", "env-file", "for", "method", "directory", "output", "batch", "json", "quiet", "parallel", "interactive", "non-interactive", "tftp-server", "tftp-root", "script", "script-for", "save", "backup", "stop-after-failures", "command", "commands-file", "remote-server", "remote-path", "remote-username", "remote-protocol", "from", "to"},
-	"设备筛选":  {"host", "hosts", "exclude-hosts", "name", "exclude-name", "vendor", "exclude-vendor", "model", "exclude-model", "name-match", "model-match", "all", "sample", "limit"},
+	"设备筛选":  {"host", "hosts", "exclude-hosts", "name", "exclude-name", "platform", "exclude-platform", "model", "exclude-model", "name-match", "model-match", "all", "sample", "limit"},
 	"连接与认证": {"protocol", "username", "password", "enable-password", "ask-password", "netdisco-username", "netdisco-password", "ask-netdisco-password", "known-hosts", "host-key-policy", "stdin-credentials", "jump-host", "connect-retries"},
 }
 

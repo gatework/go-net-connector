@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"golang.org/x/term"
@@ -25,6 +27,8 @@ func operationLabel(o options) string {
 		return "脚本下发"
 	case "exec":
 		return "只读命令采集"
+	case "facts":
+		return "设备事实采集"
 	case "remote":
 		return "远程导出备份"
 	case "tftp":
@@ -96,14 +100,14 @@ func (r Runtime) writePlan(b *strings.Builder, report *batchreport.Report) {
 		if d.Status == "filtered" {
 			continue
 		}
-		rows = append(rows, [5]string{d.Host, d.Name, d.Platform, targetText(d.Target), display.Status(d.Status)})
+		rows = append(rows, [5]string{d.Host, d.Name, d.Platform, targetText(d.Target), display.Status(string(d.Status))})
 	}
 	_ = display.Table(b, rows, r.width())
 	planned := report.Counts[batchreport.StatusNotStarted]
 	fmt.Fprintf(b, "清单 %d 台；计划执行 %d 台", report.Total, planned)
-	for status, n := range report.Counts {
-		if status != batchreport.StatusNotStarted && status != "filtered" && n > 0 {
-			fmt.Fprintf(b, "；%s %d 台", display.Status(status), n)
+	for _, status := range slices.Sorted(maps.Keys(report.Counts)) {
+		if n := report.Counts[status]; status != batchreport.StatusNotStarted && status != batchreport.StatusFiltered && n > 0 {
+			fmt.Fprintf(b, "；%s %d 台", display.Status(string(status)), n)
 		}
 	}
 	b.WriteString("\n")
@@ -152,6 +156,13 @@ func (r Runtime) writeReport(b *strings.Builder, report *batchreport.Report, arc
 			fmt.Fprintf(b, "命令文件：%s\n", display.Text(filepath.Join(report.Directory, "scripts")))
 		}
 	}
+	if report.Operation == "deploy" {
+		for _, entry := range [][2]string{{"变更前快照", "before"}, {"配置差异", "diff"}} {
+			if _, err := os.Stat(filepath.Join(report.Directory, entry[1])); err == nil {
+				fmt.Fprintf(b, "%s：%s\n", entry[0], display.Text(filepath.Join(report.Directory, entry[1])))
+			}
+		}
+	}
 }
 
 // writeWarnings renders the failure, stop, interruption, verification,
@@ -159,8 +170,11 @@ func (r Runtime) writeReport(b *strings.Builder, report *batchreport.Report, arc
 func (r Runtime) writeWarnings(b *strings.Builder, report *batchreport.Report, interrupted bool) {
 	failed := report.Counts[batchreport.StatusFailed]
 	partial := report.Counts[batchreport.StatusPartial]
-	textWarnings, unverified := 0, 0
+	textWarnings, unverified, unchanged := 0, 0, 0
 	for _, d := range report.Devices {
+		if c := d.Artifacts.Change; c != nil && c.Compared && !c.Changed && d.Status == batchreport.StatusSucceeded {
+			unchanged++
+		}
 		if d.Artifacts.Backup != nil && d.Artifacts.Backup.TextWarning != nil && d.Artifacts.Backup.TextWarning.Count > 0 {
 			textWarnings++
 		}
@@ -168,7 +182,7 @@ func (r Runtime) writeWarnings(b *strings.Builder, report *batchreport.Report, i
 			unverified++
 		}
 	}
-	if failed == 0 && partial == 0 && unverified == 0 && textWarnings == 0 && report.ReportError == "" && !report.Stopped && !interrupted {
+	if failed == 0 && partial == 0 && unverified == 0 && textWarnings == 0 && unchanged == 0 && report.ReportError == "" && !report.Stopped && !interrupted {
 		return
 	}
 	b.WriteString(display.Section(r.Output, "异常与警告"))
@@ -183,6 +197,9 @@ func (r Runtime) writeWarnings(b *strings.Builder, report *batchreport.Report, i
 	}
 	if unverified > 0 {
 		fmt.Fprintf(b, "服务器文件待核验：%d 台设备仅报告上传完成。\n", unverified)
+	}
+	if unchanged > 0 {
+		fmt.Fprintf(b, "配置无变化：%d 台设备接受了全部命令，但变更前后的配置一致；请确认脚本是否生效。\n", unchanged)
 	}
 	if textWarnings > 0 {
 		fmt.Fprintf(b, "编码警告：%d 台；请核对设备配置中的异常字符。\n", textWarnings)
@@ -206,7 +223,7 @@ func attentionRows(report *batchreport.Report) [][5]string {
 		if d.Status == batchreport.StatusSucceeded && (report.Operation != "topology" || d.Outcome == "unchanged" || d.Outcome == "discovered") {
 			continue
 		}
-		attention = append(attention, [5]string{d.Host, d.Name, d.Platform, display.Status(firstNonEmpty(d.Outcome, d.Status)), deviceNote(d)})
+		attention = append(attention, [5]string{d.Host, d.Name, d.Platform, display.Status(firstNonEmpty(string(d.Outcome), string(d.Status))), deviceNote(d)})
 	}
 	return attention
 }
@@ -220,6 +237,12 @@ func deviceNote(d batchreport.Device) string {
 	}
 	if d.Diagnostic != nil {
 		parts = append(parts, display.Error(d.Diagnostic.Code))
+	}
+	if c := d.Artifacts.Change; c != nil && c.Compared {
+		parts = append(parts, fmt.Sprintf("配置 +%d/-%d 行", c.Added, c.Removed))
+	}
+	if f := d.Artifacts.Facts; f != nil && len(f.Mismatches) > 0 {
+		parts = append(parts, "不一致字段："+strings.Join(f.Mismatches, "、"))
 	}
 	if s := d.Artifacts.Script; s != nil {
 		parts = append(parts, fmt.Sprintf("已接受 %d/%d 条", s.Accepted, s.Commands))
@@ -251,7 +274,7 @@ func inventoryRows(entries []fleet.PlanEntry) []inventoryRow {
 	rows := make([]inventoryRow, 0, len(entries))
 	for _, e := range entries {
 		d := e.Device
-		host, vendor := d.Host, d.Vendor
+		host, vendor := d.Host, d.Platform
 		if host == "" {
 			host = d.SourceIP
 		}

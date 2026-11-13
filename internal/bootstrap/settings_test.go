@@ -22,7 +22,7 @@ func TestPolicyDoesNotResolveCredentials(t *testing.T) {
 	if e != nil || calls != 0 {
 		t.Fatal(e, calls)
 	}
-	_, e = p.DeviceWithLogger(context.Background(), fleet.Record{Host: "192.0.2.1", Vendor: "h3c"}, nil)
+	_, e = p.DeviceWithLogger(context.Background(), fleet.Record{Host: "192.0.2.1", Platform: "h3c"}, nil)
 	if !errors.Is(e, ErrCredentials) || calls == 0 {
 		t.Fatal(e, calls)
 	}
@@ -87,7 +87,7 @@ func TestDeviceTemplateDoesNotRetainHostOrSecrets(t *testing.T) {
 		return nil, nil
 	})
 	for _, host := range []string{"192.0.2.1", "192.0.2.2"} {
-		if _, err = services.DeviceWithLogger(t.Context(), fleet.Record{Host: host, Vendor: "h3c"}, nil); err != nil {
+		if _, err = services.DeviceWithLogger(t.Context(), fleet.Record{Host: host, Platform: "h3c"}, nil); err != nil {
 			t.Fatal(err)
 		}
 		username = "second"
@@ -129,7 +129,7 @@ func TestJumpHostAndRetriesReachConnection(t *testing.T) {
 		got = c
 		return nil, nil
 	})
-	if _, err = services.DeviceWithLogger(t.Context(), fleet.Record{Host: "192.0.2.1", Vendor: "h3c"}, nil); err != nil {
+	if _, err = services.DeviceWithLogger(t.Context(), fleet.Record{Host: "192.0.2.1", Platform: "h3c"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got.JumpHost != "ops@bastion.example:2222" || got.ConnectRetries != 3 {
@@ -143,7 +143,7 @@ func TestJumpHostAndRetriesReachConnection(t *testing.T) {
 		got = c
 		return nil, nil
 	})
-	if _, err = defaults.DeviceWithLogger(t.Context(), fleet.Record{Host: "192.0.2.1", Vendor: "h3c"}, nil); err != nil || got.ConnectRetries != 1 || got.JumpHost != "" {
+	if _, err = defaults.DeviceWithLogger(t.Context(), fleet.Record{Host: "192.0.2.1", Platform: "h3c"}, nil); err != nil || got.ConnectRetries != 1 || got.JumpHost != "" {
 		t.Fatalf("defaults = %+v %v", got, err)
 	}
 	if _, err = load(map[string]string{"NC_SSH_JUMP_HOST": "-oProxyCommand=x"}); err == nil {

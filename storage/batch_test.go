@@ -57,7 +57,7 @@ func writeBatchFixture(t *testing.T, directory, mode string, rows []any) {
 		}
 		devices = append(devices, device)
 	}
-	b, e := json.Marshal(map[string]any{"schema_version": 3, "operation": mode, "success": false, "devices": devices})
+	b, e := json.Marshal(map[string]any{"schema_version": 4, "operation": mode, "success": false, "devices": devices})
 	if e != nil {
 		t.Fatal(e)
 	}

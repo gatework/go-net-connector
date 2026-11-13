@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
-	"reflect"
 	"time"
+
+	"github.com/gatework/go-net-connector/internal/nilcheck"
 )
 
 // Channel owns the bidirectional worker stream and its cleanup callbacks.
@@ -44,7 +45,7 @@ func runChannel(ctx context.Context, launch Launcher, run func(*Protocol) error,
 			}
 		}()
 	}
-	if ch.Close == nil || nilEndpoint(ch.Input) || nilEndpoint(ch.Output) {
+	if ch.Close == nil || nilcheck.IsNil(ch.Input) || nilcheck.IsNil(ch.Output) {
 		return ErrArchive
 	}
 	input, ok := ch.Input.(interface{ SetWriteDeadline(t time.Time) error })
@@ -79,17 +80,4 @@ func channelFailure(cause error) error {
 		phase = primary.Phase
 	}
 	return &Error{Phase: phase, cause: cause}
-}
-
-func nilEndpoint(v any) bool {
-	if v == nil {
-		return true
-	}
-	r := reflect.ValueOf(v)
-	switch r.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return r.IsNil()
-	default:
-		return false
-	}
 }

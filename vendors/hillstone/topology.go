@@ -5,16 +5,16 @@ import (
 	"strings"
 
 	"github.com/gatework/go-net-connector/internal/ifname"
-	"github.com/gatework/go-net-connector/vendors/internal/topology"
+	"github.com/gatework/go-net-connector/vendors/internal/topoparse"
 )
 
-func topologyParser() topology.Parser {
-	return topology.Parser{
+func topologyParser() topoparse.Parser {
+	return topoparse.Parser{
 		NeighborTemplate:     "hillstone/show_lldp_neighbor_information.textfsm",
 		DescriptionTemplate:  "hillstone/show_configuration_running.textfsm",
-		Protocol:             topology.ProtocolLLDP,
+		Protocol:             topoparse.ProtocolLLDP,
 		CountNeighbors:       neighborCount,
-		ValidateDescriptions: topology.ValidateInterfaceRows,
+		ValidateDescriptions: topoparse.ValidateInterfaceRows,
 		CanonicalInterface:   ifname.Key,
 	}
 }
@@ -23,21 +23,21 @@ func neighborCount(text string) (int, bool) {
 	lines := []string{}
 	for line := range strings.SplitSeq(text, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" || line == "show lldp neighbor-information" || topology.Pattern(`(?i)^(?:System Name\s+Local Interface\b|Total lldp neighbor number:\s*\d+\.?$|[-=+ ]+$|\S+(?:#|\([MBF]\))$)`).MatchString(line) {
+		if line == "" || line == "show lldp neighbor-information" || topoparse.Pattern(`(?i)^(?:System Name\s+Local Interface\b|Total lldp neighbor number:\s*\d+\.?$|[-=+ ]+$|\S+(?:#|\([MBF]\))$)`).MatchString(line) {
 			continue
 		}
 		lines = append(lines, line)
 	}
 	for _, line := range lines {
-		if !topology.Pattern(`(?i)^\S+\s+(?:(?:x?ethernet|eth|xe)\d+/\d+|(?:aggregate|agg)\d+)(?:\.\d+)?\s`).MatchString(line) {
+		if !topoparse.Pattern(`(?i)^\S+\s+(?:(?:x?ethernet|eth|xe)\d+/\d+|(?:aggregate|agg)\d+)(?:\.\d+)?\s`).MatchString(line) {
 			return -1, false
 		}
 	}
-	if match := topology.Pattern(`(?i)Total lldp neighbor number:\s*(\d+)`).FindStringSubmatch(text); len(match) > 0 {
+	if match := topoparse.Pattern(`(?i)Total lldp neighbor number:\s*(\d+)`).FindStringSubmatch(text); len(match) > 0 {
 		n, _ := strconv.Atoi(match[1])
 		if n != len(lines) {
 			return -1, false
 		}
 	}
-	return len(lines), len(lines) == 0 && topology.Pattern(`(?i)Total lldp neighbor number:\s*0\b|System Name\s+Local Interface`).MatchString(text)
+	return len(lines), len(lines) == 0 && topoparse.Pattern(`(?i)Total lldp neighbor number:\s*0\b|System Name\s+Local Interface`).MatchString(text)
 }

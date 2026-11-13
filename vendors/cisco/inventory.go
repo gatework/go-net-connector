@@ -3,7 +3,7 @@ package cisco
 import (
 	"regexp"
 
-	"github.com/gatework/go-net-connector/vendors/dialect"
+	"github.com/gatework/go-net-connector/platform"
 )
 
 var (
@@ -14,12 +14,12 @@ var (
 )
 
 // MatchInventory reports whether an inventory identity is Cisco NX-OS.
-func (NXOSDialect) MatchInventory(identity dialect.InventoryIdentity) bool {
+func (NXOSPlatform) MatchInventory(identity platform.Identity) bool {
 	return labelPattern.MatchString(identity.Vendor) &&
 		(nxOS.MatchString(identity.OS) || nexusModel.MatchString(identity.Model))
 }
 
 // MatchInventory reports whether an inventory identity is Cisco IOS.
-func (IOSDialect) MatchInventory(identity dialect.InventoryIdentity) bool {
+func (IOSPlatform) MatchInventory(identity platform.Identity) bool {
 	return labelPattern.MatchString(identity.Vendor) && iosOS.MatchString(identity.OS)
 }

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"sync"
 	"syscall"
@@ -159,7 +160,7 @@ func openProcess(ctx context.Context, cfg ConnectionConfig) (io.ReadWriteCloser,
 	var trust *hostTrust
 	var e error
 	port := cfg.Port
-	if cfg.Protocol == "telnet" {
+	if cfg.Protocol == ProtocolTelnet {
 		program = cfg.TelnetPath
 		if program == "" {
 			program = "telnet"
@@ -197,10 +198,10 @@ func openProcess(ctx context.Context, cfg ConnectionConfig) (io.ReadWriteCloser,
 
 func sshArguments(cfg ConnectionConfig, knownHosts string, port int) []string {
 	checking := "ask"
-	if cfg.HostKeyPolicy == "strict" {
+	if cfg.HostKeyPolicy == HostKeyStrict {
 		checking = "yes"
 	}
-	args := append([]string(nil), cfg.LegacyCryptoArguments...)
+	args := slices.Clone(cfg.LegacyCryptoArguments)
 	args = append(args, "-tt", "-o", "StrictHostKeyChecking="+checking, "-o", "UserKnownHostsFile="+knownHosts, "-o", "GlobalKnownHostsFile=/dev/null", "-o", "UpdateHostKeys=no", "-o", "ConnectTimeout="+strconv.Itoa(max(1, int(cfg.LoginTimeout.Seconds()))), "-p", strconv.Itoa(port))
 	if cfg.IdentityFile != "" {
 		args = append(args, "-i", cfg.IdentityFile)

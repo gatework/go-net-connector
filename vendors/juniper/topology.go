@@ -2,14 +2,14 @@ package juniper
 
 import (
 	"github.com/gatework/go-net-connector/internal/ifname"
-	"github.com/gatework/go-net-connector/vendors/internal/topology"
+	"github.com/gatework/go-net-connector/vendors/internal/topoparse"
 )
 
-func topologyParser() topology.Parser {
-	return topology.Parser{
+func topologyParser() topoparse.Parser {
+	return topoparse.Parser{
 		NeighborTemplate:    "juniper/show_lldp_neighbors_detail.textfsm",
 		DescriptionTemplate: "juniper/show_configuration_display_set.textfsm",
-		Protocol:            topology.ProtocolLLDP,
+		Protocol:            topoparse.ProtocolLLDP,
 		CountNeighbors:      neighborCount,
 		CanonicalInterface:  ifname.Key,
 		AppendInterfaceUnit: true,
@@ -19,7 +19,7 @@ func topologyParser() topology.Parser {
 }
 
 func neighborCount(text string) (int, bool) {
-	empty := topology.Pattern(`(?im)^\s*(?:No LLDP neighbors\.?|Total entries displayed\s*:\s*0)\s*$`).MatchString(text)
-	validRecord := topology.Pattern(`(?im)^\s*(?:Local Interface|Chassis (?:ID|Id)|Port ID|System name)\s*:`).MatchString(text)
-	return topology.Count(`(?im)^\s*Local Interface\s*:`, text), empty && !validRecord
+	empty := topoparse.Pattern(`(?im)^\s*(?:No LLDP neighbors\.?|Total entries displayed\s*:\s*0)\s*$`).MatchString(text)
+	validRecord := topoparse.Pattern(`(?im)^\s*(?:Local Interface|Chassis (?:ID|Id)|Port ID|System name)\s*:`).MatchString(text)
+	return topoparse.Count(`(?im)^\s*Local Interface\s*:`, text), empty && !validRecord
 }

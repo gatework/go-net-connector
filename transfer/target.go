@@ -5,13 +5,36 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/vendors/dialect"
+	"github.com/gatework/go-net-connector/platform"
+)
+
+// Named source interfaces accepted by platforms that distinguish their
+// management and data planes instead of taking a device interface name.
+const (
+	SourceInterfaceManagement = "management"
+	SourceInterfaceData       = "data"
 )
 
 // TFTPOptions contains a platform-independent TFTP transfer request.
-type TFTPOptions = dialect.TFTPOptions
+type TFTPOptions struct {
+	Server, Path, SourceFile, VRF, SourceInterface string
+	Timeout                                        time.Duration
+}
+
+// TFTPEvidence describes the configuration format and requested-path evidence
+// a platform attaches to an upload.
+type TFTPEvidence struct {
+	ConfigurationKind, Format, SourceFile string
+	IncludeRequestedPath                  bool
+}
+
+// RemoteBackupOptions carries options for a platform's native remote export.
+type RemoteBackupOptions struct {
+	Server, Path, Username, Protocol string
+}
 
 var filenameLabel = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 var serverPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$`)
@@ -52,7 +75,7 @@ func ValidateSource(source string) error {
 }
 
 // Validate checks common and platform-specific TFTP options without I/O.
-func Validate(registry dialect.Registry, vendor, deviceHost string, o TFTPOptions) error {
+func Validate(registry platform.Registry, vendor, deviceHost string, o TFTPOptions) error {
 	if o.Timeout < 0 {
 		return ErrInvalid
 	}
@@ -70,7 +93,7 @@ func Validate(registry dialect.Registry, vendor, deviceHost string, o TFTPOption
 	if ValidateServer(o.Server) != nil || o.Path != "" && ValidatePath(o.Path) != nil || o.SourceFile != "" && ValidateSource(o.SourceFile) != nil || o.VRF != "" && !vrfPattern.MatchString(o.VRF) {
 		return ErrInvalid
 	}
-	if tftp.RequiresSourceFile() && o.SourceFile == "" {
+	if tftp.Traits().RequireSourceFile && o.SourceFile == "" {
 		return errors.Join(ErrInvalid, ErrSourceFileRequired)
 	}
 	if err := tftp.ValidateOptions(deviceHost, o); err != nil {
@@ -83,7 +106,7 @@ func Validate(registry dialect.Registry, vendor, deviceHost string, o TFTPOption
 }
 
 // Filename obtains and validates the platform-specific destination filename.
-func Filename(registry dialect.Registry, vendor, host, label string) (string, error) {
+func Filename(registry platform.Registry, vendor, host, label string) (string, error) {
 	if registry == nil {
 		return "", ErrUnsupported
 	}
@@ -103,7 +126,7 @@ func Filename(registry dialect.Registry, vendor, host, label string) (string, er
 }
 
 // InventoryFilename derives a bounded label from an inventory name.
-func InventoryFilename(registry dialect.Registry, vendor, host, name string) (string, error) {
+func InventoryFilename(registry platform.Registry, vendor, host, name string) (string, error) {
 	label := filenameLabel.ReplaceAllString(name, "-")
 	if len(label) > 180 {
 		label = label[:180]

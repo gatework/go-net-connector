@@ -18,7 +18,7 @@ type exchange struct{ send, receive string }
 // Fixtures drive each platform dialogue through a full connector session.
 func dialogue(t *testing.T, name, login string, events []exchange, configs ...connector.ConnectionConfig) (*connector.Device, func()) {
 	t.Helper()
-	p := profileForTest(t, name)
+	p := lookupPlatform(t, name)
 	done := make(chan error, 1)
 	factory := func(context.Context, connector.ConnectionConfig) (io.ReadWriteCloser, error) {
 		a, b := net.Pipe()
@@ -79,12 +79,12 @@ func dialogue(t *testing.T, name, login string, events []exchange, configs ...co
 	t.Cleanup(check)
 	return d, check
 }
-func TestCollectionDialectOutputsAndEchoOnly(t *testing.T) {
+func TestCollectionPlatformOutputsAndEchoOnly(t *testing.T) {
 	prompts := map[string]string{"h3c": "<core>", "h3c_wireless": "[AC]", "huawei": "[Huawei]", "cisco_ios": "router#", "cisco_nxos": "nexus#", "centec": "Switch#", "hillstone": "stone(M)", "radware": ">> ADC - Main#", "topsec": "TopsecOS#", "fortinet": "FGT (root) #", "juniper": "audit@ex01>"}
 	for name, prompt := range prompts {
 		for _, empty := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/empty=%v", name, empty), func(t *testing.T) {
-				p := profileForTest(t, name)
+				p := lookupPlatform(t, name)
 				events := []exchange{}
 				last := ""
 				for i, c := range p.Terminal().ConfigCommands {
@@ -145,7 +145,7 @@ func TestCollectionRejectsEchoOnlyWithRenderedPrompt(t *testing.T) {
 		{"h3c", "<core>\x00"},
 	} {
 		t.Run(fmt.Sprintf("%s/%q", fixture.name, fixture.prompt), func(t *testing.T) {
-			p := profileForTest(t, fixture.name)
+			p := lookupPlatform(t, fixture.name)
 			var events []exchange
 			for _, command := range p.Terminal().ConfigCommands {
 				events = append(events, exchange{command + "\n", command + "\r\n" + fixture.prompt})
@@ -227,12 +227,12 @@ func TestRadwareMenuIdentityPrivateKeysAndHA(t *testing.T) {
 		if i == 0 && !strings.Contains(testResultOutput(r), "/c/l3") {
 			t.Fatal("wrong identity completed collection")
 		}
-		if d.HAState() != "ACTIVE" {
-			t.Fatalf("HA = %q", d.HAState())
+		if d.LoginLabel("ha_state") != "ACTIVE" {
+			t.Fatalf("HA = %q", d.LoginLabel("ha_state"))
 		}
 	}
 	check()
-	if d.HAState() != "" {
+	if d.LoginLabel("ha_state") != "" {
 		t.Fatal("HA survived disconnect")
 	}
 }
@@ -245,7 +245,7 @@ func TestExplicitLifecycleValidatesBeforeConnect(t *testing.T) {
 	if _, e := NewBuiltinRegistry().Lookup("unknown"); !errors.Is(e, connector.ErrUnsupported) || calls != 0 {
 		t.Fatalf("unknown profile: %v", e)
 	}
-	p := profileForTest(t, "h3c")
+	p := lookupPlatform(t, "h3c")
 	d, e := connector.New(p, connector.ConnectionConfig{Host: "fixture"}, connector.WithTransportFactory(factory))
 	if e != nil {
 		t.Fatal(e)

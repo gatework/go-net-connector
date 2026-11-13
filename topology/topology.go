@@ -6,7 +6,7 @@ import (
 	"slices"
 
 	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/vendors/dialect"
+	"github.com/gatework/go-net-connector/platform"
 )
 
 // Client binds stateless platform rules to a device. Constructing it performs no I/O.
@@ -17,11 +17,11 @@ type Client struct {
 	identity          InterfaceIdentity
 	writer            DescriptionWriter
 	writeDenial       WriteRestriction
-	profile           connector.Terminal
+	terminal          connector.Terminal
 }
 
 // New binds the device to its declared topology capabilities without I/O.
-func New(device *connector.Device, registry dialect.Registry) (*Client, error) {
+func New(device *connector.Device, registry platform.Registry) (*Client, error) {
 	if device == nil || registry == nil {
 		return nil, ErrInvalid
 	}
@@ -44,7 +44,7 @@ func New(device *connector.Device, registry dialect.Registry) (*Client, error) {
 		identity:          identity,
 		writer:            writer,
 		writeDenial:       writeDenial,
-		profile:           p,
+		terminal:          p,
 	}, nil
 }
 
@@ -81,7 +81,7 @@ func (client *Client) Audit(ctx context.Context, opts FormatOptions) (audit Audi
 		if e != nil {
 			return e
 		}
-		a, e := buildAudit(client.device.Host(), client.profile, client.identity, client.writer, client.writeDenial, s.Neighbors, s.Descriptions, opts)
+		a, e := buildAudit(client.device.Host(), client.terminal, client.identity, client.writer, client.writeDenial, s.Neighbors, s.Descriptions, opts)
 		a.Receipts = s.Receipts
 		audit = a
 		return e
@@ -96,7 +96,7 @@ func (client *Client) Apply(ctx context.Context, plan Plan, opts ApplyOptions) (
 		return result, newError("confirmation_required", "apply", ErrConfirmation)
 	}
 	plan = clonePlan(plan)
-	if err = validatePlan(plan, client.device.Host(), client.profile, client.identity, client.writer, client.writeDenial); err != nil {
+	if err = validatePlan(plan, client.device.Host(), client.terminal, client.identity, client.writer, client.writeDenial); err != nil {
 		return
 	}
 	if opts.Execute.MaxOutputBytes < 0 {
@@ -209,7 +209,7 @@ func commandScript(texts []string) connector.Script {
 	return s
 }
 func (client *Client) apply(ctx context.Context, op *connector.Operation, p Plan, opts ApplyOptions, result *Result) error {
-	s, e := stagesFor(client.profile, client.identity, client.writer, client.writeDenial, p.Changes)
+	s, e := stagesFor(client.terminal, client.identity, client.writer, client.writeDenial, p.Changes)
 	if e != nil {
 		return e
 	}

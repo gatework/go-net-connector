@@ -28,6 +28,9 @@ func (r Runtime) loadDeployScripts(o options) (workflow.DeployScripts, error) {
 	if o.deployStopAfter < 0 {
 		return scripts, newUsageError("--stop-after-failures 不能为负数")
 	}
+	if o.deployCommitConfirm < 0 || o.deployCommitConfirm > 60 {
+		return scripts, newUsageError("--commit-confirm 需为 1 至 60 分钟")
+	}
 	known := map[string]bool{}
 	for _, name := range vendors.NewBuiltinRegistry().Names() {
 		known[name] = true

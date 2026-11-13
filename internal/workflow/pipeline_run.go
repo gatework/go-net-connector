@@ -123,7 +123,7 @@ func (p *pipelineRun) nextRound(ctx context.Context) error {
 func runStages(ctx context.Context, session *Session, stages []Stage, evidence *Evidence, row *batchreport.Device) (failedStage string, failed error) {
 	for _, stage := range stages {
 		if failed != nil {
-			row.Stages = append(row.Stages, batchreport.Stage{Name: stage.Name(), Status: "skipped"})
+			row.Stages = append(row.Stages, batchreport.Stage{Name: stage.Name(), Status: batchreport.StageSkipped})
 			continue
 		}
 		stageStart := time.Now()
@@ -133,14 +133,14 @@ func runStages(ctx context.Context, session *Session, stages []Stage, evidence *
 			row.Stages = append(row.Stages, *session.auth)
 			if session.authErr != nil {
 				failed, failedStage = session.authErr, "authenticate"
-				row.Stages = append(row.Stages, batchreport.Stage{Name: stage.Name(), Status: "skipped"})
+				row.Stages = append(row.Stages, batchreport.Stage{Name: stage.Name(), Status: batchreport.StageSkipped})
 				continue
 			}
 		}
-		result := batchreport.Stage{Name: stage.Name(), Status: "succeeded", DurationMS: milliseconds(time.Since(stageStart))}
+		result := batchreport.Stage{Name: stage.Name(), Status: batchreport.StageSucceeded, DurationMS: milliseconds(time.Since(stageStart))}
 		if err != nil {
 			diagnostic := classify(err, stage.Name())
-			result.Status, result.Diagnostic = "failed", &diagnostic
+			result.Status, result.Diagnostic = batchreport.StageFailed, &diagnostic
 			failed, failedStage = err, stage.Name()
 		}
 		row.Stages = append(row.Stages, result)

@@ -36,13 +36,12 @@ type useCaseEnv struct {
 	cli      Runtime
 }
 
-// backupPlan applies sampling and builds the inventory plan for CLI backups.
-func (env useCaseEnv) backupPlan() (fleet.Plan, error) {
-	limit := env.services.Limit()
+// sampleLimit returns the per-platform sample size selected for this command.
+func (env useCaseEnv) sampleLimit() int {
 	if env.options.all || env.options.mode == "topology" {
-		limit = 0
+		return 0
 	}
-	return fleet.NewPlan(env.rows, env.services.Rules(), fleet.PlanOptions{Mode: "backup", LimitPerVendor: limit})
+	return env.services.Limit()
 }
 
 // offline is embedded by use cases without offline input.
@@ -53,7 +52,7 @@ func (offline) prepare(Runtime, options) error { return nil }
 type inventoryUseCase struct{ offline }
 
 func (inventoryUseCase) run(_ context.Context, env useCaseEnv) (workflow.Result, error) {
-	plan, err := env.backupPlan()
+	plan, err := fleet.NewPlan(env.rows, env.services.Rules(), fleet.PlanOptions{LimitPerPlatform: env.sampleLimit()})
 	if err != nil {
 		return workflow.Result{}, err
 	}
@@ -66,11 +65,9 @@ type backupUseCase struct {
 }
 
 func (u backupUseCase) run(ctx context.Context, env useCaseEnv) (workflow.Result, error) {
-	plan, err := env.backupPlan()
-	if err != nil {
-		return workflow.Result{}, err
-	}
-	return env.runner.Backup(ctx, env.runtime, plan, env.backup, u.preview)
+	o := env.backup
+	o.LimitPerPlatform = env.sampleLimit()
+	return env.runner.Backup(ctx, env.runtime, env.rows, o, u.preview)
 }
 
 type tftpUseCase struct {
@@ -99,13 +96,9 @@ func (u *deployUseCase) prepare(r Runtime, o options) error {
 }
 
 func (u *deployUseCase) run(ctx context.Context, env useCaseEnv) (workflow.Result, error) {
-	plan, err := fleet.NewPlan(env.rows, env.services.Rules(), fleet.PlanOptions{Mode: "backup"})
-	if err != nil {
-		return workflow.Result{}, err
-	}
 	o := env.options
-	return env.runner.Deploy(ctx, env.runtime, plan, workflow.DeployOptions{
-		Scripts: u.scripts, Save: o.save, Backup: o.deployBackup, StopAfterFailures: o.deployStopAfter,
+	return env.runner.Deploy(ctx, env.runtime, env.rows, workflow.DeployOptions{
+		Scripts: u.scripts, Save: o.save, Snapshot: !o.deployNoSnapshot, CommitConfirm: o.deployCommitConfirm, StopAfterFailures: o.deployStopAfter,
 		Plan: u.preview, Directory: env.cli.deployDirectory(o), Policy: env.backup.Policy,
 	})
 }
@@ -159,10 +152,6 @@ func (u *execUseCase) prepare(r Runtime, o options) error {
 }
 
 func (u *execUseCase) run(ctx context.Context, env useCaseEnv) (workflow.Result, error) {
-	plan, err := fleet.NewPlan(env.rows, env.services.Rules(), fleet.PlanOptions{Mode: "backup"})
-	if err != nil {
-		return workflow.Result{}, err
-	}
 	directory := env.options.directory
 	if directory == "" {
 		directory = "outputs"
@@ -170,7 +159,7 @@ func (u *execUseCase) run(ctx context.Context, env useCaseEnv) (workflow.Result,
 	if !filepath.IsAbs(directory) {
 		directory = filepath.Join(env.cli.CWD, directory)
 	}
-	return env.runner.Exec(ctx, env.runtime, plan, workflow.ExecOptions{Commands: u.commands, Plan: u.preview, Directory: directory, Policy: env.backup.Policy})
+	return env.runner.Exec(ctx, env.runtime, env.rows, workflow.ExecOptions{Commands: u.commands, Plan: u.preview, Directory: directory, Policy: env.backup.Policy})
 }
 
 type remoteUseCase struct {
@@ -179,10 +168,6 @@ type remoteUseCase struct {
 }
 
 func (u remoteUseCase) run(ctx context.Context, env useCaseEnv) (workflow.Result, error) {
-	plan, err := env.backupPlan()
-	if err != nil {
-		return workflow.Result{}, err
-	}
 	o := env.options
 	if o.remoteServer == "" || o.remoteUsername == "" {
 		return workflow.Result{}, newUsageError("远程导出需指定 --remote-server 与 --remote-username")
@@ -191,5 +176,21 @@ func (u remoteUseCase) run(ctx context.Context, env useCaseEnv) (workflow.Result
 	if !u.preview {
 		options.Password = env.services.RemoteBackupPassword()
 	}
-	return env.runner.RemoteBackup(ctx, env.runtime, plan, workflow.RemoteBackupOptions{RemoteOptions: options, Plan: u.preview, Directory: env.runtime.Directory, Policy: env.backup.Policy})
+	return env.runner.RemoteBackup(ctx, env.runtime, env.rows, workflow.RemoteBackupOptions{RemoteOptions: options, LimitPerPlatform: env.sampleLimit(), Plan: u.preview, Directory: env.runtime.Directory, Policy: env.backup.Policy})
+}
+
+type factsUseCase struct {
+	offline
+	preview bool
+}
+
+func (u factsUseCase) run(ctx context.Context, env useCaseEnv) (workflow.Result, error) {
+	directory := env.options.directory
+	if directory == "" {
+		directory = "facts"
+	}
+	if !filepath.IsAbs(directory) {
+		directory = filepath.Join(env.cli.CWD, directory)
+	}
+	return env.runner.Facts(ctx, env.runtime, env.rows, workflow.FactsOptions{LimitPerPlatform: env.sampleLimit(), Plan: u.preview, Directory: directory, Policy: env.backup.Policy})
 }

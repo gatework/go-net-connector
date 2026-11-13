@@ -40,7 +40,7 @@ type DeviceOpener func(context.Context, fleet.Record, io.Writer, SessionObserver
 type TFTPSettings struct {
 	ArchiveTimeouts   archive.Timeouts
 	Policy            *transfer.Policy
-	LimitPerVendor    int
+	LimitPerPlatform  int
 	ArchiveWorkerPath string
 	ArchivePassword   func() string
 }

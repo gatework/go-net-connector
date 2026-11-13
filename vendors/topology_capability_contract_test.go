@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/gatework/go-net-connector/topology"
-	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
 func TestRadwareExposesOnlyItsSupportedTopologyBehaviors(t *testing.T) {
@@ -44,7 +43,7 @@ func TestCiscoTopologyWriterBuildsVendorChangeCommands(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("change commands = %q, want %q", got, want)
 	}
-	wantMode := dialect.WriteMode{Enter: "configure terminal", Leave: "end", InterfaceExit: "exit"}
+	wantMode := topology.WriteMode{Enter: "configure terminal", Leave: "end", InterfaceExit: "exit"}
 	if got := writer.WriteMode(); got != wantMode {
 		t.Fatalf("write mode = %+v, want %+v", got, wantMode)
 	}

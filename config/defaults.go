@@ -25,12 +25,12 @@ func Defaults(mode string) map[string]any {
 		},
 		"inventory": map[string]any{
 			"include_hosts": []any{}, "exclude_hosts": []any{}, "include_names": []any{},
-			"exclude_names": []any{}, "include_vendors": []any{}, "exclude_vendors": []any{},
+			"exclude_names": []any{}, "include_platforms": []any{}, "exclude_platforms": []any{},
 			"include_models": []any{}, "exclude_models": []any{},
-			"name_match": "contains", "model_match": "contains",
+			"name_match": "contains", "model_match": "contains", "source": "netdisco",
 		},
 		"ssh":    map[string]any{"protocol": "ssh", "host_key_policy": "accept_new", "log_level": "info", "connect_retries": 1},
-		"backup": map[string]any{"directory": "./backups", "parallel": 4, "limit_per_vendor": 0, "layout": "batch"},
+		"backup": map[string]any{"directory": "./backups", "parallel": 4, "limit_per_platform": 0, "layout": "batch"},
 	}
 	// One flat document serves every command; only the command's success policy
 	// default differs. Topology inherits backup.parallel unless explicitly set.

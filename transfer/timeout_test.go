@@ -1,4 +1,4 @@
-package transfer
+package transfer_test
 
 import (
 	"bufio"
@@ -9,20 +9,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gatework/go-net-connector/transfer"
+
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/vendors"
 )
 
 func TestUploadCommandTimeoutOverride(t *testing.T) {
 	for _, vendor := range []string{"h3c", "huawei", "cisco_ios", "cisco_nxos", "fortinet", "centec", "hillstone", "palo_alto", "radware"} {
-		c := tftpPolicyForTest(t, vendor).Command("192.0.2.1", TFTPOptions{Timeout: 35 * time.Second}, true)
+		c := tftpPolicyForTest(t, vendor).Command("192.0.2.1", transfer.TFTPOptions{Timeout: 35 * time.Second}, true)
 		if c.Timeout == nil || *c.Timeout != 35*time.Second {
 			t.Fatalf("%s override ignored", vendor)
 		}
 	}
 }
 func TestUploadTimeoutPreservesLibraryDefault(t *testing.T) {
-	c := tftpPolicyForTest(t, "h3c").Command("192.0.2.1", TFTPOptions{Timeout: 180 * time.Second}, true)
+	c := tftpPolicyForTest(t, "h3c").Command("192.0.2.1", transfer.TFTPOptions{Timeout: 180 * time.Second}, true)
 	if *c.Timeout != 180*time.Second {
 		t.Fatal(*c.Timeout)
 	}
@@ -30,7 +32,7 @@ func TestUploadTimeoutPreservesLibraryDefault(t *testing.T) {
 func TestSilentUploadIsBounded(t *testing.T) {
 	d := transferDevice(t, "h3c", [][2]string{{"tftp 192.0.2.10 put startup.cfg output.cfg", ""}})
 	start := time.Now()
-	_, err := TFTP(t.Context(), vendors.NewBuiltinRegistry(), d, TFTPOptions{Server: "192.0.2.10", SourceFile: "startup.cfg", Path: "output.cfg", Timeout: 30 * time.Millisecond})
+	_, err := transfer.TFTP(t.Context(), vendors.NewBuiltinRegistry(), d, transfer.TFTPOptions{Server: "192.0.2.10", SourceFile: "startup.cfg", Path: "output.cfg", Timeout: 30 * time.Millisecond})
 	var ce *connector.Error
 	if !errors.As(err, &ce) || ce.Code != "command_timeout" {
 		t.Fatal(err)
@@ -72,7 +74,7 @@ func TestUploadTimeoutCoversSourceDiscoveryAndTransfer(t *testing.T) {
 	}
 	defer d.Close()
 
-	_, err = TFTP(t.Context(), vendors.NewBuiltinRegistry(), d, TFTPOptions{Server: "192.0.2.10", Path: "backup.cfg", Timeout: 500 * time.Millisecond})
+	_, err = transfer.TFTP(t.Context(), vendors.NewBuiltinRegistry(), d, transfer.TFTPOptions{Server: "192.0.2.10", Path: "backup.cfg", Timeout: 500 * time.Millisecond})
 	if err == nil {
 		t.Fatal("silent upload unexpectedly completed")
 	}

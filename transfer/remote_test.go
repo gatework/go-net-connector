@@ -1,10 +1,12 @@
-package transfer
+package transfer_test
 
 import (
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/gatework/go-net-connector/transfer"
 
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/vendors"
@@ -22,7 +24,7 @@ func TestRemoteExactCompletionAndFailurePriority(t *testing.T) {
 	} {
 		command := "show configuration | save scp://backup@192.0.2.9/site/config.conf"
 		d := transferDevice(t, "juniper", [][2]string{{command, "Password: "}, {"secret", tc.body + "\r\nsw#"}})
-		r, e := RemoteBackup(t.Context(), vendors.NewBuiltinRegistry(), d, RemoteOptions{Server: "192.0.2.9", Path: "site/config.conf", Username: "backup", Password: "secret"})
+		r, e := transfer.RemoteBackup(t.Context(), vendors.NewBuiltinRegistry(), d, transfer.RemoteOptions{Server: "192.0.2.9", Path: "site/config.conf", Username: "backup", Password: "secret"})
 		if (e == nil) != tc.ok || r.Receipt.Reported() != tc.ok {
 			t.Fatal(r, e)
 		}
@@ -32,7 +34,7 @@ func TestRemoteExactCompletionAndFailurePriority(t *testing.T) {
 	}
 }
 
-func TestRemoteBackupRequiresDialectCapability(t *testing.T) {
+func TestRemoteBackupRequiresPlatformCapability(t *testing.T) {
 	declaration, err := vendors.NewBuiltinRegistry().Lookup("h3c")
 	if err != nil {
 		t.Fatal(err)
@@ -41,13 +43,13 @@ func TestRemoteBackupRequiresDialectCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = RemoteBackup(t.Context(), vendors.NewBuiltinRegistry(), d, RemoteOptions{Server: "192.0.2.9", Path: "config.cfg", Username: "backup"}); !errors.Is(err, ErrUnsupported) {
+	if _, err = transfer.RemoteBackup(t.Context(), vendors.NewBuiltinRegistry(), d, transfer.RemoteOptions{Server: "192.0.2.9", Path: "config.cfg", Username: "backup"}); !errors.Is(err, transfer.ErrUnsupported) {
 		t.Fatalf("remote backup error = %v, want unsupported", err)
 	}
 }
 func TestRemoteRejectsBeforeDeviceIO(t *testing.T) {
-	for _, o := range []RemoteOptions{{Server: "bad;host", Path: "config", Username: "u"}, {Server: "host", Path: "../config", Username: "u"}, {Server: "host", Path: "config", Username: "u", Password: "x\ny"}, {Server: "host", Path: "config", Username: "u", Protocol: "sftp"}} {
-		if e := ValidateRemote(o); !errors.Is(e, ErrInvalid) {
+	for _, o := range []transfer.RemoteOptions{{Server: "bad;host", Path: "config", Username: "u"}, {Server: "host", Path: "../config", Username: "u"}, {Server: "host", Path: "config", Username: "u", Password: "x\ny"}, {Server: "host", Path: "config", Username: "u", Protocol: "sftp"}} {
+		if e := transfer.ValidateRemote(o); !errors.Is(e, transfer.ErrInvalid) {
 			t.Fatal(e)
 		}
 	}

@@ -7,7 +7,7 @@ import (
 	"slices"
 
 	"github.com/gatework/go-net-connector/connector"
-	"github.com/gatework/go-net-connector/vendors/dialect"
+	"github.com/gatework/go-net-connector/platform"
 )
 
 func identityKey(policy InterfaceIdentity, name string) string {
@@ -56,7 +56,7 @@ func evidenceFor(policy InterfaceIdentity, peers []Neighbor, descriptions map[st
 }
 
 // BuildPlan is pure: it opens no connections and resolves no credentials.
-func BuildPlan(registry dialect.Registry, host, vendor string, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Plan, error) {
+func BuildPlan(registry platform.Registry, host, vendor string, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Plan, error) {
 	if registry == nil {
 		return Plan{}, ErrInvalid
 	}
@@ -69,7 +69,7 @@ func BuildPlan(registry dialect.Registry, host, vendor string, peers []Neighbor,
 	denial, _ := d.(WriteRestriction)
 	return buildPlan(host, d.Terminal(), identity, writer, denial, peers, descriptions, opts)
 }
-func buildPlan(host string, profile connector.Terminal, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Plan, error) {
+func buildPlan(host string, terminal connector.Terminal, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Plan, error) {
 	if identity == nil {
 		return Plan{}, newError("description_unsupported", "plan", ErrUnsupported)
 	}
@@ -80,7 +80,7 @@ func buildPlan(host string, profile connector.Terminal, identity InterfaceIdenti
 	if e != nil {
 		return Plan{}, e
 	}
-	p := Plan{Host: host, Vendor: profile.Name, Evidence: evidence, Changes: []Change{}, Commands: []string{}, Scope: "device"}
+	p := Plan{Host: host, Platform: terminal.Name, Evidence: evidence, Changes: []Change{}, Commands: []string{}, Scope: "device"}
 	for _, peer := range peers {
 		old := descriptions[identityKey(identity, peer.LocalInterface)]
 		proposed, e := formatDescription(peer, opts)
@@ -93,7 +93,7 @@ func buildPlan(host string, profile connector.Terminal, identity InterfaceIdenti
 		p.Changes = append(p.Changes, Change{identity.ConfigName(peer.LocalInterface), old, proposed, peer})
 	}
 	if len(p.Changes) > 0 {
-		s, e := stagesFor(profile, identity, writer, denial, p.Changes)
+		s, e := stagesFor(terminal, identity, writer, denial, p.Changes)
 		if e != nil {
 			return Plan{}, e
 		}
@@ -103,7 +103,7 @@ func buildPlan(host string, profile connector.Terminal, identity InterfaceIdenti
 }
 
 // BuildAudit preserves evidence issues separately and plans only verified interfaces.
-func BuildAudit(registry dialect.Registry, host, vendor string, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Audit, error) {
+func BuildAudit(registry platform.Registry, host, vendor string, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Audit, error) {
 	if registry == nil {
 		return Audit{}, ErrInvalid
 	}
@@ -119,12 +119,12 @@ func BuildAudit(registry dialect.Registry, host, vendor string, peers []Neighbor
 	denial, _ := d.(WriteRestriction)
 	return buildAudit(host, d.Terminal(), identity, writer, denial, peers, descriptions, opts)
 }
-func buildAudit(host string, profile connector.Terminal, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Audit, error) {
+func buildAudit(host string, terminal connector.Terminal, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction, peers []Neighbor, descriptions map[string]string, opts FormatOptions) (Audit, error) {
 	if identity == nil {
 		return Audit{}, ErrUnsupported
 	}
 	a := Audit{Comparisons: []Comparison{}, Issues: []Issue{}}
-	p := Plan{Host: host, Vendor: profile.Name, Scope: "interfaces", Evidence: map[string]Evidence{}, Changes: []Change{}, Commands: []string{}}
+	p := Plan{Host: host, Platform: terminal.Name, Scope: "interfaces", Evidence: map[string]Evidence{}, Changes: []Change{}, Commands: []string{}}
 	groups := map[string][]Neighbor{}
 	order := []string{}
 	for _, n := range peers {
@@ -141,7 +141,7 @@ func buildAudit(host string, profile connector.Terminal, identity InterfaceIdent
 	}
 	if requireWriter(writer, denial) == nil {
 		if len(p.Changes) > 0 {
-			s, e := stagesFor(profile, identity, writer, denial, p.Changes)
+			s, e := stagesFor(terminal, identity, writer, denial, p.Changes)
 			if e != nil {
 				return a, e
 			}
@@ -216,14 +216,14 @@ func (s stages) commands() []string {
 	all = append(all, s.verify...)
 	return append(all, s.persist...)
 }
-func stagesFor(profile connector.Terminal, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction, changes []Change) (stages, error) {
+func stagesFor(terminal connector.Terminal, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction, changes []Change) (stages, error) {
 	if identity == nil {
 		return stages{}, newError("description_unsupported", "plan", ErrUnsupported)
 	}
 	if e := requireWriter(writer, denial); e != nil {
 		return stages{}, e
 	}
-	s := stages{verify: slices.Clone(profile.ConfigCommands), persist: slices.Clone(profile.SaveCommands)}
+	s := stages{verify: slices.Clone(terminal.ConfigCommands), persist: slices.Clone(terminal.SaveCommands)}
 	mode := writer.WriteMode()
 	if mode.Enter == "" || mode.Leave == "" || mode.InterfaceExit == "" {
 		return stages{}, newError("description_stages_unsupported", "plan", ErrUnsupported)
@@ -257,7 +257,7 @@ func stagesFor(profile connector.Terminal, identity InterfaceIdentity, writer De
 }
 
 // ValidatePlan checks target identity, evidence and exact rendered commands without I/O.
-func ValidatePlan(registry dialect.Registry, p Plan, host, vendor string) error {
+func ValidatePlan(registry platform.Registry, p Plan, host, vendor string) error {
 	if registry == nil {
 		return ErrInvalid
 	}
@@ -270,8 +270,8 @@ func ValidatePlan(registry dialect.Registry, p Plan, host, vendor string) error 
 	denial, _ := d.(WriteRestriction)
 	return validatePlan(p, host, d.Terminal(), identity, writer, denial)
 }
-func validatePlan(p Plan, host string, profile connector.Terminal, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction) error {
-	if p.Host != host || p.Vendor != profile.Name || (p.Scope != "device" && p.Scope != "interfaces") {
+func validatePlan(p Plan, host string, terminal connector.Terminal, identity InterfaceIdentity, writer DescriptionWriter, denial WriteRestriction) error {
+	if p.Host != host || p.Platform != terminal.Name || (p.Scope != "device" && p.Scope != "interfaces") {
 		return ErrInvalid
 	}
 	if len(p.Changes) == 0 {
@@ -280,7 +280,7 @@ func validatePlan(p Plan, host string, profile connector.Terminal, identity Inte
 		}
 		return nil
 	}
-	s, e := stagesFor(profile, identity, writer, denial, p.Changes)
+	s, e := stagesFor(terminal, identity, writer, denial, p.Changes)
 	if e != nil {
 		return e
 	}

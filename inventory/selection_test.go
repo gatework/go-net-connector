@@ -41,7 +41,7 @@ func TestAddressSetPreservesIPv4MappedAddressFamily(t *testing.T) {
 	}
 }
 func TestSelectionIntersectionAndExclusions(t *testing.T) {
-	opts := SelectionOptions{IncludeHosts: []string{"192.0.2.0/24"}, ExcludeHosts: []string{"192.0.2.9"}, IncludeNames: []string{"core*"}, NameMatch: "glob", IncludeVendors: []string{"h3c"}, ExcludeModels: []string{"old"}}
+	opts := SelectionOptions{IncludeHosts: []string{"192.0.2.0/24"}, ExcludeHosts: []string{"192.0.2.9"}, IncludeNames: []string{"core*"}, NameMatch: "glob", IncludePlatforms: []string{"h3c"}, ExcludeModels: []string{"old"}}
 	s, e := NewSelection(opts)
 	if e != nil {
 		t.Fatal(e)

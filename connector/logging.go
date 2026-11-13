@@ -12,15 +12,28 @@ import (
 	"github.com/gatework/go-net-connector/internal/terminal"
 )
 
-func logPriority(level string) int {
-	switch level {
-	case "debug":
+// LogLevel selects which structured session events reach the Logger.
+type LogLevel string
+
+// Structured log levels, from most to least verbose. Only LogDebug includes
+// device responses.
+const (
+	LogDebug LogLevel = "debug"
+	LogInfo  LogLevel = "info"
+	LogWarn  LogLevel = "warn"
+	LogError LogLevel = "error"
+)
+
+// priority orders the levels; an unknown level is negative.
+func (l LogLevel) priority() int {
+	switch l {
+	case LogDebug:
 		return 0
-	case "info":
+	case LogInfo:
 		return 1
-	case "warn":
+	case LogWarn:
 		return 2
-	case "error":
+	case LogError:
 		return 3
 	default:
 		return -1
@@ -30,13 +43,13 @@ func logPriority(level string) int {
 // event records bounded metadata at an operation boundary. Raw injected writers
 // have no event policy; structured DEBUG output still passes the streaming
 // renderer and both redaction passes before it reaches writeRecord.
-func (l *logWriter) event(name, level string, c Command, status string) error {
+func (l *logWriter) event(name string, level LogLevel, c Command, status string) error {
 	if l.level == "" || l.target == nil {
 		return nil
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if logPriority(level) < logPriority(l.level) {
+	if level.priority() < l.level.priority() {
 		return nil
 	}
 	if err := l.flushLocked(); err != nil {
@@ -96,8 +109,8 @@ func (l *logWriter) safeEventText(s string) string {
 		return r
 	}, s)
 }
-func (l *logWriter) writeRecord(level, message string) error {
-	line := fmt.Sprintf("[%s] %s [host=%s] %s\n", time.Now().Format("2006-01-02 15:04:05.000 -07:00"), strings.ToUpper(level), strconv.Quote(l.safeEventText(l.host)), message)
+func (l *logWriter) writeRecord(level LogLevel, message string) error {
+	line := fmt.Sprintf("[%s] %s [host=%s] %s\n", time.Now().Format("2006-01-02 15:04:05.000 -07:00"), strings.ToUpper(string(level)), strconv.Quote(l.safeEventText(l.host)), message)
 	return l.writeTarget([]byte(line))
 }
 func (l *logWriter) writeTarget(p []byte) error {
@@ -116,11 +129,11 @@ func (l *logWriter) flushLine() error {
 	}
 	line := l.line.String()
 	l.line.Reset()
-	return l.writeRecord("debug", "设备输出： | event=device_output output="+strconv.Quote(line))
+	return l.writeRecord(LogDebug, "设备输出： | event=device_output output="+strconv.Quote(line))
 }
 
 // sessionEvent keeps progress observation independent of log level and raw sinks.
-func (d *Device) sessionEvent(ctx context.Context, name, level string, command Command, status string) error {
+func (d *Device) sessionEvent(ctx context.Context, name string, level LogLevel, command Command, status string) error {
 	var observed error
 	if observer := d.config.OnSessionEvent; observer != nil {
 		if err := observer(ctx, SessionEvent{Host: d.config.Host, Name: name, Status: status}); err != nil {

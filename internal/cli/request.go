@@ -23,6 +23,8 @@ const (
 	requestDeployRun
 	requestExecPlan
 	requestExecRun
+	requestFactsPlan
+	requestFactsRun
 	requestRemotePlan
 	requestRemoteRun
 	requestDiff
@@ -47,11 +49,12 @@ var runKinds = map[string]requestKind{
 	"deploy/plan": requestDeployPlan, "deploy/run": requestDeployRun,
 	"remote/plan": requestRemotePlan, "remote/run": requestRemoteRun,
 	"exec/plan": requestExecPlan, "exec/run": requestExecRun,
+	"facts/plan": requestFactsPlan, "facts/run": requestFactsRun,
 }
 
 // newCommandRequest maps the mode and action to a request kind and use case.
 func newCommandRequest(o options) (commandRequest, error) {
-	if o.mode != "backup" && o.mode != "tftp" && o.mode != "topology" && o.mode != "deploy" && o.mode != "exec" && o.mode != "remote" {
+	if o.mode != "backup" && o.mode != "tftp" && o.mode != "topology" && o.mode != "deploy" && o.mode != "exec" && o.mode != "facts" && o.mode != "remote" {
 		return commandRequest{}, newUsageError("用途无效，请查看 --for 选项")
 	}
 	request := commandRequest{}
@@ -102,6 +105,8 @@ func (r commandRequest) newUseCase() useCase {
 		return remoteUseCase{preview: r.kind == requestRemotePlan}
 	case requestExecPlan, requestExecRun:
 		return &execUseCase{preview: r.kind == requestExecPlan}
+	case requestFactsPlan, requestFactsRun:
+		return factsUseCase{preview: r.kind == requestFactsPlan}
 	case requestTopologyPlan, requestTopologyDiscover, requestTopologyApply:
 		return topologyUseCase{mode: r.topologyMode(), options: r.topology}
 	default: // configuration requests and invalid input have no pipeline use case

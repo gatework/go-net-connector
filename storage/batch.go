@@ -87,7 +87,7 @@ func ReadBatchSaved(ctx context.Context, directory, host string) ([]byte, BatchA
 	if int64(len(body)) != selected.Bytes || !strings.EqualFold(hex.EncodeToString(sum[:]), selected.SHA256) {
 		return nil, BatchArtifact{}, ErrBatchEvidence
 	}
-	artifact := BatchArtifact{Host: selected.Host, Batch: directory, Path: filepath.Join(directory, selected.Subdirectory, name), Bytes: selected.Bytes, SHA256: hex.EncodeToString(sum[:]), Status: selected.Status}
+	artifact := BatchArtifact{Host: selected.Host, Batch: directory, Path: filepath.Join(directory, selected.Subdirectory, name), Bytes: selected.Bytes, SHA256: hex.EncodeToString(sum[:]), Status: string(selected.Status)}
 	return body, artifact, nil
 }
 

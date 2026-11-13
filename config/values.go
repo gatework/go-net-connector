@@ -1,47 +1,6 @@
 package config
 
-import (
-	"maps"
-	"slices"
-	"strings"
-)
-
-// removedFields maps configuration keys removed after v0.4.0 to their
-// replacements. They are rejected instead of ignored so an old configuration
-// cannot silently fall back to a platform default source file.
-var removedFields = map[string]struct{ env, replacement string }{
-	"tftp.h3c_source_file":          {"NC_H3C_TFTP_SOURCE_FILE", "tftp.source_files.h3c"},
-	"tftp.h3c_wireless_source_file": {"NC_H3C_WIRELESS_TFTP_SOURCE_FILE", "tftp.source_files.h3c_wireless"},
-	"tftp.huawei_source_file":       {"NC_HUAWEI_TFTP_SOURCE_FILE", "tftp.source_files.huawei"},
-}
-
-// rejectRemovedFields reports the first removed key present in a parsed layer.
-func rejectRemovedFields(data map[string]any) error {
-	for _, path := range sortedRemovedFields() {
-		if hasPath(data, path) {
-			return &FieldError{Field: path, Problem: "removed", Replacement: removedFields[path].replacement}
-		}
-	}
-	return nil
-}
-
-// rejectRemovedEnvironment reports the first removed variable that is set and
-// belongs to the projection selected by include (nil selects every field).
-func rejectRemovedEnvironment(values map[string]string, include func(string) bool) error {
-	for _, path := range sortedRemovedFields() {
-		if include != nil && !include(path) {
-			continue
-		}
-		if _, present := values[removedFields[path].env]; present {
-			return &FieldError{Field: removedFields[path].env, Problem: "removed", Replacement: removedFields[path].replacement}
-		}
-	}
-	return nil
-}
-
-func sortedRemovedFields() []string {
-	return slices.Sorted(maps.Keys(removedFields))
-}
+import "strings"
 
 func valueAtPath(values map[string]any, path string) any {
 	var value any = values

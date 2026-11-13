@@ -8,11 +8,13 @@ import (
 	"errors"
 	"io"
 	"os"
+	"slices"
 
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 
 	expect "github.com/gatework/go-expect"
+	"github.com/gatework/go-net-connector/internal/nilcheck"
 )
 
 // InteractOptions borrows a file input and cooperative output. Input must have
@@ -37,7 +39,7 @@ type inputResult struct {
 
 // Interact relays borrowed terminal input and output while owning the device lease.
 func (d *Device) Interact(parent context.Context, o InteractOptions) (result InteractResult, err error) {
-	if o.Input == nil || isNilValue(o.Output) {
+	if o.Input == nil || nilcheck.IsNil(o.Output) {
 		return result, ErrInvalid
 	}
 	if e := d.acquire(); e != nil {
@@ -65,7 +67,7 @@ func (d *Device) Interact(parent context.Context, o InteractOptions) (result Int
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	done := make(chan inputResult, 1)
-	escape := append([]byte(nil), o.Escape...)
+	escape := slices.Clone(o.Escape)
 	session := d.session
 	go func() { r := d.relayInput(ctx, session, fd, escape); done <- r; cancel() }()
 	returned := false
@@ -88,7 +90,7 @@ func (d *Device) Interact(parent context.Context, o InteractOptions) (result Int
 
 // finishInteraction prioritizes caller cancellation, then remote and local errors.
 func finishInteraction(parent context.Context, readErr error, input inputResult) (InteractResult, error) {
-	result := InteractResult{Reason: input.reason, PendingInput: append([]byte(nil), input.pending...)}
+	result := InteractResult{Reason: input.reason, PendingInput: slices.Clone(input.pending)}
 	if e := parent.Err(); e != nil {
 		return result, e
 	}

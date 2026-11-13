@@ -38,7 +38,7 @@ func TestTerminalValidationIsPure(t *testing.T) {
 	}
 }
 
-func TestProfileValidationMatchesConstruction(t *testing.T) {
+func TestTerminalValidationMatchesConstruction(t *testing.T) {
 	tests := []struct {
 		name string
 		edit func(*Terminal)

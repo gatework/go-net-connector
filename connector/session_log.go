@@ -3,6 +3,7 @@ package connector
 import (
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 
@@ -12,15 +13,16 @@ import (
 )
 
 type logWriter struct {
-	mu                    sync.Mutex
-	target                io.Writer
-	level, host, encoding string
-	line                  strings.Builder
-	redactor, rendered    *expect.Redactor
-	renderer              *terminal.Renderer
-	secrets               []string
-	paused                bool
-	count                 func(int)
+	mu                 sync.Mutex
+	target             io.Writer
+	level              LogLevel
+	host, encoding     string
+	line               strings.Builder
+	redactor, rendered *expect.Redactor
+	renderer           *terminal.Renderer
+	secrets            []string
+	paused             bool
+	count              func(int)
 }
 type writerFunc func([]byte) (int, error)
 
@@ -31,7 +33,7 @@ func (l *logWriter) Write(p []byte) (int, error) {
 	if l.count != nil {
 		l.count(len(p))
 	}
-	if l.paused || l.target == nil || l.level != "" && l.level != "debug" {
+	if l.paused || l.target == nil || l.level != "" && l.level != LogDebug {
 		return len(p), nil
 	}
 	if l.redactor == nil {
@@ -51,9 +53,9 @@ func (l *logWriter) scope(secrets []string, paused bool) error {
 	return l.startLocked(secrets, paused)
 }
 func (l *logWriter) startLocked(secrets []string, paused bool) error {
-	l.secrets = append([]string(nil), secrets...)
+	l.secrets = slices.Clone(secrets)
 	l.paused = paused
-	if paused || l.target == nil || l.level != "" && l.level != "debug" {
+	if paused || l.target == nil || l.level != "" && l.level != LogDebug {
 		return nil
 	}
 	var e error
@@ -80,7 +82,7 @@ func (l *logWriter) newRendererLocked() {
 func (l *logWriter) push(secrets []string, paused bool) (func() error, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	oldSecrets := append([]string(nil), l.secrets...)
+	oldSecrets := slices.Clone(l.secrets)
 	oldPaused := l.paused
 	if e := l.finishLocked(); e != nil {
 		return nil, e
@@ -136,7 +138,7 @@ func (l *logWriter) emit(p []byte) error {
 	if l.level == "" {
 		return l.writeTarget(p)
 	}
-	if l.level != "debug" {
+	if l.level != LogDebug {
 		return nil
 	}
 	for _, b := range p {
@@ -158,7 +160,7 @@ func (l *logWriter) finishLocked() error {
 	return l.flushLocked()
 }
 func (l *logWriter) flushLocked() error {
-	if l.redactor == nil || l.paused || l.target == nil || l.level != "" && l.level != "debug" {
+	if l.redactor == nil || l.paused || l.target == nil || l.level != "" && l.level != LogDebug {
 		return nil
 	}
 	if _, err := l.renderer.Write(l.redactor.Finish()); err != nil {

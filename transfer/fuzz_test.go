@@ -1,7 +1,9 @@
-package transfer
+package transfer_test
 
 import (
 	"testing"
+
+	"github.com/gatework/go-net-connector/transfer"
 
 	"github.com/gatework/go-net-connector/vendors"
 )
@@ -13,7 +15,7 @@ func FuzzTargetValidation(f *testing.F) {
 		if len(server)+len(path)+len(source) > 1<<16 {
 			t.Skip()
 		}
-		_ = Validate(vendors.NewBuiltinRegistry(), "h3c", "192.0.2.1", TFTPOptions{Server: server, Path: path, SourceFile: source})
-		_ = ValidateRemote(RemoteOptions{Server: server, Path: path, Username: "backup"})
+		_ = transfer.Validate(vendors.NewBuiltinRegistry(), "h3c", "192.0.2.1", transfer.TFTPOptions{Server: server, Path: path, SourceFile: source})
+		_ = transfer.ValidateRemote(transfer.RemoteOptions{Server: server, Path: path, Username: "backup"})
 	})
 }

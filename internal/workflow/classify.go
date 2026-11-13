@@ -8,10 +8,10 @@ import (
 	"github.com/gatework/go-net-connector/connector"
 	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/internal/batchreport"
+	"github.com/gatework/go-net-connector/platform"
 	"github.com/gatework/go-net-connector/storage"
 	"github.com/gatework/go-net-connector/topology"
 	"github.com/gatework/go-net-connector/transfer"
-	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
 // classify returns a safe code and phase for err: only classified metadata,
@@ -41,7 +41,7 @@ func classify(err error, stage string) batchreport.Diagnostic {
 				code = "file_persistence_unconfirmed"
 			}
 			return batchreport.Diagnostic{Code: code, Phase: stage}
-		case dialect.DiagnosticMetadata:
+		case platform.DiagnosticMetadata:
 			if e.DiagnosticCode() != "" && e.DiagnosticPhase() != "" {
 				return batchreport.Diagnostic{Code: e.DiagnosticCode(), Phase: e.DiagnosticPhase()}
 			}
@@ -50,7 +50,7 @@ func classify(err error, stage string) batchreport.Diagnostic {
 	switch {
 	case errors.Is(err, connector.ErrUnconfirmed):
 		return batchreport.Diagnostic{Code: "persistence_unconfirmed", Phase: stage}
-	case errors.Is(err, connector.ErrUnsupported), errors.Is(err, dialect.ErrUnsupported):
+	case errors.Is(err, connector.ErrUnsupported), errors.Is(err, platform.ErrUnsupported):
 		return batchreport.Diagnostic{Code: "unsupported_operation", Phase: stage}
 	case errors.Is(err, connector.ErrIncomplete):
 		return batchreport.Diagnostic{Code: "incomplete", Phase: stage}

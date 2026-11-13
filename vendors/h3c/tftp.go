@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	"github.com/gatework/go-net-connector/connector"
-	dialectapi "github.com/gatework/go-net-connector/vendors/dialect"
+	"github.com/gatework/go-net-connector/platform"
+	"github.com/gatework/go-net-connector/transfer"
 	"github.com/gatework/go-net-connector/vendors/internal/driver"
 )
 
@@ -41,11 +42,11 @@ func (tftpPolicy) ResolveSourceFile(output string) (string, error) {
 		match = startupCurrent.FindStringSubmatch(output)
 	}
 	if match == nil || strings.EqualFold(match[1], "NULL") {
-		return "", dialectapi.ErrParse
+		return "", platform.ErrParse
 	}
 	return strings.TrimSuffix(match[1], "(*)"), nil
 }
-func (h tftpPolicy) Command(host string, o dialectapi.TFTPOptions, explicitPath bool) connector.Command {
+func (h tftpPolicy) Command(host string, o transfer.TFTPOptions, explicitPath bool) connector.Command {
 	command := "tftp " + o.Server + " put " + o.SourceFile
 	if explicitPath {
 		command += " " + o.Path
@@ -58,6 +59,6 @@ func (h tftpPolicy) Command(host string, o dialectapi.TFTPOptions, explicitPath 
 	}
 	return driver.CommandWithTimeout(command, o.Timeout)
 }
-func (tftpPolicy) Completed(lines []string, _ dialectapi.TFTPOptions) (string, bool, error) {
+func (tftpPolicy) Completed(lines []string, _ transfer.TFTPOptions) (string, bool, error) {
 	return "", driver.FileTransferred(lines), nil
 }

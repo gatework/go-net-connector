@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/netip"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -121,7 +122,7 @@ func (s AddressSet) Contains(host string) bool {
 }
 
 func mergeAddressIntervals(s *AddressSet) {
-	sort.Slice(s.intervals, func(i, j int) bool { return s.intervals[i].first.Compare(s.intervals[j].first) < 0 })
+	slices.SortFunc(s.intervals, func(a, b interval) int { return a.first.Compare(b.first) })
 	merged := make([]interval, 0, len(s.intervals))
 	for _, v := range s.intervals {
 		if len(merged) > 0 {
@@ -141,8 +142,8 @@ func mergeAddressIntervals(s *AddressSet) {
 
 // SelectionOptions defines include and exclude rules for inventory fields.
 type SelectionOptions struct {
-	IncludeHosts, ExcludeHosts, IncludeNames, ExcludeNames, IncludeVendors, ExcludeVendors, IncludeModels, ExcludeModels []string
-	NameMatch, ModelMatch                                                                                                string
+	IncludeHosts, ExcludeHosts, IncludeNames, ExcludeNames, IncludePlatforms, ExcludePlatforms, IncludeModels, ExcludeModels []string
+	NameMatch, ModelMatch                                                                                                    string
 }
 type textRules struct {
 	include, exclude []string
@@ -209,7 +210,7 @@ func NewSelection(o SelectionOptions) (Selection, error) {
 	if e != nil {
 		return s, e
 	}
-	s.vendors, e = makeRules(o.IncludeVendors, o.ExcludeVendors, MatchExact)
+	s.vendors, e = makeRules(o.IncludePlatforms, o.ExcludePlatforms, MatchExact)
 	return s, e
 }
 

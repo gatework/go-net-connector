@@ -1,4 +1,4 @@
-package transfer
+package transfer_test
 
 import (
 	expect "github.com/gatework/go-expect"

@@ -5,40 +5,44 @@ import (
 	"strings"
 
 	expect "github.com/gatework/go-expect"
+	"github.com/gatework/go-net-connector/internal/nilcheck"
 )
 
 // Validate checks terminal declarations without applying defaults.
-func (p Terminal) Validate() error {
-	if p.Name == "" || p.LoginPrompt.IsZero() || p.CommandPrompt.IsZero() || p.CommandTimeout < 0 {
+func (t Terminal) Validate() error {
+	if t.Name == "" || t.LoginPrompt.IsZero() || t.CommandPrompt.IsZero() || t.CommandTimeout < 0 {
 		return ErrInvalid
 	}
-	for _, r := range []expect.Pattern{p.LoginPrompt, p.CommandPrompt, p.UsernamePrompt, p.PasswordPrompt, p.PrivilegePrompt, p.Pager} {
+	for _, r := range []expect.Pattern{t.LoginPrompt, t.CommandPrompt, t.UsernamePrompt, t.PasswordPrompt, t.PrivilegePrompt, t.Pager} {
 		if !r.IsZero() && r.ValidateText() != nil {
 			return ErrInvalid
 		}
 	}
-	if p.PrivilegeCommand != "" {
-		if e := (Command{Text: p.PrivilegeCommand}).validate(); e != nil {
+	if t.PrivilegeCommand != "" {
+		if e := (Command{Text: t.PrivilegeCommand}).validate(); e != nil {
 			return e
 		}
-		if p.PrivilegePrompt.IsZero() {
+		if t.PrivilegePrompt.IsZero() {
 			return ErrInvalid
 		}
 	}
-	for _, replies := range [][]Interaction{p.LoginInteractions, p.Interactions} {
+	for _, replies := range [][]Interaction{t.LoginInteractions, t.Interactions} {
 		if e := validateInteractions(replies); e != nil {
 			return e
 		}
 	}
-	if err := p.validateErrorPatterns(); err != nil {
+	if t.PrivilegedPrompt != nil && t.PrivilegedPrompt.MatchString("") {
+		return ErrInvalid
+	}
+	if err := t.validateErrorPatterns(); err != nil {
 		return err
 	}
-	for _, arg := range p.LegacyCryptoArguments {
+	for _, arg := range t.LegacyCryptoArguments {
 		if arg == "" || strings.ContainsAny(arg, "\x00\r\n") {
 			return ErrInvalid
 		}
 	}
-	for _, commands := range [][]string{p.ConfigCommands, p.SaveCommands} {
+	for _, commands := range [][]string{t.ConfigCommands, t.SaveCommands} {
 		for _, text := range commands {
 			if e := (Command{Text: text}).validate(); e != nil {
 				return e
@@ -48,8 +52,8 @@ func (p Terminal) Validate() error {
 	return nil
 }
 
-func (p Terminal) validateErrorPatterns() error {
-	for _, list := range [][]*regexp.Regexp{p.AuthenticationErrors, p.CommandErrors} {
+func (t Terminal) validateErrorPatterns() error {
+	for _, list := range [][]*regexp.Regexp{t.AuthenticationErrors, t.CommandErrors} {
 		for _, r := range list {
 			if r == nil || r.MatchString("") {
 				return ErrInvalid
@@ -73,7 +77,7 @@ func (c ConnectionConfig) Validate() error {
 
 // ValidateOptions checks reusable options without requiring a bound Host.
 func (c ConnectionConfig) ValidateOptions() error {
-	if c.Logger != nil && isNilValue(c.Logger) {
+	if c.Logger != nil && nilcheck.IsNil(c.Logger) {
 		return ErrInvalid
 	}
 	for _, value := range []string{c.Username, c.Password, c.EnablePassword, c.KeyPassphrase, c.IdentityFile, c.KnownHosts, c.SSHPath, c.TelnetPath} {
@@ -102,7 +106,7 @@ func (c ConnectionConfig) ValidateOptions() error {
 	default:
 		return ErrInvalid
 	}
-	if c.LogLevel != "" && logPriority(c.LogLevel) < 0 {
+	if c.LogLevel != "" && c.LogLevel.priority() < 0 {
 		return ErrInvalid
 	}
 	if c.LoginTimeout < 0 || c.CommandTimeout < 0 || c.WriteTimeout < 0 || c.MaxOutputBytes < 0 || c.MaxScriptOutputBytes < 0 {

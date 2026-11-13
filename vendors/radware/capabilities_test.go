@@ -2,9 +2,9 @@ package radware_test
 
 import (
 	"github.com/gatework/go-net-connector/connector"
+	"github.com/gatework/go-net-connector/platform"
 	"github.com/gatework/go-net-connector/topology"
 	"github.com/gatework/go-net-connector/transfer"
-	"github.com/gatework/go-net-connector/vendors/dialect"
 	"github.com/gatework/go-net-connector/vendors/radware"
 )
 
@@ -12,9 +12,9 @@ import (
 // mistyped method fails the build instead of silently dropping a capability.
 // Keep this list in step with the capability matrix in vendors/README.md.
 var (
-	_ dialect.Platform           = radware.Dialect{}
-	_ topology.DescriptionReader = radware.Dialect{}
-	_ topology.InterfaceIdentity = radware.Dialect{}
-	_ transfer.TFTPPolicy        = radware.Dialect{}
-	_ connector.LoginInspector   = radware.Dialect{}
+	_ platform.Platform          = radware.Platform{}
+	_ topology.DescriptionReader = radware.Platform{}
+	_ topology.InterfaceIdentity = radware.Platform{}
+	_ transfer.TFTPPolicy        = radware.Platform{}
+	_ connector.LoginInspector   = radware.Platform{}
 )

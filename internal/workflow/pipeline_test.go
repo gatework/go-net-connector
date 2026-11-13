@@ -16,21 +16,21 @@ import (
 	"github.com/gatework/go-net-connector/fleet"
 	"github.com/gatework/go-net-connector/internal/batchreport"
 	"github.com/gatework/go-net-connector/inventory"
+	"github.com/gatework/go-net-connector/platform"
 	"github.com/gatework/go-net-connector/storage"
 	"github.com/gatework/go-net-connector/transfer"
 	"github.com/gatework/go-net-connector/vendors"
-	"github.com/gatework/go-net-connector/vendors/dialect"
 )
 
 // fakeStage runs fn without opening a device.
 type fakeStage struct {
 	name string
-	skip string
+	skip batchreport.Status
 	fn   func(ctx context.Context, s *Session, e *Evidence) error
 }
 
-func (f fakeStage) Name() string                                { return f.name }
-func (f fakeStage) Admit(fleet.Record, dialect.Platform) string { return f.skip }
+func (f fakeStage) Name() string                                             { return f.name }
+func (f fakeStage) Admit(fleet.Record, platform.Platform) batchreport.Status { return f.skip }
 func (f fakeStage) Run(ctx context.Context, s *Session, e *Evidence) error {
 	if f.fn == nil {
 		return nil
@@ -50,7 +50,7 @@ func testRuntime(t *testing.T) Runtime {
 
 func testPlan(t *testing.T, runtime Runtime, mode string, rows ...inventory.Device) fleet.Plan {
 	t.Helper()
-	options := fleet.PlanOptions{Mode: mode}
+	options := fleet.PlanOptions{}
 	if mode == "tftp" {
 		options.Target = func(fleet.Record) (transfer.Target, error) {
 			return transfer.Target{TFTPOptions: transfer.TFTPOptions{Server: "192.0.2.50", Path: "running.cfg"}}, nil
@@ -223,8 +223,8 @@ type archiveStage struct {
 	root string
 }
 
-func (archiveStage) Name() string                                { return "tftp" }
-func (archiveStage) Admit(fleet.Record, dialect.Platform) string { return "" }
+func (archiveStage) Name() string                                             { return "tftp" }
+func (archiveStage) Admit(fleet.Record, platform.Platform) batchreport.Status { return "" }
 func (a archiveStage) Run(ctx context.Context, _ *Session, e *Evidence) error {
 	result, err := a.pool.Upload(ctx, "running.cfg", "device.cfg", func(_ context.Context, name string) (transfer.Receipt, error) {
 		err := os.WriteFile(filepath.Join(a.root, name), []byte("中文配置\n"), 0o600)

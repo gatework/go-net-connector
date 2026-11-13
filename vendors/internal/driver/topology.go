@@ -2,20 +2,21 @@ package driver
 
 import (
 	"github.com/gatework/go-net-connector/internal/ifname"
-	"github.com/gatework/go-net-connector/vendors/dialect"
-	"github.com/gatework/go-net-connector/vendors/internal/topology"
+	"github.com/gatework/go-net-connector/platform"
+	"github.com/gatework/go-net-connector/topology"
+	"github.com/gatework/go-net-connector/vendors/internal/topoparse"
 )
 
 // NeighborPolicy owns one platform's neighbor command selection and parsing.
 type NeighborPolicy struct {
 	StatusCommand         string
 	CommandText           string
-	Parser                topology.Parser
+	Parser                topoparse.Parser
 	SelectNeighborCommand func(status, prompt string) (string, error)
 }
 
 // NewNeighborPolicy binds one fixed neighbor command to its parser.
-func NewNeighborPolicy(command string, parser topology.Parser) NeighborPolicy {
+func NewNeighborPolicy(command string, parser topoparse.Parser) NeighborPolicy {
 	return NeighborPolicy{CommandText: command, Parser: parser}
 }
 
@@ -28,13 +29,13 @@ func (p NeighborPolicy) NeighborCommand(status, prompt string) (string, error) {
 		return p.SelectNeighborCommand(status, prompt)
 	}
 	if p.CommandText == "" {
-		return "", dialect.ErrUnsupported
+		return "", platform.ErrUnsupported
 	}
 	return p.CommandText, nil
 }
 
 // ParseNeighbors decodes the selected platform neighbor response.
-func (p NeighborPolicy) ParseNeighbors(output string) ([]dialect.Neighbor, error) {
+func (p NeighborPolicy) ParseNeighbors(output string) ([]topology.Neighbor, error) {
 	return p.Parser.ParseNeighbors(output)
 }
 
@@ -48,7 +49,7 @@ type TopologyReader struct {
 
 // NewTopologyReader declares the read-only topology capabilities for a
 // platform whose neighbor command does not depend on device status.
-func NewTopologyReader(neighborCommand string, parser topology.Parser) TopologyReader {
+func NewTopologyReader(neighborCommand string, parser topoparse.Parser) TopologyReader {
 	return TopologyReader{
 		NeighborPolicy:          NewNeighborPolicy(neighborCommand, parser),
 		DescriptionReader:       DescriptionReader{Parser: parser},
@@ -57,7 +58,7 @@ func NewTopologyReader(neighborCommand string, parser topology.Parser) TopologyR
 }
 
 // DescriptionReader parses a platform's running configuration.
-type DescriptionReader struct{ Parser topology.Parser }
+type DescriptionReader struct{ Parser topoparse.Parser }
 
 // ParseDescriptions decodes interface descriptions from the running configuration.
 func (p DescriptionReader) ParseDescriptions(config string) (map[string]string, error) {
@@ -66,7 +67,7 @@ func (p DescriptionReader) ParseDescriptions(config string) (map[string]string, 
 
 // InterfaceIdentityPolicy maps discovered names to the keys used by config
 // parsers and device configuration commands.
-type InterfaceIdentityPolicy struct{ Parser topology.Parser }
+type InterfaceIdentityPolicy struct{ Parser topoparse.Parser }
 
 // InterfaceKey normalizes a discovered interface to its configuration identity.
 func (p InterfaceIdentityPolicy) InterfaceKey(name string) string {
@@ -83,15 +84,15 @@ func (InterfaceIdentityPolicy) ConfigName(name string) string {
 
 // DescriptionWriter implements command grammar shared by the
 // currently writable families while retaining each family's mode transitions.
-type DescriptionWriter struct{ Mode dialect.WriteMode }
+type DescriptionWriter struct{ Mode topology.WriteMode }
 
 // NewDescriptionWriter binds interface description commands to the platform mode transitions.
-func NewDescriptionWriter(mode dialect.WriteMode) DescriptionWriter {
+func NewDescriptionWriter(mode topology.WriteMode) DescriptionWriter {
 	return DescriptionWriter{Mode: mode}
 }
 
 // WriteMode returns the mode transitions required around description commands.
-func (p DescriptionWriter) WriteMode() dialect.WriteMode { return p.Mode }
+func (p DescriptionWriter) WriteMode() topology.WriteMode { return p.Mode }
 
 // ChangeCommands renders commands that enter the interface and set its description.
 func (DescriptionWriter) ChangeCommands(interfaceName, description string) ([]string, error) {
