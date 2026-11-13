@@ -100,3 +100,10 @@ Adopt go-standards v1.0.2 through standard.mk, the distributed lint configuratio
 ## 2026-11-12 v0.8.0 发布准备
 
 `VERSION` 定为 v0.8.0，CHANGELOG 的 Unreleased 归入 v0.8.0，新增 `docs/releases/v0.8.0.md` 并更新 README 当前版本。验证：在仅含跟踪与新增文件的干净副本上 `GOWORK=off make check` PASS（含 race、lint、govulncheck、架构、安装 worker、fuzz 与消费者检查）；工作区内 `goimports -l .` 会扫描被忽略的 `.reference/`、`.superpowers/`、`.work/` 参考目录而失败，CI 干净检出不含这些目录。
+
+## 2026-11-13 v0.8.0 发布证据
+
+- PR #5 合并为 `7cf5ad283828221316926c92feb7017e02fe6a92`；该提交的 `Go` 运行 43335603284（attempt 1）矩阵、quality 与 package 全部通过。
+- 制品 `release-7cf5ad283828221316926c92feb7017e02fe6a92-1`（ID 13997231942，GitHub digest `sha256:45a8981e0da7e1d1e3e15cd3372c66a7d650ff8201ae6ea11bf3cd1c48360b87`），MANIFEST 工具链 go1.27.4；在同一 SHA 的干净检出中 `release.py verify` 通过，darwin_arm64 的 `netman`/`tftp-archive --version` 报告 v0.8.0 与该 SHA。
+- 标签 `v0.8.0` 指向该 SHA，GitHub Release 非草稿，8 个文件；重新下载的发布文件与 CI 制品逐字节一致并再次通过 verify；仓库可见性保持 PUBLIC。
+- 未在真实网络设备上验证。
